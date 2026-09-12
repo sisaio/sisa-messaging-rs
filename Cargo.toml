@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/sisa-messaging",
+    "crates/sisa-messaging-inbox",
+    "crates/sisa-messaging-outbox",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+repository = "https://github.com/sisaio/sisa-messaging-rs"
+
+[workspace.dependencies]
+sisa-messaging = { version = "=0.1.0", path = "crates/sisa-messaging" }
+sisa-messaging-inbox = { version = "=0.1.0", path = "crates/sisa-messaging-inbox" }
+sisa-messaging-outbox = { version = "=0.1.0", path = "crates/sisa-messaging-outbox" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

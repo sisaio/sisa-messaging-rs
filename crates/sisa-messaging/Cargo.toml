@@ -1,0 +1,12 @@
+[package]
+name = "sisa-messaging"
+version = "0.1.0"
+description = "Transport-independent messaging contracts for Sisa applications"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
