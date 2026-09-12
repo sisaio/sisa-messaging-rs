@@ -127,7 +127,7 @@ Applications needing it must supply a closed registry or aggregate outside the l
 
 | Instrument | Type | Unit | Attributes | Meaning |
 |---|---|---|---|---|
-| `outbox.message.count` | Gauge | `{message}` | `state=pending|expired|dead` | Current database backlog |
+| `outbox.message.count` | Gauge | `{message}` | `state=pending\|expired\|dead` | Current database backlog |
 | `outbox.pending.oldest_age` | Gauge | `s` | none | Age of oldest currently claimable row |
 
 Record `outbox.pending.oldest_age = 0` when no pending row exists; do not leave a stale value.
