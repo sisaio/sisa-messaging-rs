@@ -7,7 +7,22 @@ name = "sisa-messaging"
 version = "0.1.0"
 
 [[package]]
+name = "sisa-messaging-consumer"
+version = "0.1.0"
+dependencies = [
+ "sisa-messaging",
+ "sisa-messaging-inbox",
+]
+
+[[package]]
 name = "sisa-messaging-inbox"
+version = "0.1.0"
+dependencies = [
+ "sisa-messaging",
+]
+
+[[package]]
+name = "sisa-messaging-nats"
 version = "0.1.0"
 dependencies = [
  "sisa-messaging",
@@ -18,4 +33,13 @@ name = "sisa-messaging-outbox"
 version = "0.1.0"
 dependencies = [
  "sisa-messaging",
+]
+
+[[package]]
+name = "sisa-messaging-postgres"
+version = "0.1.0"
+dependencies = [
+ "sisa-messaging",
+ "sisa-messaging-inbox",
+ "sisa-messaging-outbox",
 ]

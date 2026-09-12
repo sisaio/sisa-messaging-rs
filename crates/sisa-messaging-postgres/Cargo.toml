@@ -1,0 +1,17 @@
+[package]
+name = "sisa-messaging-postgres"
+version = "0.1.0"
+description = "PostgreSQL runtime providers for Sisa outbox and inbox contracts"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sisa-messaging = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+sisa-messaging-outbox = { workspace = true }
+
+[lints]
+workspace = true
