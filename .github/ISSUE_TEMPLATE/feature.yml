@@ -8,6 +8,8 @@ body:
     attributes:
       value: |
         **Triage and approval:** Submitting this issue records a Todo item for triage. Do not create or start a Codex implementation task or linked branch until the repository owner explicitly approves it. After approval, the owner provisions one Codex task and moves this issue to In Progress.
+
+        **Complex work:** Use a native GitHub parent issue with bounded sub-issues when work has multiple outcomes or dependencies. The parent coordinates the outcome and dependencies; it must not become one oversized implementation task. Each sub-issue independently requires owner approval and then gets one Codex task, numbered branch, and normally one pull request. Approved dependency-ready sub-issues with non-overlapping ownership may run in parallel.
   - type: textarea
     id: problem
     attributes:
