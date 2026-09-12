@@ -1,6 +1,11 @@
 # sisa-messaging-rs
 High-performance Rust toolkit for transactional outbox, inbox, idempotency, caching, durable messaging, and SQL-first background jobs.
 
+> [!WARNING]
+> **Pre-production status:** the workspace and delivery guardrails are being established, but the
+> runtime messaging APIs are not implemented and no crates are published. Do not use this project
+> in production yet.
+
 The repository architecture is defined in [`docs/README.md`](docs/README.md). PostgreSQL schema
 changes are distributed as external Atlas Community versioned migrations; see
 [`docs/migrations.md`](docs/migrations.md).
