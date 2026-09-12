@@ -1,0 +1,168 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+tone_instructions: >-
+  Review as a public Rust library maintainer. Prioritize correctness, database, concurrency,
+  security, performance, compatibility, and test-proof risks. Cite the affected invariant and
+  skip formatting or preference-only nits that CI can enforce.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  poem: false
+  enable_prompt_for_ai_agents: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+
+  path_filters:
+    - "!target/**"
+    - "!**/.sqlx/**"
+    - "!Cargo.lock"
+
+  path_instructions:
+    - path: "crates/sisa-messaging/**"
+      instructions: >-
+        Apply docs/architecture.md and docs/api-conventions.md. This crate owns only
+        transport-independent envelopes, metadata, serialization, publication/delivery contracts,
+        mapping, IDs, and failure classification. Flag SQLx, PostgreSQL, NATS, Tokio-runtime,
+        exporter, application-configuration, outbox, or inbox implementation dependencies. Require
+        native async trait methods, static dispatch on hot paths, bounded validated values, safe
+        error rendering, and a justified public API surface.
+
+    - path: "crates/sisa-messaging-outbox/**"
+      instructions: >-
+        Apply docs/architecture.md, docs/runtime-flows.md, docs/api-conventions.md, and
+        docs/observability.md. Check at-least-once semantics, claim-token fencing, publication
+        outside transactions, per-key head ordering, retry/expiry/dead transitions, bounded worker
+        capacity, lease renewal, drain/release behavior, cancellation safety, and unbranded
+        low-cardinality telemetry. Flag provider dependencies or correctness claims stronger than
+        the documented guarantees.
+
+    - path: "crates/sisa-messaging-inbox/**"
+      instructions: >-
+        Apply docs/database.md and docs/runtime-flows.md. Claim and complete must share the caller's
+        transaction; failure recording occurs only after rollback. Check effectively-once claims are
+        limited to effects in that transaction, attempts/dead transitions remain correct, and
+        incomplete receipts are never retention-purged automatically.
+
+    - path: "crates/sisa-messaging-consumer/**"
+      instructions: >-
+        Apply docs/consumer-framework.md. Verify the complete transaction-before-settlement state
+        machine: commit before ack, rollback before failure recording, ambiguity left safe for
+        redelivery, bounded max_in_flight, progress below half ack wait, cancel-safe receive,
+        bounded drain, and fatal provider/settlement behavior. Require deterministic coverage of
+        every settlement branch and no SQLx or NATS types in the public consumer contract.
+
+    - path: "crates/sisa-messaging-postgres/**"
+      instructions: >-
+        Apply docs/database.md and docs/migrations.md. Runtime SQL uses application-supplied pools or
+        caller transactions according to ownership, database time, static unqualified identifiers,
+        bounded statements, structured SQLSTATE classification, advisory locking for inbox work,
+        and claim-token-fenced outbox outcomes. Flag migration execution or embedded SQL migrations
+        in Rust, SQLx migration features, dynamic identifier interpolation, per-row round trips,
+        unbounded queries, or query/index changes without PostgreSQL 18 plan tests.
+
+    - path: "crates/sisa-messaging-nats/**"
+      instructions: >-
+        Apply docs/architecture.md and docs/runtime-flows.md. NATS remains independent of outbox,
+        inbox, consumer, and PostgreSQL crates. Publication must await JetStream acknowledgement,
+        enforce the negotiated payload limit, project framework headers without collisions, keep
+        subject resolution transport-side, classify structured error variants, and never expose
+        payloads, credentials, connection URLs, or raw header values.
+
+    - path: "crates/**/tests/**"
+      instructions: >-
+        Apply docs/implementation-plan.md test architecture. Judge whether tests prove observable
+        behavior and documented risk rather than implementation details. Require meaningful unit,
+        property, compile/architecture, PostgreSQL, NATS, or system coverage as applicable; mocks
+        cannot prove database locking/transactions or broker acknowledgement/redelivery semantics.
+
+    - path: "tests/**"
+      instructions: >-
+        System and architecture tests must compose providers only at the application boundary,
+        exercise real PostgreSQL 18 and NATS JetStream where those semantics matter, prove
+        transaction/ack ordering and duplicate windows, remain deterministic, and clean up all
+        external resources.
+
+    - path: "migrations/**"
+      instructions: >-
+        Apply docs/database.md and docs/migrations.md. Migrations are external Atlas Community
+        versioned SQL, linear, forward-only, and immutable after release. Review explicit constraint
+        and index names, PostgreSQL 18 compatibility, lock/transaction behavior, search_path
+        assumptions, checksum consistency, clean replay, and recovery for non-transactional
+        concurrent indexes. Never suggest an embedded Rust migrate API or down migration.
+
+    - path: "**/Cargo.toml"
+      instructions: >-
+        Apply docs/architecture.md and docs/implementation-plan.md. Enforce crate dependency
+        direction, no provider-to-provider edges, one workspace version per shared dependency,
+        Rust 1.94 MSRV, minimal features, direct dependency ownership, and no runtime migration,
+        telemetry SDK/exporter, async-trait, or application configuration dependencies in library
+        crates. New dependencies need a concrete justification and cargo-deny review.
+
+    - path: ".github/**"
+      instructions: >-
+        CI is the mechanical quality authority. Check least-privilege permissions, immutable or
+        deliberately pinned actions/tool versions, no credential persistence in untrusted build
+        jobs, safe interpolation of pull-request data, explicit failure propagation, dependency and
+        secret scanning, Rust 1.94 MSRV, feature matrices, real PostgreSQL/NATS suites, Atlas clean
+        replay, and release ordering. Require a PR-scope job that rejects commits above 20 changed
+        paths and PRs above 90; CodeRabbit path filters do not change the GitHub file count.
+
+    - path: "docs/**"
+      instructions: >-
+        docs/README.md indexes the normative architecture. Flag contradictions between documents,
+        code, migration SQL, examples, or public guarantees; duplicated sources of truth; silent
+        changes to fixed decisions or non-goals; routine ADR/task-card proliferation; and claims
+        without corresponding implementation or test gates.
+
+    - path: ".codex/**"
+      instructions: >-
+        Review agent definitions for narrow ownership, one writer per path, read-only architecture
+        and review defaults, cost-aware model effort, RTK use, small task/commit/PR limits, explicit
+        Git handoffs, and a final independent review after every material change. Flag permissions
+        or instructions that let an agent silently expand scope, publish, push, migrate production,
+        or bypass the human's product decisions.
+
+  tools:
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+    squawk:
+      enabled: true
+    github-checks:
+      enabled: true
+    clippy:
+      enabled: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "docs/architecture.md"
+      - "docs/api-conventions.md"
+      - "docs/database.md"
+      - "docs/consumer-framework.md"
+      - "docs/observability.md"
+      - "docs/implementation-plan.md"
+
+chat:
+  auto_reply: true
+  art: false

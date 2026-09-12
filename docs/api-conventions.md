@@ -1,0 +1,190 @@
+# API and code conventions
+
+## 1. Public API budget
+
+Add a public item only for an active caller, correctness invariant, or real capability boundary.
+Symmetry, hypothetical future use, and one-line field assignment are not enough.
+
+Crate-root re-exports provide stable user paths. Internal module layout remains private.
+
+## 2. Construction and settings
+
+Use one construction style per type:
+
+- Plain public data: struct literal.
+- Public data with defaults: struct literal plus `..Default::default()`.
+- Required dependencies or invariants: one `new(...)`.
+- Fallible invariant: `new(...) -> Result<Self, Error>`.
+- Builder: only when staged construction materially improves a common call site.
+
+Do not combine public fields with one setter per field. Avoid positional constructors containing
+several arguments of the same type.
+
+```rust,ignore
+let purge = InboxPurgeRequest {
+    dead_retention: Some(Duration::from_secs(30 * 24 * 60 * 60)),
+    batch_size: NonZeroU32::new(500).unwrap(),
+    ..InboxPurgeRequest::default()
+};
+```
+
+Do not use `#[non_exhaustive]` on request, settings, and report structs intended for literals. Use
+it on public error enums and externally matched state enums where future variants are expected.
+
+Library settings are typed data. They may derive Serde behind a feature with
+`#[serde(default, deny_unknown_fields)]`, but never read environment variables, files, arguments,
+or secret stores. The application loads configuration and passes settings to the canonical
+constructor.
+
+Settings are separated by responsibility:
+
+- `DispatcherSettings`: worker behavior.
+- `OutboxRetention`: published/dead retention and pass size.
+- `InboxSettings`: recorded-failure limit.
+- `InboxRetention`: completed/dead retention and pass size.
+- `ConsumerSettings`: receive concurrency, source/database/settlement bounds, negative-ack delay,
+  progress interval, and drain behavior.
+- `NatsPublisherSettings`: publish timeout and behavior not owned by the resolver/context.
+
+There is no NATS consumer settings duplicate. `NatsDeliverySource` reads the durable consumer's
+already configured acknowledgement wait and delivery bound; generic concurrency, database,
+settlement, negative-ack delay, progress, and drain policy belong to `ConsumerSettings`.
+
+PostgreSQL connection policy belongs to the application-owned pool, so there is no provider
+settings type used only for statement timeout. `max_attempts` belongs to portable
+`InboxSettings`; PostgreSQL applies it atomically in SQL.
+
+## 3. Validation
+
+Validate settings once in the runtime object's constructor. Real cross-field checks include:
+
+- non-zero publish, poll, idle-poll, store, source, database, settlement, and drain timeouts;
+- non-zero capacity;
+- `store_timeout < lease / 2`;
+- retry base delay not greater than maximum delay;
+- consumer progress interval, when enabled, shorter than half the configured broker ack wait;
+- inbox `max_attempts` not greater than a finite broker `max_deliver`.
+
+Use types for local invariants: `NonZeroU32` for limits and attempts, `NonZeroUsize` for
+concurrency, and validated domain string types. Do not add a validator that repeats what a field
+type already proves.
+
+Validate strings according to their boundary:
+
+- Header/wire identifiers reject empty strings, excessive byte length, ASCII control bytes, CR,
+  LF, and DEL.
+- Header names use transport-neutral name grammar and reject the framework-reserved namespace.
+- Header values reject CR/LF and excess size; they need not be ASCII.
+- NATS subject rules live in `sisa-messaging-nats`.
+
+Do not apply `char::is_control()` indiscriminately to all application strings. The purpose is to
+prevent injection, invalid wire data, and unbounded storage—not generic text hygiene. Already
+validated values are not rechecked in the dispatcher loop.
+
+## 4. IDs
+
+Keep a newtype when mixing values would be a correctness bug: `MessageId`, row IDs,
+`ConversationId`, `RequestId`, a claim token, `InboxScope`, and `OrderingKey`.
+
+Do not expose a downstream ID-generation macro. Use a private macro internally only if worthwhile.
+Public behavior stays conventional: mint only where the layer owns minting, reconstruct through
+`from_uuid`, expose `as_uuid`/`into_uuid`, and implement `Display`, `FromStr`, and optional Serde.
+
+Claim tokens are minted by the store on claim. Row IDs are minted by PostgreSQL. Constructors must
+not suggest that dispatcher/application code owns either operation.
+
+## 5. Requests and reports
+
+Request/report structs are data carriers with named public fields:
+
+- `InboxPurgeRequest`: terminal retention and pass size fields plus `Default`; no incomplete-row
+  retention or fluent setters.
+- Inbox failure recording receives an explicit `FailureKind`; the PostgreSQL provider never
+  rediscovers retryability from rendered error text.
+- Outbox purge request: named fields plus `Default`; no fluent setters.
+- Acquire request: keep one constructor only if worker identity is a required public input.
+- Purge reports: named fields, not `new(u64, u64, u64)`.
+- Dead-letter queries: named fields plus `Default`; no setter per filter.
+
+Private SQL parameter structs remain useful because they name bindings and prevent positional
+mistakes. They require no builder or doctest.
+
+## 6. Errors
+
+Use one error per boundary, not a global `MessagingError`:
+
+- validation errors live with the validated type;
+- dispatcher errors describe construction or terminal worker failure;
+- consumer errors distinguish invalid construction, fatal source exit, and per-delivery outcomes;
+- PostgreSQL errors interpret and source `sqlx::Error`;
+- NATS errors classify transport failures without leaking data.
+
+Use `thiserror` for mechanical `Display`, `Error`, and source implementations. Declare it directly
+in the workspace and in every crate using its derive; its transitive presence through SQLx or
+async-nats is insufficient. `thiserror` does not replace explicit retry classification or careful
+redaction.
+
+Error mapping rules:
+
+- One pure SQLSTATE classifier in `sisa-messaging-postgres`.
+- Match structured variants/codes, never foreign message text.
+- Conversion, classification, truncation, and redaction helpers do not log.
+- Log at the layer that consumes, retries, suppresses, or terminates because of an error.
+- Returning an error normally means the caller owns its terminal log.
+- Persist only a redacted, UTF-8-boundary-truncated summary.
+- Share error-chain formatting/truncation once inside the PostgreSQL crate.
+- Handler error `Display` and sources must be safe to persist; the consumer passes structured
+  `FailureKind` separately and never parses rendered text.
+- Fencing shortfalls are outcomes, not errors; summarize counts rather than an unbounded ID list.
+
+## 7. Async and cancellation
+
+- Native async trait methods; no `async-trait` in library crates.
+- No boxed futures on the hot path.
+- No database transaction across broker I/O.
+- The consumer framework commits or rolls back before terminal broker settlement.
+- No externally visible I/O in a `tokio::select!` branch future.
+- Bound calls explicitly with the owning timeout.
+- Cancellation stops new work and then follows the documented drain/release sequence.
+
+## 8. Modules and documentation
+
+- Split by cohesive responsibility, not arbitrary line count.
+- `lib.rs` contains only crate documentation, module declarations, and re-exports. It contains no
+  structs, enums, traits, functions, implementations, or runtime logic.
+- Do not create `mod.rs`. A non-leaf module uses a same-level root file beside a directory of the
+  same name: `dispatcher.rs` with `dispatcher/claim.rs`, `dispatcher/publish.rs`, and other focused
+  children.
+- The module root file may contain real code. It owns the capability's public façade, primary
+  struct or trait, and high-level delegation; its directory owns the internal responsibilities.
+- Apply this paired file/directory pattern to any capability that becomes complex, including a
+  dispatcher, publisher, consumer, maintenance implementation, or dead-letter implementation.
+- Do not split a small cohesive module merely to satisfy symmetry. Split it when it has multiple
+  independently understandable responsibilities.
+- Avoid wrappers that only rename another private function.
+- Public docs state guarantees, ownership, failure behavior, and caller obligations—not project
+  archaeology.
+- Tests are named for behavior and risk, not ADR numbers.
+- Doctests demonstrate common APIs; they do not test every setter/getter.
+
+```text
+src/
+├── lib.rs                 # docs, mod declarations, re-exports only
+├── dispatcher.rs          # OutboxDispatcher façade and top-level coordination
+└── dispatcher/
+    ├── claim.rs
+    ├── publish.rs
+    ├── outcomes.rs
+    ├── leases.rs
+    └── shutdown.rs
+```
+
+## 9. Test layers
+
+- Unit: validation, retry math, codecs, mapping, and redaction.
+- Compile: `Send` bounds and capability composition.
+- PostgreSQL: atomicity, fencing, concurrency, retention, poison rows, and plans.
+- NATS: acknowledgement, dedup headers, payload limits, timeout, and classification.
+- System: outbox-to-JetStream, direct-publish rollback behavior, and inbox commit/ack windows.
+
+Do not use a large in-memory store to claim proof of PostgreSQL transaction behavior.
