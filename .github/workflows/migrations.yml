@@ -1,0 +1,57 @@
+name: Migrations
+
+on:
+  push:
+    branches: [main]
+    paths: ["migrations/**", "atlas.hcl", ".github/workflows/migrations.yml"]
+  pull_request:
+    paths: ["migrations/**", "atlas.hcl", ".github/workflows/migrations.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Explicit Atlas Community release; do not change to a floating/latest URL.
+  ATLAS_VERSION: v1.3.0
+  ATLAS_SHA256: 10d7913e3dce43ab99b8d71534a4cbadaf11a16dc293adf3b91d10e83a0ac70b
+  PGHOST: 127.0.0.1
+  PGPORT: "5432"
+  PGUSER: postgres
+  PGPASSWORD: postgres
+  PGDATABASE: postgres
+
+jobs:
+  replay:
+    name: Replay PostgreSQL 18 migrations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres -d postgres"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install pinned Atlas Community CLI
+        run: |
+          curl --fail --location --retry 3 --output atlas \
+            "https://release.ariga.io/atlas/atlas-community-linux-amd64-${ATLAS_VERSION}"
+          printf '%s  %s\n' "${ATLAS_SHA256}" atlas | sha256sum --check --status
+          chmod +x atlas
+          sudo install -m 0755 atlas /usr/local/bin/atlas
+          atlas version
+      - name: Verify checksum without mutating checkout
+        run: |
+          workdir="$(mktemp -d)"
+          cp -R migrations "${workdir}/migrations"
+          atlas migrate hash --dir "file://${workdir}/migrations"
+          cmp --silent migrations/atlas.sum "${workdir}/migrations/atlas.sum"
+      - name: Apply complete directory to clean PostgreSQL 18
+        run: atlas migrate apply --dir file://migrations --url "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+      - name: Require latest version and zero pending migrations
+        run: atlas migrate status --dir file://migrations --url "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
