@@ -1,0 +1,62 @@
+name: Feature request
+description: Propose a focused, user-visible capability
+title: "feat: "
+labels:
+  - type:feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Triage and approval:** Submitting this issue records a Todo item for triage. Do not create or start a Codex implementation task or linked branch until the repository owner explicitly approves it. After approval, the owner provisions one Codex task and moves this issue to In Progress.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and motivation
+      description: What problem would this solve, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired behavior and a representative usage example.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable conditions for completion.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals and compatibility concerns
+      description: Identify intentionally excluded behavior and compatibility or migration impact.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and constraints
+      description: Identify intended paths, dependencies, and compatibility constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risk assessment
+      description: Describe operational, compatibility, security, data, and rollback risks.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Describe the checks that must pass before the pull request is ready.
+    validations:
+      required: true
