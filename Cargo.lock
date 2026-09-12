@@ -7,6 +7,10 @@ name = "sisa-messaging"
 version = "0.1.0"
 
 [[package]]
+name = "sisa-messaging-architecture-tests"
+version = "0.0.0"
+
+[[package]]
 name = "sisa-messaging-consumer"
 version = "0.1.0"
 dependencies = [

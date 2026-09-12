@@ -1,12 +1,5 @@
 [workspace]
-members = [
-    "crates/sisa-messaging",
-    "crates/sisa-messaging-consumer",
-    "crates/sisa-messaging-inbox",
-    "crates/sisa-messaging-nats",
-    "crates/sisa-messaging-outbox",
-    "crates/sisa-messaging-postgres",
-]
+members = ["crates/*", "tests/architecture"]
 resolver = "3"
 
 [workspace.package]
