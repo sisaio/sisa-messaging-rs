@@ -3,7 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use rustc_lexer::TokenKind;
+use proc_macro2::{TokenStream, TokenTree};
+use syn::visit::{self, Visit};
+use syn::{Attribute, Expr, ExprCall, Ident, ItemUse, Macro, Path as SynPath, UseTree};
 
 const LIBRARY_CRATES: [&str; 6] = [
     "sisa-messaging",
@@ -415,83 +417,232 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
     }
 }
 
-/// Finds a forbidden configuration-source or async-trait token pattern in Rust source.
-fn forbidden_source_pattern(source: &str) -> Option<&'static str> {
-    const PATTERNS: &[(&str, &[&str])] = &[
-        ("std::env", &["std", ":", ":", "env"]),
-        ("std::{env", &["std", ":", ":", "{", "env"]),
-        ("env::var(", &["env", ":", ":", "var", "("]),
-        ("env::var_os(", &["env", ":", ":", "var_os", "("]),
-        ("env::vars(", &["env", ":", ":", "vars", "("]),
-        ("env::vars_os(", &["env", ":", ":", "vars_os", "("]),
-        ("env::args(", &["env", ":", ":", "args", "("]),
-        ("env::args_os(", &["env", ":", ":", "args_os", "("]),
-        ("env!(", &["env", "!", "("]),
-        ("option_env!(", &["option_env", "!", "("]),
-        ("include_str!(", &["include_str", "!", "("]),
-        ("include_bytes!(", &["include_bytes", "!", "("]),
-        ("include!(", &["include", "!", "("]),
-        ("std::fs", &["std", ":", ":", "fs"]),
-        ("std::{fs", &["std", ":", ":", "{", "fs"]),
-        ("tokio::fs", &["tokio", ":", ":", "fs"]),
-        ("tokio::{fs", &["tokio", ":", ":", "{", "fs"]),
-        ("async_std::fs", &["async_std", ":", ":", "fs"]),
-        ("async_std::{fs", &["async_std", ":", ":", "{", "fs"]),
-        ("fs::read(", &["fs", ":", ":", "read", "("]),
-        (
-            "fs::read_to_string(",
-            &["fs", ":", ":", "read_to_string", "("],
-        ),
-        ("fs::read_dir(", &["fs", ":", ":", "read_dir", "("]),
-        (
-            "fs::File::open(",
-            &["fs", ":", ":", "File", ":", ":", "open", "("],
-        ),
-        ("File::open(", &["File", ":", ":", "open", "("]),
-        ("OpenOptions::new(", &["OpenOptions", ":", ":", "new", "("]),
-        ("#[async_trait", &["#", "[", "async_trait"]),
-        ("async_trait::", &["async_trait", ":", ":"]),
-    ];
-
-    let tokens = significant_rust_tokens(source);
-    PATTERNS.iter().find_map(|(label, pattern)| {
-        tokens
-            .windows(pattern.len())
-            .any(|window| window == *pattern)
-            .then_some(*label)
-    })
+#[derive(Default)]
+struct ForbiddenSourceVisitor {
+    pattern: Option<&'static str>,
 }
 
-/// Returns significant Rust tokens, normalizing raw identifiers and excluding trivia/literals.
-fn significant_rust_tokens(source: &str) -> Vec<&str> {
-    let mut offset = 0;
-    rustc_lexer::tokenize(source)
-        .filter_map(|token| {
-            let start = offset;
-            offset += token.len;
-            if matches!(
-                token.kind,
-                TokenKind::Whitespace
-                    | TokenKind::LineComment
-                    | TokenKind::BlockComment { .. }
-                    | TokenKind::Literal { .. }
-            ) {
-                return None;
-            }
+impl ForbiddenSourceVisitor {
+    fn record(&mut self, pattern: &'static str) {
+        if self.pattern.is_none() {
+            self.pattern = Some(pattern);
+        }
+    }
 
-            let text = source
-                .get(start..offset)
-                .expect("lexer token must end on a UTF-8 boundary");
-            if matches!(token.kind, TokenKind::RawIdent) {
-                Some(
-                    text.strip_prefix("r#")
-                        .expect("raw identifier token must start with r#"),
-                )
-            } else {
-                Some(text)
+    fn inspect_general_path(&mut self, segments: &[String]) {
+        if starts_with(segments, &["std", "env"]) {
+            self.record("std::env");
+        } else if starts_with(segments, &["std", "fs"]) {
+            self.record("std::fs");
+        } else if starts_with(segments, &["tokio", "fs"]) {
+            self.record("tokio::fs");
+        } else if starts_with(segments, &["async_std", "fs"]) {
+            self.record("async_std::fs");
+        } else if segments
+            .first()
+            .is_some_and(|segment| segment == "async_trait")
+            && segments.len() > 1
+        {
+            self.record("async_trait::");
+        }
+    }
+
+    fn inspect_called_path(&mut self, path: &SynPath) {
+        let segments = path_segments(path);
+        match segments.as_slice() {
+            [root, function, ..]
+                if root == "env"
+                    && matches!(
+                        function.as_str(),
+                        "var" | "var_os" | "vars" | "vars_os" | "args" | "args_os"
+                    ) =>
+            {
+                self.record(match function.as_str() {
+                    "var" => "env::var(",
+                    "var_os" => "env::var_os(",
+                    "vars" => "env::vars(",
+                    "vars_os" => "env::vars_os(",
+                    "args" => "env::args(",
+                    "args_os" => "env::args_os(",
+                    _ => unreachable!("guard restricts environment function names"),
+                });
             }
-        })
+            [root, function, ..]
+                if root == "fs"
+                    && matches!(function.as_str(), "read" | "read_to_string" | "read_dir") =>
+            {
+                self.record(match function.as_str() {
+                    "read" => "fs::read(",
+                    "read_to_string" => "fs::read_to_string(",
+                    "read_dir" => "fs::read_dir(",
+                    _ => unreachable!("guard restricts filesystem function names"),
+                });
+            }
+            [root, ty, function, ..] if root == "fs" && ty == "File" && function == "open" => {
+                self.record("fs::File::open(");
+            }
+            [ty, function, ..] if ty == "File" && function == "open" => {
+                self.record("File::open(");
+            }
+            [ty, function, ..] if ty == "OpenOptions" && function == "new" => {
+                self.record("OpenOptions::new(");
+            }
+            _ => {}
+        }
+    }
+
+    fn inspect_imported_macro(&mut self, segments: &[String]) {
+        if matches!(segments.first().map(String::as_str), Some("std" | "core"))
+            && let Some(pattern) = segments
+                .last()
+                .and_then(|macro_name| forbidden_macro_pattern(macro_name))
+        {
+            self.record(pattern);
+        }
+    }
+
+    fn inspect_macro_tokens(&mut self, tokens: &TokenStream) {
+        for token in tokens.clone() {
+            match token {
+                TokenTree::Group(group) => self.inspect_macro_tokens(&group.stream()),
+                TokenTree::Ident(ident) => {
+                    if let Some(pattern) = forbidden_macro_token_pattern(&ident_name(&ident)) {
+                        self.record(pattern);
+                    }
+                }
+                TokenTree::Literal(_) | TokenTree::Punct(_) => {}
+            }
+        }
+    }
+
+    fn inspect_use_tree(&mut self, tree: &UseTree, prefix: &[String]) {
+        match tree {
+            UseTree::Path(path) => {
+                let mut segments = prefix.to_vec();
+                segments.push(ident_name(&path.ident));
+                self.inspect_general_path(&segments);
+                self.inspect_imported_macro(&segments);
+                self.inspect_use_tree(&path.tree, &segments);
+            }
+            UseTree::Name(name) => {
+                let mut segments = prefix.to_vec();
+                segments.push(ident_name(&name.ident));
+                self.inspect_general_path(&segments);
+                self.inspect_imported_macro(&segments);
+            }
+            UseTree::Rename(rename) => {
+                let mut segments = prefix.to_vec();
+                segments.push(ident_name(&rename.ident));
+                self.inspect_general_path(&segments);
+                self.inspect_imported_macro(&segments);
+            }
+            UseTree::Group(group) => {
+                for item in &group.items {
+                    self.inspect_use_tree(item, prefix);
+                }
+            }
+            UseTree::Glob(_) => {}
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for ForbiddenSourceVisitor {
+    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+        let segments = path_segments(attribute.path());
+        if segments
+            .first()
+            .is_some_and(|segment| segment == "async_trait")
+        {
+            self.record("#[async_trait");
+        }
+        visit::visit_attribute(self, attribute);
+    }
+
+    fn visit_expr_call(&mut self, call: &'ast ExprCall) {
+        if let Expr::Path(function) = call.func.as_ref() {
+            self.inspect_called_path(&function.path);
+        }
+        visit::visit_expr_call(self, call);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        self.inspect_use_tree(&item.tree, &[]);
+        visit::visit_item_use(self, item);
+    }
+
+    fn visit_macro(&mut self, item: &'ast Macro) {
+        let segments = path_segments(&item.path);
+        if let Some(pattern) = segments
+            .last()
+            .and_then(|macro_name| forbidden_macro_pattern(macro_name))
+        {
+            self.record(pattern);
+        }
+        visit::visit_macro(self, item);
+    }
+
+    fn visit_path(&mut self, path: &'ast SynPath) {
+        self.inspect_general_path(&path_segments(path));
+        visit::visit_path(self, path);
+    }
+
+    fn visit_token_stream(&mut self, tokens: &'ast TokenStream) {
+        self.inspect_macro_tokens(tokens);
+    }
+}
+
+fn forbidden_macro_pattern(macro_name: &str) -> Option<&'static str> {
+    match macro_name {
+        "env" => Some("env!("),
+        "option_env" => Some("option_env!("),
+        "include_str" => Some("include_str!("),
+        "include_bytes" => Some("include_bytes!("),
+        "include" => Some("include!("),
+        _ => None,
+    }
+}
+
+fn forbidden_macro_token_pattern(identifier: &str) -> Option<&'static str> {
+    match identifier {
+        "env" => Some("configuration-sensitive macro token `env`"),
+        "fs" => Some("configuration-sensitive macro token `fs`"),
+        "File" => Some("configuration-sensitive macro token `File`"),
+        "OpenOptions" => Some("configuration-sensitive macro token `OpenOptions`"),
+        "include" => Some("configuration-sensitive macro token `include`"),
+        "include_str" => Some("configuration-sensitive macro token `include_str`"),
+        "include_bytes" => Some("configuration-sensitive macro token `include_bytes`"),
+        "option_env" => Some("configuration-sensitive macro token `option_env`"),
+        "async_trait" => Some("configuration-sensitive macro token `async_trait`"),
+        _ => None,
+    }
+}
+
+fn ident_name(ident: &Ident) -> String {
+    let rendered = ident.to_string();
+    rendered.strip_prefix("r#").unwrap_or(&rendered).to_owned()
+}
+
+fn path_segments(path: &SynPath) -> Vec<String> {
+    path.segments
+        .iter()
+        .map(|segment| ident_name(&segment.ident))
         .collect()
+}
+
+fn starts_with(actual: &[String], expected: &[&str]) -> bool {
+    actual.len() >= expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| actual == expected)
+}
+
+/// Finds forbidden configuration-source or async-trait syntax in a Rust source file.
+fn forbidden_source_pattern(source: &str) -> syn::Result<Option<&'static str>> {
+    let file = syn::parse_file(source)?;
+    let mut visitor = ForbiddenSourceVisitor::default();
+    visitor.visit_file(&file);
+    Ok(visitor.pattern)
 }
 
 /// Reports whether a package is an OpenTelemetry SDK or exporter dependency.
@@ -583,11 +734,14 @@ fn library_sources_do_not_load_configuration_or_use_async_trait() {
         let source_root = workspace_root().join("crates").join(crate_name).join("src");
         for source_path in rust_sources_under(&source_root) {
             let source = read(&source_path);
+            let forbidden = forbidden_source_pattern(&source).unwrap_or_else(|error| {
+                panic!("failed to parse {} as Rust: {error}", source_path.display())
+            });
             assert!(
-                forbidden_source_pattern(&source).is_none(),
+                forbidden.is_none(),
                 "{} contains forbidden library source pattern {:?}",
                 source_path.display(),
-                forbidden_source_pattern(&source)
+                forbidden
             );
         }
     }
@@ -677,75 +831,223 @@ fn workspace_dependency_parser_resolves_renamed_packages() {
 #[test]
 fn source_detector_recognizes_environment_arguments_files_and_async_trait_usage() {
     assert_eq!(
-        forbidden_source_pattern("std::env::var(\"TOKEN\")"),
+        detected(r#"fn check() { let _ = std::env::var("TOKEN"); }"#),
         Some("std::env")
     );
     assert_eq!(
-        forbidden_source_pattern("use std::{ env as process_env };"),
-        Some("std::{env")
-    );
-    assert_eq!(forbidden_source_pattern("env!(\"CONFIG\")"), Some("env!("));
-    assert_eq!(
-        forbidden_source_pattern("std::env::args().next()"),
+        detected("use std::{ env as process_env };"),
         Some("std::env")
     );
     assert_eq!(
-        forbidden_source_pattern("env::args().next()"),
+        detected("fn check() { let _ = std::env::args().next(); }"),
+        Some("std::env")
+    );
+    assert_eq!(
+        detected("fn check() { let _ = env::args().next(); }"),
         Some("env::args(")
     );
     assert_eq!(
-        forbidden_source_pattern("env::args_os().next()"),
+        detected("fn check() { let _ = env::args_os().next(); }"),
         Some("env::args_os(")
     );
     assert_eq!(
-        forbidden_source_pattern("r#env::args_os().next()"),
+        detected("fn check() { let _ = r#env::args_os().next(); }"),
         Some("env::args_os(")
     );
     assert_eq!(
-        forbidden_source_pattern("std::fs::read_to_string(path)"),
+        detected("fn check() { let _ = std::fs::read_to_string(path); }"),
         Some("std::fs")
     );
     assert_eq!(
-        forbidden_source_pattern("fs::read(path)"),
+        detected("fn check() { let _ = fs::read(path); }"),
         Some("fs::read(")
     );
     assert_eq!(
-        forbidden_source_pattern("fs::read_to_string(path)"),
+        detected("fn check() { let _ = fs::read_to_string(path); }"),
         Some("fs::read_to_string(")
     );
     assert_eq!(
-        forbidden_source_pattern("fs::read_dir(path)"),
+        detected("fn check() { let _ = fs::read_dir(path); }"),
         Some("fs::read_dir(")
     );
     assert_eq!(
-        forbidden_source_pattern("std /* comment */ :: env :: args()"),
+        detected("fn check() { let _ = std /* comment */ :: env :: args(); }"),
         Some("std::env")
     );
     assert_eq!(
-        forbidden_source_pattern("fs /* comment */ :: read_to_string(path)"),
+        detected("fn check() { let _ = fs /* comment */ :: read_to_string(path); }"),
         Some("fs::read_to_string(")
     );
     assert_eq!(
-        forbidden_source_pattern("File::open(path)"),
+        detected("fn check() { let _ = File::open(path); }"),
         Some("File::open(")
     );
+    assert_eq!(detected("fn check() { let _ = vfs::read(path); }"), None);
     assert_eq!(
-        forbidden_source_pattern(r#"include_str!("settings.toml")"#),
-        Some("include_str!(")
+        detected("fn check() { let _ = ConfigFile::open(path); }"),
+        None
     );
     assert_eq!(
-        forbidden_source_pattern(r#"include_bytes!("settings.bin")"#),
-        Some("include_bytes!(")
-    );
-    assert_eq!(
-        forbidden_source_pattern(r#"include!("generated_settings.rs")"#),
-        Some("include!(")
-    );
-    assert_eq!(forbidden_source_pattern("vfs::read(path)"), None);
-    assert_eq!(forbidden_source_pattern("ConfigFile::open(path)"), None);
-    assert_eq!(
-        forbidden_source_pattern("#[async_trait]"),
+        detected("#[async_trait] trait Handler {}"),
         Some("#[async_trait")
+    );
+}
+
+#[test]
+fn source_detector_rejects_bare_and_qualified_configuration_macros() {
+    for (source, expected) in [
+        (r#"fn check() { let _ = env!("CONFIG"); }"#, "env!("),
+        (r#"fn check() { let _ = std::env!("CONFIG"); }"#, "env!("),
+        (r#"fn check() { let _ = ::std::env!("CONFIG"); }"#, "env!("),
+        (
+            r#"fn check() { let _ = option_env!("CONFIG"); }"#,
+            "option_env!(",
+        ),
+        (
+            r#"fn check() { let _ = std::option_env!("CONFIG"); }"#,
+            "option_env!(",
+        ),
+        (
+            r#"fn check() { let _ = ::std::option_env!("CONFIG"); }"#,
+            "option_env!(",
+        ),
+        (
+            r#"fn check() { let _ = include_str!("settings.toml"); }"#,
+            "include_str!(",
+        ),
+        (
+            r#"fn check() { let _ = std::include_str!("settings.toml"); }"#,
+            "include_str!(",
+        ),
+        (
+            r#"fn check() { let _ = ::std::include_str!("settings.toml"); }"#,
+            "include_str!(",
+        ),
+        (
+            r#"fn check() { let _ = include_bytes!("settings.bin"); }"#,
+            "include_bytes!(",
+        ),
+        (
+            r#"fn check() { let _ = std::include_bytes!("settings.bin"); }"#,
+            "include_bytes!(",
+        ),
+        (
+            r#"fn check() { let _ = ::std::include_bytes!("settings.bin"); }"#,
+            "include_bytes!(",
+        ),
+        (
+            r#"fn check() { let _ = include!("generated_settings.rs"); }"#,
+            "include!(",
+        ),
+        (
+            r#"fn check() { let _ = std::include!("generated_settings.rs"); }"#,
+            "include!(",
+        ),
+        (
+            r#"fn check() { let _ = ::std::include!("generated_settings.rs"); }"#,
+            "include!(",
+        ),
+    ] {
+        assert_eq!(detected(source), Some(expected), "source: {source}");
+    }
+
+    for macro_name in [
+        "env",
+        "option_env",
+        "include_str",
+        "include_bytes",
+        "include",
+    ] {
+        let expected = forbidden_macro_pattern(macro_name)
+            .expect("fixture macro must be forbidden by library policy");
+        for qualifier in ["core::", "::core::"] {
+            let source =
+                format!(r#"fn check() {{ let _ = {qualifier}{macro_name}!("fixture"); }}"#);
+            assert_eq!(detected(&source), Some(expected), "source: {source}");
+        }
+        for namespace in ["std", "core"] {
+            let source = format!(
+                r#"use {namespace}::{macro_name} as config; fn check() {{ let _ = config!("fixture"); }}"#
+            );
+            let import_expected = if namespace == "std" && macro_name == "env" {
+                "std::env"
+            } else {
+                expected
+            };
+            assert_eq!(detected(&source), Some(import_expected), "source: {source}");
+        }
+    }
+}
+
+#[test]
+fn source_detector_inspects_opaque_macro_bodies_without_reading_literals() {
+    assert_eq!(
+        detected(r#"macro_rules! load { () => { include_str!("settings.toml") } }"#),
+        Some("configuration-sensitive macro token `include_str`")
+    );
+    assert_eq!(
+        detected(r#"macro_rules! load { () => { env!("CONFIG") } }"#),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(r#"macro_rules! harmless { () => { "include_str!(settings.toml)" } }"#),
+        None
+    );
+    assert_eq!(
+        detected(r#"fn check() { let _ = identity!(std::env::var("PATH")); }"#),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! invoke { ($m:ident) => { $m!("PATH") }; } const X: &str = invoke!(env);"#,
+        ),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! invoke { ($($m:ident)*) => { $($m)*!("PATH") }; } const X: &str = invoke!(env);"#,
+        ),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! invoke { ($($m:ident)+) => { $($m)+!("PATH") }; } const X: &str = invoke!(env);"#,
+        ),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! invoke { ($($m:ident)?) => { $($m)?!("PATH") }; } const X: &str = invoke!(env);"#,
+        ),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! identifiers { ($($name:ident)*) => { stringify!($($name)*) }; } const X: &str = identifiers!(safe tokens);"#,
+        ),
+        None
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! load { ($m:ident) => { use std::$m as config; const X: &str = config!("/etc/hosts"); }; } load!(include_str);"#,
+        ),
+        Some("configuration-sensitive macro token `include_str`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! load { ($m:ident) => { fn x() { let _ = std::$m::var("PATH"); } }; } load!(env);"#,
+        ),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(
+            r#"macro_rules! load { ($p:path) => { fn x() { let _ = $p("PATH"); } }; } load!(std::env::var);"#,
+        ),
+        Some("configuration-sensitive macro token `env`")
+    );
+    assert_eq!(
+        detected(r#"macro_rules! harmless { () => { "std::env::var(PATH)" } }"#),
+        None
     );
 }
 
@@ -755,10 +1057,22 @@ fn source_detector_ignores_documentation_and_string_literals() {
     for source in [
         "/// Applications call std::env::args(), not this library.\npub struct Settings;",
         "//! Never call fs::read_to_string(path) here.",
-        r#"let example = "std::fs::read_to_string(path)";"#,
+        r#"fn check() { let example = "std::fs::read_to_string(path)"; }"#,
         r#"#[doc = "env::args_os() is application-owned"] pub struct Settings;"#,
-        r##"let example = r"#[async_trait]";"##,
+        r##"fn check() { let example = r"#[async_trait]"; }"##,
     ] {
-        assert_eq!(forbidden_source_pattern(source), None, "source: {source}");
+        assert_eq!(detected(source), None, "source: {source}");
     }
+}
+
+fn detected(source: &str) -> Option<&'static str> {
+    forbidden_source_pattern(source)
+        .unwrap_or_else(|error| panic!("source fixture must parse as Rust: {error}\n{source}"))
+}
+
+#[test]
+fn source_detector_reports_parse_failures() {
+    let error = forbidden_source_pattern("fn incomplete(")
+        .expect_err("invalid Rust source must fail architecture analysis");
+    assert!(!error.to_string().is_empty());
 }

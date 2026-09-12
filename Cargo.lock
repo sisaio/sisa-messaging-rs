@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "rustc_lexer"
-version = "0.1.0"
+name = "proc-macro2"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c86aae0c77166108c01305ee1a36a1e77289d7dc6ca0a3cd91ff4992de2d16a5"
+checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
- "unicode-xid",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -19,7 +19,8 @@ version = "0.1.0"
 name = "sisa-messaging-architecture-tests"
 version = "0.0.0"
 dependencies = [
- "rustc_lexer",
+ "proc-macro2",
+ "syn",
 ]
 
 [[package]]
@@ -61,7 +62,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "unicode-xid"
-version = "0.2.6"
+name = "syn"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+checksum = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
+dependencies = [
+ "proc-macro2",
+ "unicode-ident",
+]
+
+[[package]]
+name = "unicode-ident"
+version = "1.0.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"

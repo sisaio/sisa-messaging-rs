@@ -9,13 +9,14 @@ license = "MIT"
 repository = "https://github.com/sisaio/sisa-messaging-rs"
 
 [workspace.dependencies]
-rustc_lexer = "0.1.0"
+proc-macro2 = { version = "1.0.107", default-features = false }
 sisa-messaging = { version = "=0.1.0", path = "crates/sisa-messaging" }
 sisa-messaging-consumer = { version = "=0.1.0", path = "crates/sisa-messaging-consumer" }
 sisa-messaging-inbox = { version = "=0.1.0", path = "crates/sisa-messaging-inbox" }
 sisa-messaging-nats = { version = "=0.1.0", path = "crates/sisa-messaging-nats" }
 sisa-messaging-outbox = { version = "=0.1.0", path = "crates/sisa-messaging-outbox" }
 sisa-messaging-postgres = { version = "=0.1.0", path = "crates/sisa-messaging-postgres" }
+syn = { version = "3.0.5", default-features = false, features = ["full", "parsing", "visit"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
