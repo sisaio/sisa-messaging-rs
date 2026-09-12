@@ -202,8 +202,11 @@ the schema URL/version it emits and changes it deliberately; it does not read
 Per-message publish and claim spans default to `debug`, not `info`.
 
 The consumer creates one `process {destination template}` span with consumer span kind. For the
-single-message typed path, it captures any valid ambient HTTP or scheduler context and adds it as a
-link before making the extracted remote context the span parent. This permitted remote-parent
+single-message typed path, it captures the extracted remote context and any valid ambient HTTP or
+scheduler context before creating the span. When the extracted remote `SpanContext` is valid, the
+consumer creates the span with that remote context as parent and supplies the valid ambient context
+as a creation-time link. Otherwise, it creates the span with the valid ambient context as parent,
+or starts a new trace when neither context contains a valid span. This permitted remote-parent
 choice is documented by the instrumentation. Database processing and handler execution are
 children, while broker settlement uses its own client-kind settle span.
 
@@ -244,9 +247,11 @@ is known safe; otherwise record a stable category/type and retain the original a
 ## 8. Context propagation
 
 The NATS mapper forwards W3C `traceparent` and `tracestate` in framework-owned headers. Consumer
-integration links any valid ambient HTTP or scheduler context, then makes the extracted remote
-context the parent of the single-message `process` span; `inbox.claim`, handler work, and commit
-are children, while settlement is a related client operation.
+integration captures both contexts before creating the single-message `process` span. A valid
+remote `SpanContext` becomes the parent, with any valid ambient HTTP or scheduler context supplied
+as a creation-time link. Without a valid remote span, the valid ambient context remains the parent,
+or processing starts a new trace if neither context contains a valid span. `inbox.claim`, handler
+work, and commit are children, while settlement is a related client operation.
 
 The transport does not install a global propagator. Provider/exporter setup and sampling remain
 application responsibilities.

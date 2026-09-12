@@ -340,12 +340,14 @@ Checkpoints are an optional fresh-install replay optimization, not a correctness
 Community Edition does not generate them. If replay time becomes a measured problem, the project
 may introduce a separately reviewed baseline strategy without rewriting released history.
 
-For review or drift investigation, follow the canonical
-[snapshot procedure](migrations.md#7-snapshot-role): apply the complete versioned directory to a
-clean, disposable PostgreSQL 18 database, confirm its migration status, and inspect that database.
-The resulting snapshot is a generated artifact, not a migration or Atlas checkpoint, and is never
-added to the migration directory. PostgreSQL `pg_dump --schema-only` is used instead when objects
-outside the Community schema model must be captured.
+For review or desired-schema snapshot generation, follow the canonical
+[snapshot procedure](migrations.md#7-desired-schema-snapshot): apply the complete versioned
+directory to a clean, disposable PostgreSQL 18 database, confirm its migration status, and inspect
+only that database. The resulting snapshot is a generated artifact, not a migration or Atlas
+checkpoint, and is never added to the migration directory. Comparing a live target with this
+desired state is a separate operator procedure using `atlas schema diff`; the snapshot commands
+never inspect a live target. PostgreSQL `pg_dump --schema-only` is used instead when objects outside
+the Community schema model must be captured.
 
 ## 9. Standards references
 

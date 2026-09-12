@@ -139,9 +139,10 @@ Production rules:
 For installations that place messaging tables in multiple PostgreSQL schemas, the operator runs
 the bundle once per schema and keeps revision bookkeeping in each selected schema.
 
-## 7. Snapshot role
+## 7. Desired-schema snapshot
 
-A full SQL snapshot is useful for review, documentation, or an operator's manual drift check:
+A full SQL desired-schema snapshot is useful for review and documentation. These commands operate
+only on a clean, disposable database; they do not inspect or compare a live target:
 
 ```text
 atlas migrate apply \
@@ -165,9 +166,15 @@ never inserted into the active migration directory. It does not replace `atlas.s
 bookkeeping, or the versioned files. Use `pg_dump --schema-only` when PostgreSQL objects outside
 the Atlas Community schema model must be captured.
 
+Live-target comparison is a separate, operator-controlled procedure. Use `atlas schema diff` with
+the live database as `--from` and the expected desired state as `--to`; when the desired state is a
+versioned migration directory, supply the required clean dev database separately. Never substitute
+a live database URL into the desired-schema snapshot commands above.
+
 ## 8. References
 
 - [Atlas Community Edition](https://atlasgo.io/community-edition)
 - [Atlas versioned migrations](https://atlasgo.io/versioned/intro)
 - [Applying versioned migrations](https://atlasgo.io/versioned/apply)
 - [Atlas schema inspection](https://atlasgo.io/inspect)
+- [Atlas schema comparison](https://atlasgo.io/declarative/diff)
