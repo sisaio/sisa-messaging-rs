@@ -73,10 +73,11 @@ and review must inspect the completed diff.
 The primary agent sends a small packet to each spawned agent:
 
 ```text
+GitHub issue: <number, URL, type/area/risk labels, Project status and priority>
 Objective:
 Acceptance criteria:
 Base branch:
-Proposed branch: <type>/<short-kebab-description>
+Proposed branch: <type>/<issue-number>-<short-kebab-description>
 PR intent and target file count:
 Commit rounds: exact message, intended paths, validation for each round
 Normative docs/sections:
@@ -88,14 +89,18 @@ Known decisions and unresolved questions:
 Expected handoff:
 ```
 
-Do not paste entire design documents into the packet. Give paths and section names so the receiving
-agent loads only what it needs.
+Derive the packet from the authoritative GitHub issue. Do not paste the entire issue or design
+documents into the packet. Give paths and section names so the receiving agent loads only what it
+needs.
 
 ## 5. Workflow
 
 ```text
-user request
-  -> primary: task packet and acceptance criteria
+GitHub issue, or one bounded sub-issue under a complex parent
+  -> triage: complete content, labels, priority, and Todo status
+  -> repository-owner approval gate for this issue only
+  -> one Codex task
+  -> primary: task packet and acceptance criteria derived from the issue
   -> architect: design packet, when the architecture gate applies
   -> backend_developer: implementation and tests
   -> release_engineer: delivery preparation, only when applicable
@@ -136,19 +141,47 @@ create a GitHub release, or run production migrations without explicit user auth
 
 ## 7. Git and review-size policy
 
-Every task is planned as one reviewable PR. The primary agent defines the branch and commit rounds
-before implementation:
+Every repository-changing task starts from one open GitHub issue and is planned as one reviewable
+PR. Read-only investigation and planning can happen before an issue exists. The primary agent
+defines the issue link, branch, and commit rounds before implementation:
 
-- Branches use `<type>/<short-kebab-description>` from the named base branch. Allowed types are
+- Creating and classifying an issue is triage only. A new issue stays in Project status `Todo`
+  while the repository owner reviews its content, labels, priority, scope, and acceptance criteria.
+  No Codex task, linked branch, repository edit, commit, or PR may be created for it until the owner
+  explicitly approves implementation. Approval moves the issue to `In Progress` and provisions
+  exactly one Codex task from the approved issue. Issues needing clarification remain in `Todo` and
+  use `needs:decision` when appropriate. Approval applies only to the selected issue; approving a
+  parent does not approve or provision any sub-issue.
+
+- A complex or multi-PR initiative uses a native GitHub parent issue for the combined outcome,
+  shared constraints, dependency graph, and completion roll-up. Its bounded sub-issues each define
+  independently reviewable acceptance criteria, scope, non-goals, risks, validation, and labels.
+  The parent does not receive an aggregate implementation task, branch, or catch-all PR. Each
+  approved sub-issue receives one Codex task, one linked numbered branch, and normally one PR that
+  closes only that sub-issue. Dependency-ready sub-issues may execute in parallel only when their
+  file ownership and behavioral responsibilities do not overlap; shared schema, public contracts,
+  or integration boundaries require serialization. Close the parent only after every required
+  sub-issue and the combined acceptance criteria are complete.
+
+- Branches use `<type>/<issue-number>-<short-kebab-description>` from the named base branch and are
+  created with `gh issue develop` so GitHub records the linked branch. Allowed types are
   `feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `ci`, `build`, `chore`, `release`, and
-  `hotfix`. Examples: `feat/outbox-dispatcher`, `fix/claim-fencing`, `docs/consumer-guide`, and
-  `ci/pr-size-gate`. The description is lowercase kebab-case. Work never starts directly on `main`.
+  `hotfix`. Examples: `feat/123-outbox-dispatcher`, `fix/124-claim-fencing`,
+  `docs/125-consumer-guide`, and `ci/126-pr-size-gate`. The description is lowercase kebab-case.
+  Work never starts directly on `main`.
 - Each commit represents one testable behavior and strictly follows Conventional Commits 1.0.0:
   `<type>[optional scope][optional !]: <description>`, with body and footer sections separated by
   blank lines. `feat` means a new feature, `fix` means a bug fix, and an incompatible change uses
   `!` or an uppercase `BREAKING CHANGE:` footer. Repository commit types are `build`, `chore`, `ci`,
   `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`. A `hotfix/*` branch uses
-  `fix`; release mechanics normally use `chore(release)`.
+  `fix`; release mechanics normally use `chore(release)`. Each commit body or footer references
+  its issue as `Refs #<issue-number>` without closing it.
+- The PR body includes `Closes #<issue-number>`, matching the branch issue number. The PR is the
+  review record, and merging it into the default branch closes the issue. Closing keywords do not
+  belong in individual commits.
+- Automation and Codex agents never enable auto-merge or merge a PR. Once required checks and
+  reviews pass, the primary reports that the PR is ready and waits for the repository owner to
+  review and merge it manually.
 - `prek` installs the versioned `.pre-commit-config.yaml` hooks. Before commit they validate the
   branch, staged diff, formatting, Clippy, and the commit message; before push they run the full
   workspace test suite. Hooks provide fast feedback, while CI remains the non-bypassable authority.
@@ -173,6 +206,7 @@ before implementation:
 Before each commit round, the primary agent reports:
 
 ```text
+GitHub issue:
 Base branch:
 Working branch:
 PR purpose:
@@ -213,10 +247,21 @@ management overhead:
 | Standard | At most 25 paths and normally 1–3 commits | Primary → architect only if gated → developer/release engineer → reviewer → primary |
 | Multi-PR | More than 25 forecast paths | User-approved PR sequence; every PR follows the normal targets and hard limits |
 
-Normal work lives in the active Codex task packet and is handed off by repository path and section,
-not copied into messages. This repository does not maintain a separate backlog project, one
-markdown card per task, separate story files, or a routine ADR stream. Git history, the PR, and the
-normative documents are the durable record.
+GitHub Issues and the linked GitHub Project are the authoritative work tracker. Each repository
+change uses one issue, one Codex task, one linked numbered branch, and normally one PR. Parent
+issues and sub-issues coordinate multi-PR initiatives. The active Codex task packet is a transient
+handoff derived from its issue; it is not a second task record.
+
+Each actionable issue has exactly one `type:*` label, all applicable `area:*` labels, and only the
+`risk:*` labels that alter review evidence. `needs:*` and `blocked` labels represent exceptional
+triage conditions. [`CONTRIBUTING.md`](../CONTRIBUTING.md#classify-the-issue) is the canonical list
+of valid labels; task packets use only those names. Priority and the normal `Todo` → `In Progress`
+→ `Done` lifecycle live in GitHub Project fields instead of duplicative labels.
+
+This repository does not maintain Markdown task cards, separate story files, another backlog, or a
+routine ADR stream. The issue records intent and acceptance, the PR records review and validation,
+Git history records the accepted change, and normative documents record only resulting durable
+contracts and behavior.
 
 When a decision changes a lasting guarantee, public capability, schema invariant, ownership
 boundary, or non-goal, update the relevant normative document in the same PR. Create an ADR only
