@@ -2,10 +2,11 @@ name: PR scope
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
+  issues: read
   pull-requests: read
 
 concurrency:
@@ -33,7 +34,7 @@ jobs:
           readonly max_commit_paths=20
           readonly max_pr_paths=90
           readonly max_pr_commits_from_api=250
-          readonly allowed_branch_pattern='^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[a-z0-9]+(-[a-z0-9]+)*$'
+          readonly allowed_branch_pattern='^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$'
           readonly conventional_header_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^()]+\))?(!)?: [^[:space:]].*$'
 
           api_get() {
@@ -55,7 +56,35 @@ jobs:
 
           if ! [[ "${PR_HEAD_REF}" =~ ${allowed_branch_pattern} ]]; then
             echo "Invalid pull-request branch name." >&2
-            echo "Expected <type>/<short-kebab-description>; received a ref that does not satisfy repository policy." >&2
+            echo "Expected <type>/<issue-number>-<short-kebab-description>; received a ref that does not satisfy repository policy." >&2
+            exit 1
+          fi
+
+          branch_issue_number="${BASH_REMATCH[2]}"
+          pull_url="${GH_API_URL}/repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}"
+          pull_request="$(api_get "${pull_url}")"
+          pull_body="$(jq --exit-status --raw-output \
+            'if (type == "object" and (.body == null or (.body | type) == "string")) then (.body // "") else error("expected pull request object with body") end' \
+            <<<"${pull_request}")"
+
+          shopt -s nocasematch
+          closing_reference_pattern="(^|[^[:alnum:]_])Closes[[:space:]]+#${branch_issue_number}([^[:alnum:]_]|$)"
+          if ! grep -Eiq "${closing_reference_pattern}" <<<"${pull_body}"; then
+            echo "PR body must contain a closing reference for issue #${branch_issue_number}, matching its branch." >&2
+            echo "Use canonical syntax: Closes #${branch_issue_number}" >&2
+            exit 1
+          fi
+
+          issue_url="${GH_API_URL}/repos/${GH_REPOSITORY}/issues/${branch_issue_number}"
+          issue="$(api_get "${issue_url}")"
+          issue_number="$(jq --exit-status --raw-output \
+            'if (type == "object" and (.number | type) == "number") then (.number | tostring) else error("expected issue object") end' \
+            <<<"${issue}")"
+          issue_state="$(jq --exit-status --raw-output \
+            'if (type == "object" and (.state | type) == "string") then .state else error("expected issue state") end' \
+            <<<"${issue}")"
+          if [[ "${issue_number}" != "${branch_issue_number}" ]] || [[ "${issue_state}" != open ]] || jq --exit-status 'has("pull_request")' <<<"${issue}" >/dev/null; then
+            echo "Branch issue #${branch_issue_number} must resolve to an existing open GitHub issue, not a pull request." >&2
             exit 1
           fi
 
@@ -101,6 +130,9 @@ jobs:
                   end' \
                   <<<"${commit}"
               )"
+              commit_message="$(jq --exit-status --raw-output \
+                'if (type == "object" and (.commit | type) == "object" and (.commit.message | type) == "string") then .commit.message else error("expected commit object with message") end' \
+                <<<"${commit}")"
               commit_path_count="$(
                 jq --exit-status \
                   'if (type == "object" and ((.files | type) == "array")) then
@@ -117,6 +149,15 @@ jobs:
                 violating_messages=$((violating_messages + 1))
               elif [[ "${PR_HEAD_REF}" == hotfix/* && "${BASH_REMATCH[1]}" != "fix" ]]; then
                 echo "Commit ${sha:0:12} uses type ${BASH_REMATCH[1]}; commits on hotfix/* must use fix." >&2
+                violating_messages=$((violating_messages + 1))
+              fi
+
+              if ! grep -Eq "^[[:space:]]*Refs[[:space:]]+#${branch_issue_number}[[:space:]]*$" <<<"${commit_message}"; then
+                echo "Commit ${sha:0:12} must contain a standalone Refs #${branch_issue_number} line." >&2
+                violating_messages=$((violating_messages + 1))
+              fi
+              if grep -Eiq "(^|[^[:alnum:]_])(Closes|Close|Closed|Fixes|Fix|Fixed|Resolves|Resolve|Resolved)[[:space:]]*:?[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)?#[1-9][0-9]*([^[:alnum:]_]|$)" <<<"${commit_message}"; then
+                echo "Commit ${sha:0:12} must not use GitHub closing keywords; use Refs #${branch_issue_number}." >&2
                 violating_messages=$((violating_messages + 1))
               fi
 

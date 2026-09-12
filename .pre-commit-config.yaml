@@ -26,7 +26,7 @@ repos:
   - repo: local
     hooks:
       - id: branch-name
-        name: Git-flow branch name
+        name: Issue-linked branch name
         language: system
         stages: [pre-commit]
         always_run: true
@@ -44,9 +44,9 @@ repos:
               echo "Detached HEAD is allowed only while an active rebase is recorded by Git." >&2;
               exit 1;
             fi;
-            if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[1-9][0-9]*-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
               echo "Invalid branch: ${branch}" >&2;
-              echo "Expected <type>/<short-kebab-description>; commits on main/master are forbidden." >&2;
+              echo "Expected <type>/<issue-number>-<short-kebab-description>; commits on main/master are forbidden." >&2;
               exit 1;
             fi'
 
@@ -79,6 +79,42 @@ repos:
                 echo "Commits on ${branch} must use the Conventional Commit type fix." >&2;
                 exit 1;
               fi;
+            fi' --
+
+      - id: issue-commit-reference
+        name: Commit references branch issue
+        language: system
+        stages: [commit-msg]
+        always_run: true
+        entry: >-
+          bash -c '
+            message_file="$1";
+            if [ ! -f "${message_file}" ]; then
+              echo "Commit message file is unavailable; refusing to skip issue reference validation." >&2;
+              exit 1;
+            fi;
+            branch="$(git symbolic-ref --quiet --short HEAD || true)";
+            if [ -z "${branch}" ]; then
+              for rebase_state in "$(git rev-parse --git-path rebase-merge)" "$(git rev-parse --git-path rebase-apply)"; do
+                if [ -f "${rebase_state}/head-name" ]; then
+                  IFS= read -r branch < "${rebase_state}/head-name" || true;
+                  branch="${branch#refs/heads/}";
+                  break;
+                fi;
+              done;
+            fi;
+            if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "Cannot validate commit issue reference: branch must include a positive issue number." >&2;
+              exit 1;
+            fi;
+            issue_number="${BASH_REMATCH[2]}";
+            if ! grep -Eq "^[[:space:]]*Refs[[:space:]]+#${issue_number}[[:space:]]*$" "${message_file}"; then
+              echo "Commit message must contain a standalone Refs #${issue_number} line." >&2;
+              exit 1;
+            fi;
+            if grep -Eiq "(^|[^[:alnum:]_])(Closes|Close|Closed|Fixes|Fix|Fixed|Resolves|Resolve|Resolved)[[:space:]]*:?[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)?#[1-9][0-9]*([^[:alnum:]_]|$)" "${message_file}"; then
+              echo "Commit messages must not use GitHub closing keywords; use Refs #${issue_number}." >&2;
+              exit 1;
             fi' --
 
       - id: staged-diff-check
