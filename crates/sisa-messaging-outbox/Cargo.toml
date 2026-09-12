@@ -1,0 +1,15 @@
+[package]
+name = "sisa-messaging-outbox"
+version = "0.1.0"
+description = "Transactional outbox contracts and dispatch coordination"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sisa-messaging = { workspace = true }
+
+[lints]
+workspace = true

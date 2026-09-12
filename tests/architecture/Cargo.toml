@@ -1,0 +1,20 @@
+[package]
+name = "sisa-messaging-architecture-tests"
+version = "0.0.0"
+description = "Machine-readable workspace architecture guardrails"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dev-dependencies]
+proc-macro2 = { workspace = true }
+syn = { workspace = true }
+
+[[test]]
+name = "workspace_boundaries"
+path = "workspace_boundaries.rs"
+
+[lints]
+workspace = true

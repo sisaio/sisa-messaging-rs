@@ -1,0 +1,74 @@
+name: Release rehearsal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Explicit Atlas Community release; do not change to a floating/latest URL.
+  ATLAS_VERSION: v1.3.0
+  ATLAS_SHA256: 10d7913e3dce43ab99b8d71534a4cbadaf11a16dc293adf3b91d10e83a0ac70b
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  package:
+    name: Build and package release artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # v1 action revision
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - name: Validate release build and package contents
+        run: |
+          cargo build --workspace --release --locked
+          cargo test --workspace --release --locked
+          mkdir -p artifacts/crates
+          # Keep this rehearsal in the same order required for a future publication:
+          # messaging; outbox/inbox/NATS; then consumer/PostgreSQL.
+          # This pre-publication rehearsal intentionally performs inventory-only validation. The
+          # package list checks package contents without publishing or requiring registry-backed
+          # isolated verification. Once publication is enabled, add archive creation and isolated
+          # verification against the intended registry/order.
+          for package in \
+            sisa-messaging \
+            sisa-messaging-outbox sisa-messaging-inbox sisa-messaging-nats \
+            sisa-messaging-consumer sisa-messaging-postgres; do
+            cargo package --package "${package}" --allow-dirty --locked --list > "artifacts/crates/${package}.files"
+          done
+      - name: Build rustdoc with warnings denied
+        run: |
+          cargo doc --workspace --no-deps --all-features --locked
+          tar -czf "artifacts/rustdoc-${GITHUB_SHA}.tar.gz" -C target doc
+          sha256sum "artifacts/rustdoc-${GITHUB_SHA}.tar.gz" > "artifacts/rustdoc-${GITHUB_SHA}.tar.gz.sha256"
+      - name: Build migration bundle and deployment guide
+        run: |
+          curl --fail --location --retry 3 --output atlas \
+            "https://release.ariga.io/atlas/atlas-community-linux-amd64-${ATLAS_VERSION}"
+          printf '%s  %s\n' "${ATLAS_SHA256}" atlas | sha256sum --check --status
+          chmod +x atlas
+          ./atlas version
+          checksum_dir="$(mktemp -d)"
+          cp -R migrations "${checksum_dir}/migrations"
+          ./atlas migrate hash --dir "file://${checksum_dir}/migrations"
+          cmp --silent migrations/atlas.sum "${checksum_dir}/migrations/atlas.sum"
+          postgres_version="$(cargo metadata --no-deps --locked --format-version 1 | jq -r '.packages[] | select(.name == "sisa-messaging-postgres") | .version' | head -n 1)"
+          test -n "${postgres_version}"
+          bundle="artifacts/sisa-messaging-postgres-migrations-${postgres_version}.tar.gz"
+          mkdir -p artifacts/migrations
+          cp -R migrations artifacts/migrations/
+          cp docs/migrations.md artifacts/migrations/DEPLOYMENT.md
+          printf '%s\n' "sisa-messaging-postgres ${postgres_version} (source commit ${GITHUB_SHA})" > artifacts/migrations/VERSION
+          tar -czf "${bundle}" -C artifacts/migrations migrations DEPLOYMENT.md VERSION
+          sha256sum "${bundle}" > "${bundle}.sha256"
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: release-rehearsal-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

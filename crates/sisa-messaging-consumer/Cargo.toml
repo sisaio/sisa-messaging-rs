@@ -1,0 +1,16 @@
+[package]
+name = "sisa-messaging-consumer"
+version = "0.1.0"
+description = "Typed bounded consumer runtime for Sisa messaging"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sisa-messaging = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+
+[lints]
+workspace = true
