@@ -58,6 +58,9 @@
   them with `--no-verify`. Do not create a commit unless the user asks.
 - Target at most 10 changed files per commit; 20 is the hard limit. Target at most 25 changed files
   per task/PR; 90 is the hard limit, preserving margin below CodeRabbit's 100-file maximum.
+- A PR may contain at most 250 commits because GitHub's pull-request commits endpoint does not
+  expose a complete list beyond that cap, so CI cannot audit every commit's changed-path limit.
+  Normal small-task planning should remain far below this auditability ceiling.
 - Count every added, modified, deleted, or renamed path, including tests, generated files,
   migrations, checksums, and lockfiles. Split work by capability or testable behavior before a
   limit is reached; do not use an oversized catch-all commit.

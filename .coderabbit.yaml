@@ -156,20 +156,12 @@ knowledge_base:
   code_guidelines:
     enabled: true
     filePatterns:
-      - files: "docs/architecture.md"
-        applyTo: "crates/**"
-      - files: "docs/api-conventions.md"
-        applyTo: "crates/**"
-      - files: "docs/database.md"
-        applyTo: "crates/sisa-messaging-postgres/**"
-      - files: "docs/database.md"
-        applyTo: "migrations/**"
-      - files: "docs/consumer-framework.md"
-        applyTo: "crates/sisa-messaging-consumer/**"
-      - files: "docs/observability.md"
-        applyTo: "crates/**"
-      - files: "docs/implementation-plan.md"
-        applyTo: "**/*"
+      - "docs/architecture.md"
+      - "docs/api-conventions.md"
+      - "docs/database.md"
+      - "docs/consumer-framework.md"
+      - "docs/observability.md"
+      - "docs/implementation-plan.md"
 
 chat:
   auto_reply: true

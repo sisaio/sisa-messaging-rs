@@ -144,16 +144,26 @@ the bundle once per schema and keeps revision bookkeeping in each selected schem
 A full SQL snapshot is useful for review, documentation, or an operator's manual drift check:
 
 ```text
+atlas migrate apply \
+  --dir file://migrations \
+  --url <disposable-postgresql-18-url-with-selected-search-path>
+
+atlas migrate status \
+  --dir file://migrations \
+  --url <disposable-postgresql-18-url-with-selected-search-path>
+
 atlas schema inspect \
-  --env local \
-  --url file://migrations \
+  --url <disposable-postgresql-18-url-with-selected-search-path> \
   --format '{{ sql . }}' \
   > schema.snapshot.sql
 ```
 
-It is never inserted into the active migration directory. It does not replace `atlas.sum`, Atlas
-revision bookkeeping, or the versioned files. Use `pg_dump --schema-only` when PostgreSQL objects
-outside the Atlas Community schema model must be captured.
+The target must be a clean, disposable PostgreSQL 18 database. This procedure inspects the database
+after the versioned directory has been applied; inspecting a migration directory as a schema source
+would require an explicit dev database and is not the release snapshot contract. The snapshot is
+never inserted into the active migration directory. It does not replace `atlas.sum`, Atlas revision
+bookkeeping, or the versioned files. Use `pg_dump --schema-only` when PostgreSQL objects outside
+the Atlas Community schema model must be captured.
 
 ## 8. References
 

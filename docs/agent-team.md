@@ -152,10 +152,14 @@ before implementation:
 - `prek` installs the versioned `.pre-commit-config.yaml` hooks. Before commit they validate the
   branch, staged diff, formatting, Clippy, and the commit message; before push they run the full
   workspace test suite. Hooks provide fast feedback, while CI remains the non-bypassable authority.
-  Agents never use `--no-verify`.
+  Agents never use `--no-verify`. The branch hook permits Git's transient detached `HEAD` only while
+  an active rebase directory exists; an ordinary detached-HEAD commit remains forbidden.
 - A commit targets at most 10 changed paths and has a hard limit of 20.
 - A task/PR targets at most 25 changed paths and has a hard limit of 90. The 90-file stop leaves a
   ten-file margin below CodeRabbit's 100-file maximum.
+- A PR has a 250-commit auditability ceiling because GitHub's pull-request commits endpoint does
+  not return a complete list beyond that point. CI fails closed rather than silently skipping the
+  per-commit path audit; normal tasks should remain nowhere near this ceiling.
 - Added, modified, deleted, renamed, generated, test, migration, checksum, and lockfile paths all
   count. Companion files are not exempt.
 - Work is split by capability, dependency direction, or independently testable behavior before a

@@ -35,8 +35,13 @@ repos:
           bash -c '
             branch="$(git symbolic-ref --quiet --short HEAD || true)";
             if [ -z "${branch}" ]; then
+              rebase_merge="$(git rev-parse --git-path rebase-merge)";
+              rebase_apply="$(git rev-parse --git-path rebase-apply)";
+              if [ -d "${rebase_merge}" ] || [ -d "${rebase_apply}" ]; then
+                exit 0;
+              fi;
               echo "Invalid branch: detached HEAD" >&2;
-              echo "Check out an allowed <type>/<short-kebab-description> branch before committing." >&2;
+              echo "Detached HEAD is allowed only while an active rebase is recorded by Git." >&2;
               exit 1;
             fi;
             if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
@@ -44,6 +49,37 @@ repos:
               echo "Expected <type>/<short-kebab-description>; commits on main/master are forbidden." >&2;
               exit 1;
             fi'
+
+      - id: hotfix-commit-type
+        name: Hotfix commits use fix
+        language: system
+        stages: [commit-msg]
+        always_run: true
+        entry: >-
+          bash -c '
+            message_file="$1";
+            if [ ! -f "${message_file}" ]; then
+              echo "Commit message file is unavailable; refusing to skip hotfix validation." >&2;
+              exit 1;
+            fi;
+            branch="$(git symbolic-ref --quiet --short HEAD || true)";
+            if [ -z "${branch}" ]; then
+              for rebase_state in "$(git rev-parse --git-path rebase-merge)" "$(git rev-parse --git-path rebase-apply)"; do
+                if [ -f "${rebase_state}/head-name" ]; then
+                  IFS= read -r branch < "${rebase_state}/head-name" || true;
+                  branch="${branch#refs/heads/}";
+                  break;
+                fi;
+              done;
+            fi;
+            if [[ "${branch}" == hotfix/* ]]; then
+              IFS= read -r header < "${message_file}" || true;
+              fix_header_pattern="^fix(\\([^()]+\\))?(!)?:[[:space:]]+[^[:space:]].*$";
+              if ! [[ "${header}" =~ ${fix_header_pattern} ]]; then
+                echo "Commits on ${branch} must use the Conventional Commit type fix." >&2;
+                exit 1;
+              fi;
+            fi' --
 
       - id: staged-diff-check
         name: Staged whitespace and conflict markers

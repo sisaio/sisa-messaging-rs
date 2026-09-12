@@ -118,7 +118,7 @@ are instrument metadata.
 | `outbox.retried.messages` | Counter | `{message}` | `failure.kind` | Database-confirmed retry transitions |
 | `outbox.dead.messages` | Counter | `{message}` | `dead.reason` | Database-confirmed dead transitions observed by this process |
 | `outbox.publish.duration` | Histogram | `s` | `error.type` only on failure | Duration of one publisher attempt |
-| `outbox.in_flight` | UpDownCounter | `{message}` | none | Local publishes currently unresolved |
+| `outbox.in.flight` | UpDownCounter | `{message}` | none | Local publishes currently unresolved |
 
 `message.type` is not a default metric attribute. It is application-defined and can be unbounded.
 Applications needing it must supply a closed registry or aggregate outside the library.
@@ -158,7 +158,7 @@ Outbox lifecycle and transport metrics answer different questions and must not b
 | `consumer.duplicate.messages` | Counter | `{message}` | `duplicate.state=completed\|in_progress` | Deliveries whose handler did not run |
 | `consumer.dead.messages` | Counter | `{message}` | `dead.reason` | Deliveries observed or transitioned dead |
 | `messaging.process.duration` | Histogram | `s` | OTel messaging attributes and `error.type` on failure | Handler processing duration |
-| `consumer.in_flight` | UpDownCounter | `{message}` | none | Received deliveries not yet settled |
+| `consumer.in.flight` | UpDownCounter | `{message}` | none | Received deliveries not yet settled |
 
 `consumer.processed.messages` is emitted only after commit confirmation. A settlement failure does
 not decrement an earlier processed count; it can cause a later duplicate delivery. Message type,

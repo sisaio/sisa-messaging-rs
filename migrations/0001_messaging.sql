@@ -2,8 +2,9 @@
 --
 -- Atlas Community Edition applies this versioned migration to the schema selected by the
 -- PostgreSQL connection search_path. Runtime SQL uses the same unqualified, fixed table names.
--- Every index, including a unique index, is created explicitly with an
--- ix_<table>_<purpose> name. Once released, this migration is immutable.
+-- Every supporting index, including a unique supporting index, is created explicitly with an
+-- ix_<table>_<purpose> name. Primary-key indexes retain their constraint-derived pk_* names. Once
+-- released, this migration is immutable.
 -- See docs/database.md for state transitions, query shapes, and retention rules.
 
 -- Durable publication requests written in the application's business transaction. Workers claim

@@ -4,11 +4,10 @@
 
 The repository begins with the executable schema baseline in
 [`../migrations/0001_messaging.sql`](../migrations/0001_messaging.sql).
-`ck_outbox_messages_claim` requires
-`claim_token` and `locked_by` to be null or non-null together. Every valid transition maintains
-that relationship, and terminal rows cannot retain a claim. Both metadata columns must contain a
-JSON object. These checks make corrupt state fail at its write boundary without adding another
-runtime query.
+`ck_outbox_messages_claim` requires `claim_token` and `locked_by` to be null or non-null together,
+while `ck_outbox_messages_terminal_claim` prevents a terminal row from retaining either value.
+Every valid transition maintains both invariants. Both metadata columns must contain a JSON object.
+These checks make corrupt state fail at its write boundary without adding another runtime query.
 
 - PostgreSQL 18 or later is required for `uuidv7()`.
 - `timestamptz` is used for every timestamp.
@@ -166,10 +165,11 @@ ID among the non-terminal, unexpired rows for that key. This prevents concurrent
 within one key and gives the stored rows a deterministic tiebreak order.
 
 It does not guarantee transaction commit order or a business-domain sequence. PostgreSQL UUIDv7
-values are time ordered and monotonic within one backend, but rows can be inserted through
-different pool connections and transaction visibility is independent of UUID generation. A domain
-that requires a strict externally meaningful sequence needs an explicit application sequence and
-a corresponding schema/query extension.
+values contain a millisecond timestamp and are therefore time-correlated, but their remaining bits
+do not form a strict insertion sequence. Rows can also be inserted through different pool
+connections, and transaction visibility is independent of UUID generation. A domain that requires
+a strict externally meaningful sequence needs an explicit application sequence and a corresponding
+schema/query extension.
 
 Lease expiry, operator resurrection of a dead predecessor, broker behavior, duplicate delivery,
 and consumer concurrency can still produce downstream reordering. The library promises only the
@@ -340,16 +340,12 @@ Checkpoints are an optional fresh-install replay optimization, not a correctness
 Community Edition does not generate them. If replay time becomes a measured problem, the project
 may introduce a separately reviewed baseline strategy without rewriting released history.
 
-For review or drift investigation, a complete SQL snapshot of all versioned migrations can be
-generated without adding it to the migration directory:
-
-```text
-atlas schema inspect --env local --url file://migrations --format '{{ sql . }}' > schema.snapshot.sql
-```
-
-The snapshot is a generated artifact, not a migration and not an Atlas checkpoint. PostgreSQL
-`pg_dump --schema-only` is used instead when objects outside the Community schema model must be
-captured.
+For review or drift investigation, follow the canonical
+[snapshot procedure](migrations.md#7-snapshot-role): apply the complete versioned directory to a
+clean, disposable PostgreSQL 18 database, confirm its migration status, and inspect that database.
+The resulting snapshot is a generated artifact, not a migration or Atlas checkpoint, and is never
+added to the migration directory. PostgreSQL `pg_dump --schema-only` is used instead when objects
+outside the Community schema model must be captured.
 
 ## 9. Standards references
 
