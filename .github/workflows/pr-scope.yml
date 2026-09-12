@@ -1,0 +1,119 @@
+name: PR scope
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changed-path-limits:
+    name: Changed path limits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_API_URL: ${{ github.api_url }}
+      GH_REPOSITORY: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_COMMIT_COUNT: ${{ github.event.pull_request.commits }}
+    steps:
+      - name: Enforce commit and PR limits
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          readonly max_commit_paths=20
+          readonly max_pr_paths=90
+          readonly max_pr_commits_from_api=250
+
+          api_get() {
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              "$1"
+          }
+
+          if [[ ! "${PR_NUMBER}" =~ ^[0-9]+$ || ! "${PR_COMMIT_COUNT}" =~ ^[0-9]+$ ]]; then
+            echo "GitHub supplied invalid pull-request metadata." >&2
+            exit 1
+          fi
+
+          pr_files_url="${GH_API_URL}/repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/files"
+          pr_files="$(api_get "${pr_files_url}?per_page=$((max_pr_paths + 1))&page=1")"
+          pr_path_count="$(jq --exit-status 'if type == "array" then length else error("expected array") end' <<<"${pr_files}")"
+
+          if ((pr_path_count > max_pr_paths)); then
+            echo "PR #${PR_NUMBER} changes at least ${pr_path_count} paths; the hard limit is ${max_pr_paths}." >&2
+            echo "Split the work into smaller capability-focused PRs." >&2
+            exit 1
+          fi
+
+          if ((PR_COMMIT_COUNT > max_pr_commits_from_api)); then
+            echo "PR #${PR_NUMBER} has ${PR_COMMIT_COUNT} commits; GitHub's PR endpoint exposes at most ${max_pr_commits_from_api}." >&2
+            echo "The workflow cannot prove every commit is within the ${max_commit_paths}-path limit. Rebase or split the PR." >&2
+            exit 1
+          fi
+
+          page_count=$(((PR_COMMIT_COUNT + 99) / 100))
+          observed_commits=0
+          violating_commits=0
+
+          for ((page = 1; page <= page_count; page += 1)); do
+            commits_url="${GH_API_URL}/repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/commits"
+            commits="$(api_get "${commits_url}?per_page=100&page=${page}")"
+
+            while IFS= read -r sha; do
+              if [[ ! "${sha}" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "GitHub supplied an invalid commit SHA: ${sha}" >&2
+                exit 1
+              fi
+
+              commit_url="${GH_API_URL}/repos/${GH_REPOSITORY}/commits/${sha}"
+              commit="$(api_get "${commit_url}?per_page=$((max_commit_paths + 1))&page=1")"
+              commit_path_count="$(
+                jq --exit-status \
+                  'if (type == "object" and ((.files | type) == "array")) then
+                    (.files | length)
+                  else
+                    error("expected commit object with files array")
+                  end' \
+                  <<<"${commit}"
+              )"
+              observed_commits=$((observed_commits + 1))
+
+              if ((commit_path_count > max_commit_paths)); then
+                echo "Commit ${sha:0:12} changes at least ${commit_path_count} paths; the hard limit is ${max_commit_paths}." >&2
+                violating_commits=$((violating_commits + 1))
+              else
+                echo "Commit ${sha:0:12}: ${commit_path_count}/${max_commit_paths} changed paths."
+              fi
+            done < <(
+              jq --exit-status --raw-output \
+                'if type == "array" then .[].sha else error("expected array") end' \
+                <<<"${commits}"
+            )
+          done
+
+          if ((observed_commits != PR_COMMIT_COUNT)); then
+            echo "Expected ${PR_COMMIT_COUNT} commits but GitHub returned ${observed_commits}; refusing a partial audit." >&2
+            exit 1
+          fi
+
+          if ((violating_commits > 0)); then
+            echo "${violating_commits} commit(s) exceed the changed-path hard limit." >&2
+            exit 1
+          fi
+
+          echo "PR #${PR_NUMBER}: ${pr_path_count}/${max_pr_paths} changed paths across ${observed_commits} audited commit(s)."

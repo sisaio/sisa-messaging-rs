@@ -1,0 +1,84 @@
+minimum_prek_version: "0.4.14"
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+fail_fast: true
+
+repos:
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: 91ab4bf57e58b32adf1a122681f6ebe164d081c8 # frozen: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        name: Conventional Commits 1.0.0
+        stages: [commit-msg]
+        args:
+          - --strict
+          - build
+          - chore
+          - ci
+          - docs
+          - feat
+          - fix
+          - perf
+          - refactor
+          - revert
+          - style
+          - test
+
+  - repo: local
+    hooks:
+      - id: branch-name
+        name: Git-flow branch name
+        language: system
+        stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
+        entry: >-
+          bash -c '
+            branch="$(git symbolic-ref --quiet --short HEAD || true)";
+            if [ -z "${branch}" ]; then
+              echo "Invalid branch: detached HEAD" >&2;
+              echo "Check out an allowed <type>/<short-kebab-description> branch before committing." >&2;
+              exit 1;
+            fi;
+            if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "Invalid branch: ${branch}" >&2;
+              echo "Expected <type>/<short-kebab-description>; commits on main/master are forbidden." >&2;
+              exit 1;
+            fi'
+
+      - id: staged-diff-check
+        name: Staged whitespace and conflict markers
+        language: system
+        stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
+        entry: git diff --cached --check
+
+      - id: cargo-fmt
+        name: cargo fmt
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: '(^|/)(Cargo\.toml|Cargo\.lock|[^/]+\.rs)$'
+        entry: bash -c 'if [ -f Cargo.toml ]; then cargo fmt --all -- --check; fi'
+
+      - id: cargo-clippy
+        name: cargo clippy
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: '(^|/)(Cargo\.toml|Cargo\.lock|[^/]+\.rs)$'
+        entry: >-
+          bash -c 'if [ -f Cargo.toml ]; then
+            cargo clippy --workspace --all-targets --all-features -- -D warnings;
+          fi'
+
+      - id: cargo-test
+        name: cargo test before push
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+        entry: >-
+          bash -c 'if [ -f Cargo.toml ]; then
+            cargo test --workspace --all-features;
+          fi'
