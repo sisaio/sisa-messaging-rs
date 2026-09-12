@@ -27,10 +27,15 @@
   write-enabling override, and verify that their handoffs introduced no worktree changes.
 - Keep project management lean: GitHub Issues and the linked GitHub Project are the authoritative
   work tracker. Use one issue, one Codex task, one numbered branch, and normally one PR per
-  repository change. Use parent issues and sub-issues for multi-PR work. Do not create Markdown
-  task cards, story files, a second backlog, or routine ADRs. Update normative docs only when a
-  completed change affects a durable decision; create one plan document only for a user-approved
-  multi-PR effort that cannot be coordinated adequately through its parent and sub-issues.
+  repository change. For complex or multi-PR work, use one native GitHub parent issue to coordinate
+  bounded sub-issues and their dependencies; do not give the parent an aggregate implementation
+  task, branch, or catch-all PR. Each sub-issue requires separate owner approval and gets its own
+  task, branch, and normally one PR. Approved dependency-ready sub-issues may run in parallel only
+  with non-overlapping file ownership and behavioral scope. Close the parent after all required
+  sub-issues and combined acceptance criteria are complete. Do not create Markdown task cards,
+  story files, a second backlog, or routine ADRs. Update normative docs only when a completed change
+  affects a durable decision; create one plan document only for a user-approved multi-PR effort
+  that cannot be coordinated adequately through its parent and sub-issues.
 
 # Security and performance lenses
 
@@ -55,7 +60,8 @@
 - Issue creation and classification are triage only. Keep a new issue in `Todo`; do not provision a
   Codex task, create its branch, or begin repository edits until the repository owner explicitly
   approves the issue. After approval, move it to `In Progress`, provision exactly one Codex task,
-  and derive that task's packet from the approved issue.
+  and derive that task's packet from the approved issue. Approval is per issue: approval of a parent
+  never implicitly approves or provisions its sub-issues.
 - Never implement directly on `main`. Before edits, state the issue number and URL, base branch,
   proposed `<type>/<issue-number>-<short-kebab-description>` branch name, PR intent, and
   commit-round plan. Create the branch with `gh issue develop` so GitHub links it to the issue.

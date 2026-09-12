@@ -96,9 +96,9 @@ needs.
 ## 5. Workflow
 
 ```text
-GitHub issue
+GitHub issue, or one bounded sub-issue under a complex parent
   -> triage: complete content, labels, priority, and Todo status
-  -> repository-owner approval gate
+  -> repository-owner approval gate for this issue only
   -> one Codex task
   -> primary: task packet and acceptance criteria derived from the issue
   -> architect: design packet, when the architecture gate applies
@@ -150,7 +150,18 @@ defines the issue link, branch, and commit rounds before implementation:
   No Codex task, linked branch, repository edit, commit, or PR may be created for it until the owner
   explicitly approves implementation. Approval moves the issue to `In Progress` and provisions
   exactly one Codex task from the approved issue. Issues needing clarification remain in `Todo` and
-  use `needs:decision` when appropriate.
+  use `needs:decision` when appropriate. Approval applies only to the selected issue; approving a
+  parent does not approve or provision any sub-issue.
+
+- A complex or multi-PR initiative uses a native GitHub parent issue for the combined outcome,
+  shared constraints, dependency graph, and completion roll-up. Its bounded sub-issues each define
+  independently reviewable acceptance criteria, scope, non-goals, risks, validation, and labels.
+  The parent does not receive an aggregate implementation task, branch, or catch-all PR. Each
+  approved sub-issue receives one Codex task, one linked numbered branch, and normally one PR that
+  closes only that sub-issue. Dependency-ready sub-issues may execute in parallel only when their
+  file ownership and behavioral responsibilities do not overlap; shared schema, public contracts,
+  or integration boundaries require serialization. Close the parent only after every required
+  sub-issue and the combined acceptance criteria are complete.
 
 - Branches use `<type>/<issue-number>-<short-kebab-description>` from the named base branch and are
   created with `gh issue develop` so GitHub records the linked branch. Allowed types are

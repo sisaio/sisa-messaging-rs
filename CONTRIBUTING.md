@@ -16,9 +16,7 @@ configuration, migration, test, or documentation change must have one open issue
 - compatibility, schema, concurrency, security, performance, or release risks; and
 - the validation expected before review.
 
-Use a parent issue and implementation sub-issues when an initiative needs multiple PRs. Each
-implementation issue gets its own Codex task, linked branch, and normally one PR. Do not add
-per-ticket Markdown files to the repository.
+Do not add per-ticket Markdown files to the repository.
 
 Report security vulnerabilities with a private security advisory instead of a public issue.
 
@@ -45,6 +43,26 @@ Codex task, linked branch, commit, or pull request until the owner explicitly ap
 After approval, move the issue to `In Progress`, provision exactly one Codex task from the approved
 issue, and create its linked numbered branch. If review requests changes or a decision is still
 missing, leave the issue in `Todo` and use `needs:decision` when appropriate.
+
+Approval applies to one issue only. Approving a parent issue does not approve its sub-issues.
+
+## Split complex work into sub-issues
+
+When an initiative is too large for one bounded PR, keep its outcome, shared constraints, and
+dependency order in a native GitHub parent issue. Attach bounded sub-issues for the independently
+reviewable implementation slices. The parent coordinates the work; it does not get one oversized
+Codex task, aggregate implementation branch, or catch-all PR.
+
+Each sub-issue must contain its own acceptance criteria, scope, non-goals, risks, validation, and
+labels. The repository owner reviews and approves each sub-issue separately. Every approved
+sub-issue then gets one Codex task, one linked numbered branch, and normally one PR that closes only
+that sub-issue.
+
+Dependency-ready sub-issues may run as parallel Codex tasks only when their owned paths and
+behavioral responsibilities do not overlap. Record dependencies on the parent and sub-issues;
+serialize work that shares files, schema decisions, public contracts, or other integration
+boundaries. Close the parent only after every required sub-issue is complete and the combined
+acceptance criteria are satisfied.
 
 ## Create the linked branch
 
