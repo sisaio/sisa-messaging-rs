@@ -1,6 +1,6 @@
 name: Implementation task
 description: Track one bounded implementation outcome
-title: ""
+title: "task: "
 labels:
   - type:task
 body:
