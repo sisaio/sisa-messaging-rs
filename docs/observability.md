@@ -86,17 +86,22 @@ Each instrumented crate owns one private `OnceLock<Instruments>`. Handles are cr
 reused for the process lifetime. Enum attributes map to static strings; emission does not allocate
 labels dynamically.
 
-The application must call `opentelemetry::global::set_meter_provider` before starting messaging
-components. Instruments obtained from the no-op provider before that call remain attached to that
-provider when cached. Required startup order:
+The application must retain its `SdkMeterProvider` handle and pass a clone to
+`opentelemetry::global::set_meter_provider` before starting messaging components. Instruments
+obtained from the no-op provider before that call remain attached to that provider when cached.
+Required startup order:
 
 ```text
 load application settings
   → construct OTel providers/exporters/resources
-  → set global meter provider
+  → retain SdkMeterProvider and set its clone as the global meter provider
   → install tracing subscriber/layers
   → construct and start messaging tasks
 ```
+
+During shutdown, the application first stops and awaits all messaging tasks, then calls
+`SdkMeterProvider::shutdown()` on the retained handle. This flushes pending metrics and releases
+provider resources; messaging tasks must not emit measurements after that call.
 
 When no provider is installed, calls use the OTel no-op provider. No custom no-op type is needed.
 
@@ -197,9 +202,10 @@ the schema URL/version it emits and changes it deliberately; it does not read
 Per-message publish and claim spans default to `debug`, not `info`.
 
 The consumer creates one `process {destination template}` span with consumer span kind. For the
-single-message typed path it makes extracted remote context its parent; this permitted choice is
-documented by the instrumentation. Database processing and handler execution are children, while
-broker settlement uses its own client-kind settle span.
+single-message typed path, it captures any valid ambient HTTP or scheduler context and adds it as a
+link before making the extracted remote context the span parent. This permitted remote-parent
+choice is documented by the instrumentation. Database processing and handler execution are
+children, while broker settlement uses its own client-kind settle span.
 
 Safe structured fields include:
 
@@ -238,9 +244,9 @@ is known safe; otherwise record a stable category/type and retain the original a
 ## 8. Context propagation
 
 The NATS mapper forwards W3C `traceparent` and `tracestate` in framework-owned headers. Consumer
-integration extracts the remote context and makes it the parent of the single-message `process`
-span; `inbox.claim`, handler work, and commit are children, while settlement is a related client
-operation.
+integration links any valid ambient HTTP or scheduler context, then makes the extracted remote
+context the parent of the single-message `process` span; `inbox.claim`, handler work, and commit
+are children, while settlement is a related client operation.
 
 The transport does not install a global propagator. Provider/exporter setup and sampling remain
 application responsibilities.
