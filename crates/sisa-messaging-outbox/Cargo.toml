@@ -9,7 +9,34 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# Portable runtime coordination and cancellation.
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# Direct diagnostics APIs; applications retain provider and subscriber ownership.
+opentelemetry = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Transport-independent envelope contracts and persisted identities.
 sisa-messaging = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+# Deterministic asynchronous protocol tests.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+# Hot-path microbenchmarks.
+criterion = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[bench]]
+name = "retry"
+harness = false
+
+[[bench]]
+name = "dispatcher_core"
+harness = false
 
 [lints]
 workspace = true
