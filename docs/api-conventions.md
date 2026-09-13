@@ -43,12 +43,12 @@ Settings are separated by responsibility:
 - `InboxSettings`: recorded-failure limit.
 - `InboxRetention`: completed/dead retention and pass size.
 - `ConsumerSettings`: receive concurrency, source/database/settlement bounds, negative-ack delay,
-  progress interval, and drain behavior.
+  heartbeat interval, and drain behavior.
 - `NatsPublisherSettings`: publish timeout and behavior not owned by the resolver/context.
 
 There is no NATS consumer settings duplicate. `NatsDeliverySource` reads the durable consumer's
 already configured acknowledgement wait and delivery bound; generic concurrency, database,
-settlement, negative-ack delay, progress, and drain policy belong to `ConsumerSettings`.
+settlement, negative-ack delay, heartbeat, and drain policy belong to `ConsumerSettings`.
 
 PostgreSQL connection policy belongs to the application-owned pool, so there is no provider
 settings type used only for statement timeout. `max_attempts` belongs to portable
@@ -62,7 +62,7 @@ Validate settings once in the runtime object's constructor. Real cross-field che
 - non-zero capacity;
 - `store_timeout < lease / 2`;
 - retry base delay not greater than maximum delay;
-- consumer progress interval, when enabled, shorter than half the configured broker ack wait;
+- consumer heartbeat interval, when enabled, shorter than half the configured broker ack wait;
 - inbox `max_attempts` not greater than a finite broker `max_deliver`.
 
 Use types for local invariants: `NonZeroU32` for limits and attempts, `NonZeroUsize` for
@@ -74,7 +74,8 @@ Validate strings according to their boundary:
 - Header/wire identifiers reject empty strings, excessive byte length, ASCII control bytes, CR,
   LF, and DEL.
 - Header names use transport-neutral name grammar and reject the framework-reserved namespace.
-- Header values reject CR/LF and excess size; they need not be ASCII.
+- Header values reject ASCII control bytes (including CR and LF), plus excess size; they need not be
+  limited to visible ASCII.
 - NATS subject rules live in `sisa-messaging-nats`.
 
 Do not apply `char::is_control()` indiscriminately to all application strings. The purpose is to

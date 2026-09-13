@@ -104,7 +104,9 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Keep wire-independent values free of SQLx, async-nats, Tokio runtime, and telemetry SDK types.
 - Freeze metadata JSON and framework-header mappings with contract fixtures and round-trip
   tests.
-- Benchmark construction, validation, serialization, mapping, and safe error rendering.
+- Benchmark construction, validation, serialization, and safe error rendering.
+- Defer concrete envelope-to-wire mapping benchmarks to the Phase 6 NATS provider, where the real
+  subject, header, and wire projection exists.
 
 ### Phase 3 — outbox contracts and dispatcher
 
@@ -142,7 +144,7 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 
 - Implement subject resolution, envelope/header mapping, current negotiated payload checking, and
   JetStream publication with awaited acknowledgement.
-- Implement delivery source, confirmed ack, delayed nak, term, and progress acknowledgement.
+- Implement delivery source, confirmed ack, delayed nak, terminate, and heartbeat acknowledgement.
 - Keep stream/consumer creation, credentials, TLS, connection, and reconnect supervision outside
   the crate.
 - Implement OTel messaging semantic conventions without payload, raw dynamic subject, credential,
@@ -153,7 +155,7 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Implement typed `ConsumerHandler` and the bounded `Consumer` receive/process/settle loop.
 - Open the source once under a timeout and require cancel-safe receive readiness afterward.
 - Centralize the full claim/handle/rollback/fail/complete/commit/settle decision table.
-- Coordinate progress acknowledgement without placing workflow I/O in cancellable `select!`
+- Coordinate heartbeat acknowledgement without placing workflow I/O in cancellable `select!`
   branch futures.
 - Implement stop-receiving, bounded-drain, abort, and unacknowledged-redelivery shutdown.
 - Test every settlement branch with deterministic protocol implementations, then prove the same
@@ -228,7 +230,7 @@ reason rather than an automatic rejection when ecosystems cannot yet converge.
 ### NATS integration tests
 
 - Awaited publish acknowledgement, broker deduplication, negotiated payload limit, mapping,
-  confirmed consumer ack, nak, term, progress, redelivery, cancellation, and safe errors.
+  confirmed consumer ack, nak, terminate, heartbeat, redelivery, cancellation, and safe errors.
 - Tests use a real JetStream server, with fault injection where an ambiguity window must be shown.
 
 ### System tests
@@ -264,7 +266,7 @@ not appear in test names.
 - Rollback precedes classified failure recording; permanent and exhausted failures become dead.
 - Commit ambiguity never records handler failure or acknowledges.
 - Permanent provider/settlement failures stop the runtime and leave the delivery unresolved.
-- Progress acknowledgement protects slow work without becoming a correctness mechanism.
+- Heartbeat acknowledgement protects slow work without becoming a correctness mechanism.
 - Cancellation bounds new work, drains completions, and leaves unresolved deliveries for
   redelivery.
 - Retention deletes only completed/dead receipts; dead retry clears death fields and attempts.
@@ -286,7 +288,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo test --workspace --no-default-features
 cargo doc --workspace --all-features --no-deps
-cargo bench --workspace --no-run
+cargo bench --workspace --all-features --no-run
 cargo deny check
 cargo semver-checks for every previously published crate
 Atlas migration checksum is unchanged after regeneration

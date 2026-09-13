@@ -297,7 +297,7 @@ sequenceDiagram
         Consumer->>Broker: Delayed NAK
     else Permanent or attempts exhausted
         Inbox-->>Consumer: Dead outcome
-        Consumer->>Broker: TERM
+        Consumer->>Broker: TERMINATE
     else Another transaction completed first
         Inbox-->>Consumer: Already completed
         Consumer->>Broker: ACK
@@ -326,12 +326,12 @@ flowchart LR
     Handle --> Complete[Complete inbox receipt]
     Complete --> Commit[Commit transaction]
     Commit --> Plan[Create settlement plan]
-    Plan --> Settle[Ack, delayed NAK, TERM,<br/>or leave unresolved]
+    Plan --> Settle[Ack, delayed NAK, TERMINATE,<br/>or leave unresolved]
 ```
 
 The source stops polling at `max_in_flight`. Each received delivery retains its broker settlement
 handle while an owned workflow task performs the database and handler work. A coordinator can send
-progress acknowledgements while waiting without cancelling or repolling the workflow future.
+heartbeat acknowledgements while waiting without cancelling or repolling the workflow future.
 
 The workflow returns a private settlement plan:
 
@@ -351,7 +351,7 @@ flowchart TD
     Result[Private workflow result] --> Kind{Result kind}
     Kind -- Commit confirmed<br/>or already completed --> Ack[ACK]
     Kind -- In progress<br/>or transient failure --> Nak[Delayed NAK]
-    Kind -- Permanent, exhausted,<br/>or decode poison --> Term[TERM]
+    Kind -- Permanent, exhausted,<br/>or decode poison --> Terminate[TERMINATE]
     Kind -- Commit ambiguous --> Ambiguous[Delayed NAK;<br/>do not record handler failure]
     Kind -- Permanent provider<br/>or settlement failure --> Fatal[Leave unresolved;<br/>stop receiving and return fatal]
 ```

@@ -150,7 +150,7 @@ Where practical, the NATS provider uses OTel messaging instruments:
 - `messaging.client.operation.duration`.
 
 Use `messaging.system = "nats"`, a bounded `messaging.operation.name` such as `publish`, `receive`,
-`ack`, `nack`, or `term`, and `error.type` only on failure. Do not add raw subjects when they may
+`ack`, `nack`, `terminate`, and `error.type` only on failure. Do not add raw subjects when they may
 contain dynamic or sensitive tokens; use a stable destination template when available.
 
 Outbox lifecycle and transport metrics answer different questions and must not be summed together.
