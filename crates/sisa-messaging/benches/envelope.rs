@@ -63,7 +63,6 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
         ("large", 32, false),
     ] {
         let metadata = metadata(header_count);
-
         let order_id = ordered.then(|| OrderingKey::new("order-42").unwrap());
 
         group.bench_with_input(BenchmarkId::new("profile", name), &name, |bencher, _| {
@@ -83,6 +82,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
             );
         });
     }
+
     group.finish();
 
     criterion.bench_function("validate_header_name", |bencher| {

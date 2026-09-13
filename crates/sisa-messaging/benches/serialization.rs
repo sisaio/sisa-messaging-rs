@@ -11,6 +11,7 @@ use sisa_messaging::{
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct BenchMessage {
     order_id: Option<String>,
+
     payload: Vec<u8>,
 }
 
@@ -94,6 +95,7 @@ fn serialization_benchmarks(criterion: &mut Criterion) {
             |bencher, _| bencher.iter(|| serde_json::from_slice::<Metadata>(black_box(&metadata))),
         );
     }
+
     group.finish();
 }
 
