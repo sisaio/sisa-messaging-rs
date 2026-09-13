@@ -130,11 +130,13 @@ concurrency/cancellation, compatibility, or cross-crate behavior. A scoped imple
 specified by existing docs goes directly to the developer. The architect's normal design packet is
 limited to 800 words and does not repeat source documents.
 
-Independent review is required after every material Rust, runtime SQL, versioned migration, test,
-manifest or dependency, CI or release, and normative-document change. Only generated output with a
-separately reviewed source, or a change explicitly classified as low-risk and non-behavioral by the
-primary agent, may skip review. Release preparation never occurs after the final review: changes
-from a review finding receive another focused reviewer pass.
+Independent review is required after every material Rust, runtime SQL,
+versioned migration, test, manifest or dependency, CI or release,
+normative-document, `.codex/config.toml`, and `.codex/agents/*.toml` change.
+Only generated output with a separately reviewed source, or a change explicitly
+classified as low-risk and non-behavioral by the primary agent, may skip review.
+Release preparation never occurs after the final review: changes from a review
+finding receive another focused reviewer pass.
 
 Final review always uses a fresh read-only reviewer with only the approved issue packet, relevant
 normative sections, and repository evidence. It resolves the exact base SHA with `merge-base`,
@@ -149,11 +151,12 @@ redaction review and a secret scan over the reviewed range; test-oracle changes 
 and isolation review. Its handoff separates unique, duplicate, invalid, tooling, and unresolved
 production findings.
 
-The review gate passes only when reviewed HEAD equals current `HEAD`, no blocker/high finding
-remains, every accepted medium finding is fixed or explicitly dispositioned, required checks and CI
-have evidence, the range-aligned secret scan passed, docs and behavior agree, and there is no
-unresolved schema/public compatibility decision. The reviewer advises; the primary owns finding
-disposition and final acceptance.
+The review gate passes only when the reviewed merge base and reviewed HEAD
+equal the current values, no blocker/high finding remains, every accepted
+medium finding is fixed or explicitly dispositioned, required checks and CI
+have evidence, the range-aligned secret scan passed, docs and behavior agree,
+and there is no unresolved schema/public compatibility decision. The reviewer
+advises; the primary owns finding disposition and final acceptance.
 
 ## 6. Database and release escalation
 
@@ -164,8 +167,10 @@ versioned migration SQL, checksum, replay, and packaging from that approved desi
 then inspects the complete database diff as one behavioral change. Any later fix by either writer
 receives a focused re-review.
 
-The release engineer may prepare crates, release assets, CI, or tags, but may not publish, push,
-create a GitHub release, or run production migrations without explicit user authorization.
+The release engineer may prepare crates, release assets, CI, or tags, but
+assigned delivery work never authorizes irreversible production changes. Any
+production command, including a production migration, and any publish, push,
+or GitHub release action requires explicit user authorization.
 
 ## 7. Git and review-size policy
 
@@ -306,11 +311,12 @@ across `AGENTS.md`, this document, `.codex/config.toml`, and the four role files
 not expose per-agent input, cached-input, output, or reasoning-token counters. The representative
 before state used three possible concurrent agent threads, high default effort for architecture,
 implementation, and review, reusable reviewer context, and no explicit once-per-head validation or
-stopping rule. After the change, the same set is 5,249 words and 37,292 bytes: words rise 0.1% and
-bytes fall 0.3%. The four role files fall from 1,573 to 866 words (44.9%); possible concurrency
-falls from three to two; and high effort is concentrated
-in the gated architect and final reviewer rather than the routine implementation path. Acceptance
-still requires no unresolved valid high or medium finding and no skipped validation.
+stopping rule. After the change, the same set is 5,321 words and 37,856 bytes: words rise 1.5% and
+bytes rise 1.2%. The four role files fall from 1,573 to 899 words (42.8%); possible concurrency
+falls from three to two; and high effort is concentrated in the gated architect
+and final reviewer rather than the routine implementation path. Acceptance
+still requires no unresolved valid high or medium finding and no skipped
+validation.
 
 This repository does not maintain Markdown task cards, separate story files, another backlog, or a
 routine ADR stream. The issue records intent and acceptance, the PR records review and validation,

@@ -11,9 +11,10 @@ evidence; do not request transcripts or raw logs. Inspect the changed files and 
 manifests, migrations, or tests needed to trace a concrete risk.
 
 For final review, report the exact merge base, current HEAD, and changed-path count, then inspect the
-committed `merge-base...HEAD` diff. Refuse final approval for uncommitted changes, a reviewed head
-different from checked-out HEAD, or missing secret-scan evidence for that range. Any material head
-change invalidates approval. A focused fix review never replaces a fresh final complete-diff review.
+committed `merge-base...HEAD` diff. Refuse final approval for uncommitted changes, a recorded merge
+base or reviewed head that differs from the current values, or missing secret-scan evidence for that
+range. A change to either recorded value invalidates approval. A focused fix review never replaces
+a fresh final complete-diff review.
 
 Apply the normative correctness, security, performance, dependency, Git-scope, and test lenses only
 as relevant. Concurrency/cancellation/fencing risk requires state-transition and adversarial-

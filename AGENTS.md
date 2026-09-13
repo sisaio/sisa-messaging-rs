@@ -16,10 +16,13 @@
 - Use `backend_developer` as the only Rust, runtime-SQL, and test writer for an implementation task.
   `release_engineer` exclusively owns versioned migration SQL and delivery files when assigned.
   Do not run parallel writers over overlapping files.
-- Ask `reviewer` for an independent review after every material Rust, SQL, migration, test,
-  manifest/dependency, CI/release, or normative-document change. A fresh read-only final reviewer
-  checks the committed `merge-base...HEAD` diff and records base/head SHAs, path count, checks, and
-  range secret scan. A head change invalidates approval; focused review cannot replace final review.
+- Ask `reviewer` for an independent review after every material Rust, SQL,
+  migration, test, manifest/dependency, CI/release, normative-document,
+  `.codex/config.toml`, or `.codex/agents/*.toml` change. A fresh read-only
+  final reviewer checks the committed `merge-base...HEAD` diff and records
+  base/head SHAs, path count, checks, and range secret scan. Both the reviewed
+  merge base and reviewed HEAD must equal the current values; a change to
+  either invalidates approval. Focused review cannot replace final review.
 - Use `release_engineer` only for GitHub CI/CD, Atlas migration mechanics, release artifacts, and
   crates.io publication preparation.
 - Do not create standing BA, PO, DBA, frontend, designer, or QA agents. Follow the escalation and
@@ -100,5 +103,6 @@
   or multi-PR sequence before continuing.
 - At every handoff report the issue, current/proposed branch, commit round and exact message,
   changed-file count, PR total file count, checks run, and the next safe slice.
-- Report a PR ready only when reviewed HEAD is current, required CI and range secret scan passed,
-  and no required finding remains unresolved.
+- Report a PR ready only when the reviewed merge base and HEAD are current,
+  required CI and range secret scan passed, and no required finding remains
+  unresolved.
