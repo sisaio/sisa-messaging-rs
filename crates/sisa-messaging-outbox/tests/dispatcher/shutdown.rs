@@ -106,7 +106,7 @@ async fn slow_started_renewal_cannot_bypass_the_drain_deadline() {
     assert_eq!(report.released, 1);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(start_paused = true)]
 async fn successful_publish_racing_deadline_is_completed_before_hanging_work_is_released() {
     let completed = record(0, 0);
     let hanging = record(2, 0);
@@ -125,8 +125,14 @@ async fn successful_publish_racing_deadline_is_completed_before_hanging_work_is_
 
     wait_for(|| publisher.active.load(Ordering::SeqCst) == 2).await;
     cancellation.cancel();
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_millis(1)).await;
     wait_for(|| store.renew_entered.load(Ordering::SeqCst)).await;
     publisher.release();
+    wait_for(|| publisher.active.load(Ordering::SeqCst) == 1).await;
+    assert!(store.lock().renewals.is_empty());
+    tokio::time::advance(Duration::from_millis(18)).await;
+    wait_for(|| store.lock().renewals.len() == 1).await;
     let report = task
         .await
         .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
@@ -138,6 +144,10 @@ async fn successful_publish_racing_deadline_is_completed_before_hanging_work_is_
     assert_eq!(store.lock().completes, vec![vec![completed.claim]]);
     assert_eq!(store.lock().releases, vec![vec![hanging.claim]]);
     let operations = &store.lock().operations;
+    let renewal = operations
+        .iter()
+        .position(|operation| *operation == "renew")
+        .unwrap_or_else(|| panic!("renew operation missing: {operations:?}"));
     let complete = operations
         .iter()
         .position(|operation| *operation == "complete")
@@ -147,7 +157,7 @@ async fn successful_publish_racing_deadline_is_completed_before_hanging_work_is_
         .position(|operation| *operation == "release")
         .unwrap_or_else(|| panic!("release operation missing: {operations:?}"));
     assert!(
-        complete < release,
+        renewal < complete && complete < release,
         "resolved outcomes must persist before releases: {operations:?}"
     );
 }
