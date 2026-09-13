@@ -24,7 +24,7 @@ mod serializer;
 pub use delivery::{Delivery, DeliverySource, Settlement};
 pub use envelope::{Envelope, EnvelopeError, SerializedEnvelope};
 pub use error::{ErrorSummary, MAX_ERROR_SUMMARY_BYTES};
-pub use failure::{Classify, FailureKind};
+pub use failure::{ErrorClassifier, FailureKind};
 pub use headers::{
     FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers,
 };

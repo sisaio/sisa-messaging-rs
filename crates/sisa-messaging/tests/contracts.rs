@@ -5,10 +5,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use sisa_messaging::{
-    Classify, ContentType, ConversationId, Delivery, DeliverySource, Envelope, EnvelopeMapper,
-    ErrorSummary, FailureKind, FrameworkHeader, HeaderName, HeaderNameError, HeaderValue,
-    HeaderValueError, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata,
-    MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
+    ContentType, ConversationId, Delivery, DeliverySource, Envelope, EnvelopeMapper,
+    ErrorClassifier, ErrorSummary, FailureKind, FrameworkHeader, HeaderName, HeaderNameError,
+    HeaderValue, HeaderValueError, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType,
+    Metadata, MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
     ValidationError,
 };
 
@@ -258,7 +258,7 @@ impl std::fmt::Display for ContractError {
 
 impl Error for ContractError {}
 
-impl Classify for ContractError {
+impl ErrorClassifier for ContractError {
     fn classify(&self) -> FailureKind {
         FailureKind::Transient
     }

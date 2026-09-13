@@ -3,8 +3,8 @@ use std::path::Path;
 
 #[allow(unused_imports)]
 use sisa_messaging::{
-    Classify, ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata,
-    DeliverySource, Envelope, EnvelopeError, EnvelopeMapper, ErrorSummary, FailureKind,
+    ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata, DeliverySource,
+    Envelope, EnvelopeError, EnvelopeMapper, ErrorClassifier, ErrorSummary, FailureKind,
     FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers,
     MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata, MetadataValue, OrderingKey,
     Publisher, RequestId, RoutingMetadata, SerializedEnvelope, Serializer, Settlement,
