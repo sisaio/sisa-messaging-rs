@@ -8,6 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Keep provider identity serialization opt-in.
+default = []
+serde = ["dep:serde", "uuid/serde"]
+
 [dependencies]
 # Portable runtime coordination and cancellation.
 tokio = { workspace = true }
@@ -22,12 +27,18 @@ tracing = { workspace = true }
 sisa-messaging = { workspace = true }
 uuid = { workspace = true }
 
+# Optional serialization for provider-minted identity carriers.
+serde = { workspace = true, optional = true }
+
 [dev-dependencies]
 # Deterministic asynchronous protocol tests.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
 # Hot-path microbenchmarks.
 criterion = { workspace = true }
+
+# Feature-gated identity round-trip and observability assertions.
+serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [[bench]]

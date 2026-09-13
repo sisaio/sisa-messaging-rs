@@ -458,6 +458,8 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "opentelemetry",
+ "serde",
+ "serde_json",
  "sisa-messaging",
  "thiserror",
  "tokio",

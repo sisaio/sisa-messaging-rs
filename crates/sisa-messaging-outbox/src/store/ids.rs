@@ -9,6 +9,8 @@ macro_rules! provider_id {
     ($name:ident, $description:literal) => {
         #[doc = $description]
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+        #[cfg_attr(feature = "serde", serde(transparent))]
         pub struct $name(Uuid);
 
         impl $name {

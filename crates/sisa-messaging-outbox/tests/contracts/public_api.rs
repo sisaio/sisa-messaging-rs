@@ -23,6 +23,34 @@ fn provider_owned_id_types_only_reconstruct_existing_values() {
     assert_eq!(claim.token.into_uuid(), token);
 }
 
+#[cfg(feature = "serde")]
+#[test]
+fn provider_owned_ids_round_trip_with_the_core_uuid_json_representation() {
+    let row = Uuid::from_u128(1);
+    let token = Uuid::from_u128(2);
+    let outbox_id = OutboxId::from_uuid(row);
+    let claim_token = ClaimToken::from_uuid(token);
+
+    let encoded_outbox = serde_json::to_string(&outbox_id)
+        .unwrap_or_else(|error| panic!("outbox id serialization failed: {error}"));
+    let encoded_uuid = serde_json::to_string(&row)
+        .unwrap_or_else(|error| panic!("UUID serialization failed: {error}"));
+    assert_eq!(encoded_outbox, encoded_uuid);
+    assert_eq!(
+        serde_json::from_str::<OutboxId>(&encoded_outbox)
+            .unwrap_or_else(|error| panic!("outbox id deserialization failed: {error}")),
+        outbox_id
+    );
+
+    let encoded_token = serde_json::to_string(&claim_token)
+        .unwrap_or_else(|error| panic!("claim token serialization failed: {error}"));
+    assert_eq!(
+        serde_json::from_str::<ClaimToken>(&encoded_token)
+            .unwrap_or_else(|error| panic!("claim token deserialization failed: {error}")),
+        claim_token
+    );
+}
+
 #[test]
 fn crate_root_reexports_match_the_public_api_inventory() {
     let lib_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
