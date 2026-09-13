@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, UpDownCounter};
 
 use sisa_messaging::FailureKind;
 
@@ -22,6 +22,10 @@ struct Instruments {
     publish_duration: Histogram<f64>,
 
     in_flight: UpDownCounter<i64>,
+
+    message_count: Gauge<u64>,
+
+    pending_oldest_age: Gauge<f64>,
 }
 
 static INSTRUMENTS: OnceLock<Instruments> = OnceLock::new();
@@ -54,6 +58,14 @@ fn instruments() -> &'static Instruments {
             in_flight: meter
                 .i64_up_down_counter("outbox.in.flight")
                 .with_unit("{message}")
+                .build(),
+            message_count: meter
+                .u64_gauge("outbox.message.count")
+                .with_unit("{message}")
+                .build(),
+            pending_oldest_age: meter
+                .f64_gauge("outbox.pending.oldest_age")
+                .with_unit("s")
                 .build(),
         }
     })
@@ -93,6 +105,21 @@ pub(crate) fn dead(count: usize, reason: DeadReason) {
         count as u64,
         &[KeyValue::new("dead.reason", reason.as_str())],
     );
+}
+
+pub(crate) fn record_stats(
+    message_counts: [(&'static str, u64); 3],
+    oldest_pending_age_seconds: f64,
+) {
+    let instruments = instruments();
+    for (state, count) in message_counts {
+        instruments
+            .message_count
+            .record(count, &[KeyValue::new("state", state)]);
+    }
+    instruments
+        .pending_oldest_age
+        .record(oldest_pending_age_seconds, &[]);
 }
 
 fn failure_attribute(kind: FailureKind) -> KeyValue {

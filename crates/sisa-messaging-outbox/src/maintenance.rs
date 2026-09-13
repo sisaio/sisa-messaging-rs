@@ -59,6 +59,44 @@ pub struct OutboxStats {
     pub oldest_pending_age: Duration,
 }
 
+impl OutboxStats {
+    /// Records this database-authoritative snapshot through the configured global meter provider.
+    ///
+    /// Applications should designate one observer per database/schema to fetch [`Self`] through
+    /// [`OutboxMaintenance::stats`] and invoke this method. This library never polls, schedules a
+    /// background task, or installs a provider, preventing duplicate application-owned observers.
+    pub fn record_metrics(&self) {
+        let snapshot = metric_snapshot(self);
+        crate::telemetry::record_stats(
+            snapshot.message_counts,
+            snapshot.oldest_pending_age_seconds,
+        );
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct MetricSnapshot {
+    message_counts: [(&'static str, u64); 3],
+    oldest_pending_age_seconds: f64,
+}
+
+fn metric_snapshot(stats: &OutboxStats) -> MetricSnapshot {
+    let oldest_pending_age_seconds = if stats.pending == 0 {
+        0.0
+    } else {
+        stats.oldest_pending_age.as_secs_f64()
+    };
+
+    MetricSnapshot {
+        message_counts: [
+            ("pending", stats.pending),
+            ("expired", stats.expired),
+            ("dead", stats.dead),
+        ],
+        oldest_pending_age_seconds,
+    }
+}
+
 /// Explicit bounded maintenance operations, separate from dispatcher storage.
 pub trait OutboxMaintenance: Send + Sync {
     /// Maintenance error with structured retry classification and safe rendering.
@@ -72,4 +110,42 @@ pub trait OutboxMaintenance: Send + Sync {
 
     /// Reads authoritative queue levels without scheduling background polling.
     fn stats(&self) -> impl Future<Output = Result<OutboxStats, Self::Error>> + Send;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metric_snapshot_maps_every_state_and_resets_empty_pending_age() {
+        let populated = OutboxStats {
+            pending: 3,
+            expired: 5,
+            dead: 7,
+            oldest_pending_age: Duration::from_millis(1_250),
+        };
+        assert_eq!(
+            metric_snapshot(&populated),
+            MetricSnapshot {
+                message_counts: [("pending", 3), ("expired", 5), ("dead", 7)],
+                oldest_pending_age_seconds: 1.25,
+            }
+        );
+
+        let inconsistent_empty = OutboxStats {
+            pending: 0,
+            oldest_pending_age: Duration::from_secs(99),
+            ..populated
+        };
+        assert_eq!(
+            metric_snapshot(&inconsistent_empty),
+            MetricSnapshot {
+                message_counts: [("pending", 0), ("expired", 5), ("dead", 7)],
+                oldest_pending_age_seconds: 0.0,
+            }
+        );
+
+        populated.record_metrics();
+        inconsistent_empty.record_metrics();
+    }
 }
