@@ -1,6 +1,7 @@
 //! Safe construction and terminal dispatcher errors.
 
 use std::error::Error;
+use std::fmt;
 
 use crate::RetryPolicyError;
 
@@ -37,7 +38,12 @@ pub enum SettingsError {
 }
 
 /// Terminal dispatcher failure returned to its supervisor.
-#[derive(Debug, thiserror::Error)]
+///
+/// Its outer [`Display`](fmt::Display) and [`Debug`](fmt::Debug) representations are bounded,
+/// stable categories that never format provider or task errors. The original error remains
+/// available through [`Error::source`] for typed inspection and downcasting. Callers that
+/// recursively render foreign source chains are responsible for applying their own redaction.
+#[derive(thiserror::Error)]
 #[non_exhaustive]
 pub enum DispatcherError<E>
 where
@@ -50,4 +56,18 @@ where
     /// A publisher task panicked or was cancelled unexpectedly.
     #[error("outbox publisher task failed")]
     PublisherTask(#[source] tokio::task::JoinError),
+}
+
+impl<E> fmt::Debug for DispatcherError<E>
+where
+    E: Error + Send + Sync + 'static,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(_) => formatter.write_str("DispatcherError::Store(permanent)"),
+            Self::PublisherTask(_) => {
+                formatter.write_str("DispatcherError::PublisherTask(unexpected)")
+            }
+        }
+    }
 }

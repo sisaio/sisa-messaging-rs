@@ -8,6 +8,19 @@ use sisa_messaging_outbox::{
 
 use super::support::{CompileCapabilities, CompilePublisher};
 
+#[derive(Clone, Copy, Debug)]
+struct RejectingPolicy;
+
+impl RetryPolicy for RejectingPolicy {
+    fn retry_delay(&self, _attempt: NonZeroU32) -> Option<Duration> {
+        None
+    }
+
+    fn validate(&self) -> Result<(), RetryPolicyError> {
+        Err(RetryPolicyError::ZeroBaseDelay)
+    }
+}
+
 #[test]
 fn exponential_retry_is_capped_exhaustible_and_overflow_safe() {
     let policy = ExponentialBackoff::new(
@@ -61,5 +74,22 @@ fn retry_and_dispatcher_settings_validate_once_at_construction() {
     assert!(matches!(
         OutboxDispatcher::new(CompileCapabilities, CompilePublisher, settings),
         Err(SettingsError::InvalidWorkerId)
+    ));
+
+    let defaults = DispatcherSettings::default();
+    let settings = DispatcherSettings {
+        worker_id: defaults.worker_id,
+        max_in_flight: defaults.max_in_flight,
+        lease: defaults.lease,
+        poll_interval: defaults.poll_interval,
+        idle_poll_interval: defaults.idle_poll_interval,
+        publish_timeout: defaults.publish_timeout,
+        store_timeout: defaults.store_timeout,
+        drain_timeout: defaults.drain_timeout,
+        retry_policy: RejectingPolicy,
+    };
+    assert!(matches!(
+        OutboxDispatcher::new(CompileCapabilities, CompilePublisher, settings),
+        Err(SettingsError::RetryPolicy(RetryPolicyError::ZeroBaseDelay))
     ));
 }

@@ -4,14 +4,18 @@ use std::num::NonZeroU32;
 use std::time::Duration;
 
 /// Validates and calculates retry delays without performing I/O.
+///
+/// Implementations must deterministically return non-zero, representable delays and eventually
+/// return `None` so retry is finitely exhausted. [`validate`](Self::validate) must check those
+/// invariants without I/O; dispatcher construction calls it once before any runtime work begins.
+/// Custom policy constructors remain responsible for establishing the same invariants when they
+/// expose validated policy values independently of a dispatcher.
 pub trait RetryPolicy: Send + Sync + 'static {
     /// Returns the delay after a recorded attempt, or `None` when retry is exhausted.
     fn retry_delay(&self, attempt: NonZeroU32) -> Option<Duration>;
 
-    /// Validates policy invariants once during dispatcher construction.
-    fn validate(&self) -> Result<(), RetryPolicyError> {
-        Ok(())
-    }
+    /// Validates finite exhaustion and every delay invariant during dispatcher construction.
+    fn validate(&self) -> Result<(), RetryPolicyError>;
 }
 
 /// Exponential retry with a finite attempt budget and maximum delay.
