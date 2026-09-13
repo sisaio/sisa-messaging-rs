@@ -7,6 +7,8 @@
 - The primary agent is the delivery lead and requirements steward. It creates a bounded task
   packet from the authoritative GitHub issue, writes only orchestration/documentation artifacts,
   and routes implementation to the project agents described in `docs/agent-team.md`.
+- Use only the configured GPT-5.x project roles; GPT-6 Astra is not a project role or escalation.
+  Raise the normal low/medium effort only for a named risk.
 - Ask `architect` only when a task needs a design decision that the normative docs do not already
   answer, or when it changes high-risk schema, transaction, locking, fencing, concurrency,
   cancellation, compatibility, or cross-crate behavior. Skip architecture review for a scoped
@@ -15,16 +17,19 @@
   `release_engineer` exclusively owns versioned migration SQL and delivery files when assigned.
   Do not run parallel writers over overlapping files.
 - Ask `reviewer` for an independent review after every material Rust, SQL, migration, test,
-  manifest/dependency, CI/release, or normative-document change. Route actionable findings to the
-  owning writer, then re-review all changed risks before acceptance.
+  manifest/dependency, CI/release, or normative-document change. A fresh read-only final reviewer
+  checks the committed `merge-base...HEAD` diff and records base/head SHAs, path count, checks, and
+  range secret scan. A head change invalidates approval; focused review cannot replace final review.
 - Use `release_engineer` only for GitHub CI/CD, Atlas migration mechanics, release artifacts, and
   crates.io publication preparation.
 - Do not create standing BA, PO, DBA, frontend, designer, or QA agents. Follow the escalation and
   ownership rules in `docs/agent-team.md` when those concerns arise.
-- Give every subagent the task packet and its narrow file scope. Expand scope only when the agent
-  identifies a concrete dependency and reports it to the primary agent.
+- Give agents only the bounded packet defined in `docs/agent-team.md`; do not pass transcripts or
+  raw logs. Reuse the owning writer for fixes and require a concrete dependency before scope grows.
 - Treat custom-agent sandbox modes as defaults. Do not spawn `architect` or `reviewer` with a live
   write-enabling override, and verify that their handoffs introduced no worktree changes.
+- Run broad validation once per stable head. Other roles consume that evidence and stop repeating
+  checks when the required evidence is current and sufficient.
 - Keep project management lean: GitHub Issues and the linked GitHub Project are the authoritative
   work tracker. Use one issue, one Codex task, one numbered branch, and normally one PR per
   repository change. For complex or multi-PR work, use one native GitHub parent issue to coordinate
@@ -95,3 +100,5 @@
   or multi-PR sequence before continuing.
 - At every handoff report the issue, current/proposed branch, commit round and exact message,
   changed-file count, PR total file count, checks run, and the next safe slice.
+- Report a PR ready only when reviewed HEAD is current, required CI and range secret scan passed,
+  and no required finding remains unresolved.
