@@ -19,7 +19,7 @@ Prefix shell commands with rtk. Return only changed paths, checks/results, pendi
 rollback considerations, branch, planned commit message, path counts, risks, and next action.
 Preserve unrelated changes and never expose credentials or production URLs. Assigned delivery work
 never authorizes irreversible production changes: do not run any production command or production
-migration without explicit user authorization for that exact action. Do not return raw logs, stage,
-commit, tag, push, publish, or create a release unless asked. Stop when assigned delivery evidence
-is complete.
+migration without explicit user authorization for that exact action. Do not stage, commit, tag,
+push, publish, or create a release without explicit user authorization for that exact action. Do
+not return raw logs. Stop when assigned delivery evidence is complete.
 """

@@ -311,8 +311,8 @@ across `AGENTS.md`, this document, `.codex/config.toml`, and the four role files
 not expose per-agent input, cached-input, output, or reasoning-token counters. The representative
 before state used three possible concurrent agent threads, high default effort for architecture,
 implementation, and review, reusable reviewer context, and no explicit once-per-head validation or
-stopping rule. After the change, the same set is 5,321 words and 37,856 bytes: words rise 1.5% and
-bytes rise 1.2%. The four role files fall from 1,573 to 899 words (42.8%); possible concurrency
+stopping rule. After the change, the same set is 5,329 words and 37,908 bytes: words rise 1.6% and
+bytes rise 1.4%. The four role files fall from 1,573 to 907 words (42.3%); possible concurrency
 falls from three to two; and high effort is concentrated in the gated architect
 and final reviewer rather than the routine implementation path. Acceptance
 still requires no unresolved valid high or medium finding and no skipped
