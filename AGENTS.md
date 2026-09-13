@@ -8,7 +8,7 @@
   packet from the authoritative GitHub issue, writes only orchestration/documentation artifacts,
   and routes implementation to the project agents described in `docs/agent-team.md`.
 - Use only the configured GPT-5.x project roles; GPT-6 Astra is not a project role or escalation.
-  Raise the normal low/medium effort only for a named risk.
+  High effort is reserved for the gated architect, final reviewer, or another named risk.
 - Ask `architect` only when a task needs a design decision that the normative docs do not already
   answer, or when it changes high-risk schema, transaction, locking, fencing, concurrency,
   cancellation, compatibility, or cross-crate behavior. Skip architecture review for a scoped

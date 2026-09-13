@@ -7,17 +7,17 @@ This repository uses one primary Codex agent and four project-scoped custom agen
 | Role | Model / normal effort | Writes files | Use and escalation trade-off |
 |---|---|---:|---|
 | Primary delivery lead | Cost-controlled GPT-5.x / low or medium | Docs only | Requirements, orchestration, and acceptance; raise effort only for a named unresolved risk |
-| `architect` | `gpt-5.5` / `medium` | No | Architecture and test design; high is reserved for an unresolved schema, concurrency, cancellation, fencing, compatibility, or cross-crate decision |
-| `backend_developer` | `gpt-5.6-sol` / `medium` | Yes | Sustained Rust/SQL work; high is reserved for a named correctness risk that targeted evidence cannot settle |
-| `reviewer` | `gpt-5.6-terra` / `medium` | No | Model-diverse independent review; high is reserved for a named high-risk invariant after targeted inspection |
+| `architect` | `gpt-5.6-sol` / `high` | No | Flagship reasoning for gated architecture and adversarial design analysis |
+| `backend_developer` | `gpt-5.6-terra` / `medium` | Yes | Cost-balanced sustained Rust/SQL implementation; high is a task-specific override for a named correctness risk |
+| `reviewer` | `gpt-5.6-sol` / `high` | No | Flagship independent integration and final-approval review |
 | `release_engineer` | `gpt-5.6-luna` / `medium` | Yes, narrowly | Faster delivery work; high is reserved for migration-integrity, publication, or CI-security risk |
 
 GPT-6 Astra is not a primary or project-agent model and is not an escalation path. The model split
-preserves diversity between the implementation writer and final reviewer while keeping routine
-work at medium or lower effort. Higher effort must purchase a named decision or risk analysis, not
-general confidence. The project config caps spawned agents at two concurrent threads; the normal
-workflow remains sequential because overlapping writers and implementation-aware final reviewers
-are prohibited.
+preserves diversity between the Terra implementation writer and Sol final reviewer. High effort is
+bounded to architecture, which is spawned only behind its design/risk gate, and independent review,
+which owns final approval; routine implementation and delivery remain medium. The project config
+caps spawned agents at two concurrent threads, and the normal workflow remains sequential because
+overlapping writers and implementation-aware final reviewers are prohibited.
 
 [Official OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model)
 recommends explicitly tuning delegation and calibrating verification to the task. This repository
@@ -306,11 +306,11 @@ across `AGENTS.md`, this document, `.codex/config.toml`, and the four role files
 not expose per-agent input, cached-input, output, or reasoning-token counters. The representative
 before state used three possible concurrent agent threads, high default effort for architecture,
 implementation, and review, reusable reviewer context, and no explicit once-per-head validation or
-stopping rule. After the change, the same set is 5,238 words and 37,232 bytes, reductions of 0.1%
-and 0.5%. The four role files, which form the repeated per-agent instruction cost, fall from 1,573
-to 853 words (45.8%); possible concurrency falls from three to two; and high-default roles fall from
-three to zero. Acceptance still requires no unresolved valid high or medium finding and no skipped
-validation.
+stopping rule. After the change, the same set is 5,249 words and 37,292 bytes: words rise 0.1% and
+bytes fall 0.3%. The four role files fall from 1,573 to 866 words (44.9%); possible concurrency
+falls from three to two; and high effort is concentrated
+in the gated architect and final reviewer rather than the routine implementation path. Acceptance
+still requires no unresolved valid high or medium finding and no skipped validation.
 
 This repository does not maintain Markdown task cards, separate story files, another backlog, or a
 routine ADR stream. The issue records intent and acceptance, the PR records review and validation,
