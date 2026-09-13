@@ -1,6 +1,23 @@
 use std::fs;
 use std::path::Path;
 
+#[allow(unused_imports)]
+use sisa_messaging::{
+    ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata, DeliverySource,
+    Envelope, EnvelopeError, EnvelopeMapper, ErrorClassifier, ErrorSummary, FailureKind,
+    FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers,
+    MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata, MetadataValue, OrderingKey,
+    Publisher, RequestId, RoutingMetadata, SerializedEnvelope, Serializer, Settlement,
+    TraceMetadata, ValidationError,
+};
+
+#[cfg(feature = "json")]
+#[allow(unused_imports)]
+use sisa_messaging::{JsonSerializer, JsonSerializerError};
+
+#[allow(dead_code)]
+const _: usize = MAX_ERROR_SUMMARY_BYTES;
+
 #[test]
 fn crate_root_reexports_match_the_public_api_inventory() {
     let lib_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");

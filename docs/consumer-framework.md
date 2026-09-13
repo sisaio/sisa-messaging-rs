@@ -300,7 +300,7 @@ a cancellable `select!` branch future.
 
 Heartbeat acknowledgement covers database work and handler work. It reduces needless redelivery
 of slow messages but does not promise exclusivity; the inbox remains the correctness mechanism.
-Progress failures are warnings and do not cancel a handler whose transaction is still healthy.
+Heartbeat failures are warnings and do not cancel a handler whose transaction is still healthy.
 
 The framework does not prefetch an unbounded batch. Provider buffering must also be bounded at or
 close to `max_in_flight`.

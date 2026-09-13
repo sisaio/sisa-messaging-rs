@@ -237,6 +237,9 @@ pub enum HeaderValueError {
     /// The value exceeded the byte bound.
     TooLong,
 
+    /// The value contained a non-newline control character.
+    InvalidCharacter,
+
     /// The value contained CR or LF.
     Newline,
 }
@@ -245,6 +248,9 @@ impl fmt::Display for HeaderValueError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TooLong => formatter.write_str("header value exceeds the 8192-byte limit"),
+            Self::InvalidCharacter => {
+                formatter.write_str("header value contains a forbidden control character")
+            }
             Self::Newline => formatter.write_str("header value contains a forbidden newline"),
         }
     }
@@ -267,6 +273,10 @@ impl HeaderValue {
 
         if value.contains(['\r', '\n']) {
             return Err(HeaderValueError::Newline);
+        }
+
+        if value.as_bytes().iter().any(|byte| byte.is_ascii_control()) {
+            return Err(HeaderValueError::InvalidCharacter);
         }
 
         Ok(Self(value))

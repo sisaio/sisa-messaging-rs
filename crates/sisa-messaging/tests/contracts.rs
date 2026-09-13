@@ -90,6 +90,10 @@ fn bounded_values_reject_empty_control_and_oversized_input_without_echoing_it() 
 #[test]
 fn custom_headers_reject_injection_and_framework_collisions() {
     assert_eq!(
+        HeaderValueError::InvalidCharacter.to_string(),
+        "header value contains a forbidden control character"
+    );
+    assert_eq!(
         HeaderName::new("message-id"),
         Err(HeaderNameError::Reserved)
     );
@@ -104,6 +108,10 @@ fn custom_headers_reject_injection_and_framework_collisions() {
     assert_eq!(
         HeaderValue::new("safe\r\nunsafe"),
         Err(HeaderValueError::Newline)
+    );
+    assert_eq!(
+        HeaderValue::new("safe\x01"),
+        Err(HeaderValueError::InvalidCharacter)
     );
     assert!(HeaderValue::new("Zażółć gęślą").is_ok());
     assert_eq!(
@@ -462,6 +470,42 @@ mod json_contract {
             Some("checkout-42")
         );
         assert!(decoded.headers.is_empty());
+    }
+
+    #[test]
+    fn metadata_json_rejects_reserved_header_names_and_control_characters() {
+        assert!(
+            serde_json::from_str::<Metadata>(
+                r#"{
+                    "headers": {
+                        "message-id": "forbidden"
+                    }
+                }"#
+            )
+            .is_err()
+        );
+
+        assert!(
+            serde_json::from_str::<Metadata>(
+                r#"{
+                    "headers": {
+                        "x-safe": "safe\r\nunsafe"
+                    }
+                }"#
+            )
+            .is_err()
+        );
+
+        assert!(
+            serde_json::from_str::<Metadata>(
+                r#"{
+                    "headers": {
+                        "x-safe": "safe\u0001value"
+                    }
+                }"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
