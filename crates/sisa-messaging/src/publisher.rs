@@ -3,12 +3,12 @@
 use std::error::Error;
 use std::future::Future;
 
-use crate::{ErrorClassifier, SerializedEnvelope};
+use crate::{Classify, SerializedEnvelope};
 
 /// Performs one acknowledged publish attempt for a serialized envelope.
 pub trait Publisher: Send + Sync {
     /// Transport error with an explicit retry decision.
-    type Error: Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: Error + Send + Sync + 'static + Classify;
 
     /// Publishes once and completes only after acknowledgement or failure.
     fn publish(

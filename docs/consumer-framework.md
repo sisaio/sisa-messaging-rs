@@ -50,7 +50,7 @@ Their semantic shape is:
 
 ```rust,ignore
 pub trait Settlement: Send + 'static {
-    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: std::error::Error + Send + Sync + 'static + Classify;
 
     fn heartbeat(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn ack(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -67,7 +67,7 @@ pub trait Delivery: Send + 'static {
 
 pub trait DeliverySource: Send {
     type Delivery: Delivery;
-    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: std::error::Error + Send + Sync + 'static + Classify;
 
     fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
@@ -97,7 +97,7 @@ recorded-failure bound so consumer construction can compare it with a finite bro
 ```rust,ignore
 pub trait InboxUnitOfWork: Send + Sync {
     type Transaction: Send + 'static;
-    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: std::error::Error + Send + Sync + 'static + Classify;
 
     fn begin(
         &self,
@@ -129,7 +129,7 @@ The public shape is intentionally small:
 
 ```rust,ignore
 pub trait ConsumerHandler<M, Tx>: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: std::error::Error + Send + Sync + 'static + Classify;
 
     fn handle(
         &self,

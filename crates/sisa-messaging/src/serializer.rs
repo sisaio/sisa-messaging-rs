@@ -2,7 +2,7 @@
 
 use std::error::Error;
 
-use crate::{Envelope, ErrorClassifier, Message, SerializedEnvelope};
+use crate::{Classify, Envelope, Message, SerializedEnvelope};
 
 #[cfg(feature = "json")]
 use crate::FailureKind;
@@ -13,7 +13,7 @@ const JSON_CONTENT_TYPE: &str = "application/json";
 /// Serializes and reconstructs typed envelopes without introducing transport types.
 pub trait Serializer<M: Message>: Send + Sync {
     /// Codec error type. Its display representation must not expose payload bytes.
-    type Error: Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: Error + Send + Sync + 'static + Classify;
 
     /// Serializes a typed envelope.
     fn serialize(&self, envelope: &Envelope<M>) -> Result<SerializedEnvelope, Self::Error>;
@@ -73,7 +73,7 @@ impl std::fmt::Display for JsonSerializerError {
 impl Error for JsonSerializerError {}
 
 #[cfg(feature = "json")]
-impl ErrorClassifier for JsonSerializerError {
+impl Classify for JsonSerializerError {
     fn classify(&self) -> FailureKind {
         FailureKind::Permanent
     }

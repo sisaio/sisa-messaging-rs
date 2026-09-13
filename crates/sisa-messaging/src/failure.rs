@@ -21,7 +21,7 @@ impl FailureKind {
 }
 
 /// Attaches an explicit retry decision to an error crossing a retry boundary.
-pub trait ErrorClassifier {
+pub trait Classify {
     /// Returns the structured retry classification.
     fn classify(&self) -> FailureKind;
 }

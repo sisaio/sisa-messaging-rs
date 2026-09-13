@@ -5,14 +5,14 @@ use std::future::Future;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use crate::ErrorClassifier;
+use crate::Classify;
 
 /// A broker settlement handle.
 ///
 /// Terminal actions consume the handle, preventing a second terminal settlement in safe Rust.
 pub trait Settlement: Send + 'static {
     /// Settlement error with an explicit retry decision.
-    type Error: Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: Error + Send + Sync + 'static + Classify;
 
     /// Sends an active heartbeat for work-in-progress work without terminaling.
     fn heartbeat(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -43,7 +43,7 @@ pub trait DeliverySource: Send {
     /// Delivery yielded by the source.
     type Delivery: Delivery;
     /// Fatal source error with an explicit retry decision.
-    type Error: Error + Send + Sync + 'static + ErrorClassifier;
+    type Error: Error + Send + Sync + 'static + Classify;
 
     /// Performs one-time source initialization.
     fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;

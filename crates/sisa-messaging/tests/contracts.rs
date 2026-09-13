@@ -5,10 +5,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use sisa_messaging::{
-    ContentType, ConversationId, Delivery, DeliverySource, Envelope, EnvelopeMapper,
-    ErrorClassifier, ErrorSummary, FailureKind, FrameworkHeader, HeaderName, HeaderNameError,
-    HeaderValue, HeaderValueError, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType,
-    Metadata, MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
+    Classify, ContentType, ConversationId, Delivery, DeliverySource, Envelope, EnvelopeMapper,
+    ErrorSummary, FailureKind, FrameworkHeader, HeaderName, HeaderNameError, HeaderValue,
+    HeaderValueError, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata,
+    MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
     ValidationError,
 };
 
@@ -90,7 +90,7 @@ fn bounded_values_reject_empty_control_and_oversized_input_without_echoing_it() 
 #[test]
 fn custom_headers_reject_injection_and_framework_collisions() {
     assert_eq!(
-        HeaderValueError::InvalidCharacter.to_string(),
+        HeaderValueError::ControlCharacter.to_string(),
         "header value contains a forbidden control character"
     );
     assert_eq!(
@@ -111,8 +111,24 @@ fn custom_headers_reject_injection_and_framework_collisions() {
     );
     assert_eq!(
         HeaderValue::new("safe\x01"),
-        Err(HeaderValueError::InvalidCharacter)
+        Err(HeaderValueError::ControlCharacter)
     );
+    for byte in (0_u8..=31).chain(std::iter::once(127)) {
+        let expected = if byte == b'\r' || byte == b'\n' {
+            HeaderValueError::Newline
+        } else {
+            HeaderValueError::ControlCharacter
+        };
+        assert_eq!(
+            HeaderValue::new(
+                String::from_utf8(vec![
+                    b's', b'a', b'f', b'e', byte, b'u', b'n', b's', b'a', b'f', b'e'
+                ])
+                .unwrap()
+            ),
+            Err(expected)
+        );
+    }
     assert!(HeaderValue::new("Zażółć gęślą").is_ok());
     assert_eq!(
         HeaderName::new("X-Import-Batch").unwrap().as_str(),
@@ -242,7 +258,7 @@ impl std::fmt::Display for ContractError {
 
 impl Error for ContractError {}
 
-impl ErrorClassifier for ContractError {
+impl Classify for ContractError {
     fn classify(&self) -> FailureKind {
         FailureKind::Transient
     }
@@ -501,6 +517,17 @@ mod json_contract {
                 r#"{
                     "headers": {
                         "x-safe": "safe\u0001value"
+                    }
+                }"#
+            )
+            .is_err()
+        );
+
+        assert!(
+            serde_json::from_str::<Metadata>(
+                r#"{
+                    "headers": {
+                        "x-safe": "safe\u007fvalue"
                     }
                 }"#
             )
