@@ -4,20 +4,24 @@
 
 This repository uses one primary Codex agent and four project-scoped custom agents:
 
-| Role | Model / effort | Writes files | Use |
+| Role | Model / normal effort | Writes files | Use and escalation trade-off |
 |---|---|---:|---|
-| Primary delivery lead | User-selected session model | Docs only | Requirements, task packets, orchestration, acceptance, and user decisions |
-| `architect` | `gpt-6-astra` / `high` | No | Architecture, public contracts, concurrency, database design, and test strategy |
-| `backend_developer` | `gpt-5.6-sol` / `high` | Yes | Rust/SQL implementation, fixes, and tests |
-| `reviewer` | `gpt-5.6-terra` / `high` | No | Independent code, SQL, architecture, and test review |
-| `release_engineer` | `gpt-5.6-luna` / `medium` | Yes, narrowly | GitHub CI/CD, Atlas mechanics, release bundles, and crates.io preparation |
+| Primary delivery lead | Cost-controlled GPT-5.x / low or medium | Docs only | Requirements, orchestration, and acceptance; raise effort only for a named unresolved risk |
+| `architect` | `gpt-5.6-sol` / `high` | No | Flagship reasoning for gated architecture and adversarial design analysis |
+| `backend_developer` | `gpt-5.6-terra` / `medium` | Yes | Cost-balanced sustained Rust/SQL implementation; high is a task-specific override for a named correctness risk |
+| `reviewer` | `gpt-5.6-sol` / `high` | No | Flagship independent integration and final-approval review |
+| `release_engineer` | `gpt-5.6-luna` / `medium` | Yes, narrowly | Faster delivery work; high is reserved for migration-integrity, publication, or CI-security risk |
 
-The model split is deliberate. Architecture retains the strongest model but uses `high` as its
-cost-aware default; `xhigh` is a one-off escalation for unresolved, high-risk design problems.
-Sustained implementation uses the agentic workhorse; review uses a different model family at
-`high` reasoning to reduce correlated blind spots; repeatable delivery work uses the faster model.
-The project config caps spawned agents at three concurrent threads, although the normal workflow
-is mostly sequential.
+GPT-6 Astra is not a primary or project-agent model and is not an escalation path. The model split
+preserves diversity between the Terra implementation writer and Sol final reviewer. High effort is
+bounded to architecture, which is spawned only behind its design/risk gate, and independent review,
+which owns final approval; routine implementation and delivery remain medium. The project config
+caps spawned agents at two concurrent threads, and the normal workflow remains sequential because
+overlapping writers and implementation-aware final reviewers are prohibited.
+
+[Official OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model)
+recommends explicitly tuning delegation and calibrating verification to the task. This repository
+applies those harness principles with its own approved GPT-5.x model constraint and evidence gates.
 
 ## 2. Roles intentionally not created
 
@@ -60,6 +64,8 @@ Every agent must:
 4. Report a concrete dependency before expanding beyond the supplied path scope.
 5. Return summaries and evidence rather than raw logs.
 6. Preserve unrelated user changes and never claim an unrun check passed.
+7. Stop when the packet's outcome and evidence are complete; do not repeat tests, reviews, scans,
+   benchmarks, or polling without a changed head, a failure to diagnose, or an unresolved finding.
 
 Only one write-heavy agent may own overlapping files. The backend developer exclusively owns Rust,
 runtime SQL, and test implementation. The release engineer exclusively owns versioned migration
@@ -67,6 +73,12 @@ SQL, `atlas.sum`, CI, and release/delivery files when assigned. The primary agen
 or task documentation and orchestration artifacts. Read-only architecture or review work may run
 in parallel when it is genuinely independent, but architecture must settle before implementation
 and review must inspect the completed diff.
+
+New agents inherit the smallest useful history. Architecture and final review start from a bounded
+packet without the parent conversation; an implementation follow-up returns to the existing owning
+writer when doing so avoids reloading the same requirements and code. Long-running work compacts
+into a continuation packet containing only completed actions, decisions, issue/branch/SHA
+identifiers, evidence, blockers, and the next goal.
 
 ## 4. Task packet
 
@@ -86,12 +98,14 @@ Allowed write paths:
 Non-goals:
 Required test layers and completion gates:
 Known decisions and unresolved questions:
+Stopping condition:
 Expected handoff:
 ```
 
 Derive the packet from the authoritative GitHub issue. Do not paste the entire issue or design
-documents into the packet. Give paths and section names so the receiving agent loads only what it
-needs.
+documents into the packet. Include the outcome, acceptance criteria, applicable risk evidence,
+named document sections, allowed paths, and stopping condition. Give paths and section names so the
+receiving agent loads only what it needs; never attach transcripts or raw logs.
 
 ## 5. Workflow
 
@@ -104,9 +118,9 @@ GitHub issue, or one bounded sub-issue under a complex parent
   -> architect: design packet, when the architecture gate applies
   -> backend_developer: implementation and tests
   -> release_engineer: delivery preparation, only when applicable
-  -> reviewer: isolated review of the complete diff
+  -> reviewer: fresh isolated review of the committed complete diff
   -> owning writer: accepted fixes
-  -> reviewer: focused re-review of every changed risk
+  -> reviewer: focused finding review, then fresh final review of the complete diff
   -> primary: verify evidence and report to user
 ```
 
@@ -116,16 +130,33 @@ concurrency/cancellation, compatibility, or cross-crate behavior. A scoped imple
 specified by existing docs goes directly to the developer. The architect's normal design packet is
 limited to 800 words and does not repeat source documents.
 
-Independent review is required after every material Rust, runtime SQL, versioned migration, test,
-manifest or dependency, CI or release, and normative-document change. Only generated output with a
-separately reviewed source, or a change explicitly classified as low-risk and non-behavioral by the
-primary agent, may skip review. Release preparation never occurs after the final review: changes
-from a review finding receive another focused reviewer pass.
+Independent review is required after every material Rust, runtime SQL,
+versioned migration, test, manifest or dependency, CI or release,
+normative-document, `.codex/config.toml`, and `.codex/agents/*.toml` change.
+Only generated output with a separately reviewed source, or a change explicitly
+classified as low-risk and non-behavioral by the primary agent, may skip review.
+Release preparation never occurs after the final review: changes from a review
+finding receive another focused reviewer pass.
 
-The review gate passes only when no blocker/high finding remains, every accepted medium finding is
-fixed or explicitly dispositioned, required checks have evidence, docs and behavior agree, and
-there is no unresolved schema/public compatibility decision. The reviewer advises; the primary
-agent owns finding disposition and final acceptance.
+Final review always uses a fresh read-only reviewer with only the approved issue packet, relevant
+normative sections, and repository evidence. It resolves the exact base SHA with `merge-base`,
+records the exact current head SHA and changed-path count, and reviews the committed
+`merge-base...HEAD` diff. A material change after review makes that approval stale. A focused fix
+review may close its finding, but it never substitutes for the fresh final complete-diff integration
+review.
+
+The final reviewer maps only applicable risks to extra evidence: concurrency, cancellation, and
+fencing require state-transition and adversarial-interleaving analysis; security requires
+redaction review and a secret scan over the reviewed range; test-oracle changes require determinism
+and isolation review. Its handoff separates unique, duplicate, invalid, tooling, and unresolved
+production findings.
+
+The review gate passes only when the reviewed merge base and reviewed HEAD
+equal the current values, no blocker/high finding remains, every accepted
+medium finding is fixed or explicitly dispositioned, required checks and CI
+have evidence, the range-aligned secret scan passed, docs and behavior agree,
+and there is no unresolved schema/public compatibility decision. The reviewer
+advises; the primary owns finding disposition and final acceptance.
 
 ## 6. Database and release escalation
 
@@ -136,8 +167,10 @@ versioned migration SQL, checksum, replay, and packaging from that approved desi
 then inspects the complete database diff as one behavioral change. Any later fix by either writer
 receives a focused re-review.
 
-The release engineer may prepare crates, release assets, CI, or tags, but may not publish, push,
-create a GitHub release, or run production migrations without explicit user authorization.
+The release engineer may prepare crates, release assets, CI, or tags, but
+assigned delivery work never authorizes irreversible production changes. Any
+production command, including a production migration, and any publish, push,
+or GitHub release action requires explicit user authorization.
 
 ## 7. Git and review-size policy
 
@@ -187,6 +220,9 @@ defines the issue link, branch, and commit rounds before implementation:
   workspace test suite. Hooks provide fast feedback, while CI remains the non-bypassable authority.
   Agents never use `--no-verify`. The branch hook permits Git's transient detached `HEAD` only while
   an active rebase directory exists; an ordinary detached-HEAD commit remains forbidden.
+- Before push or final acceptance, run a secret scan over the same base/head commit range recorded
+  by the final reviewer. The pinned CI secret-scan remains an independent non-bypassable check; a
+  whole-tree or differently based scan does not replace the range-aligned evidence.
 - A commit targets at most 10 changed paths and has a hard limit of 20.
 - A task/PR targets at most 25 changed paths and has a hard limit of 90. The 90-file stop leaves a
   ten-file margin below CodeRabbit's 100-file maximum.
@@ -202,6 +238,8 @@ defines the issue link, branch, and commit rounds before implementation:
   approval before implementation. The 20-file commit, 90-file PR, and CodeRabbit 100-file ceilings
   are non-overridable; an atomic change that cannot fit must be split into an explicit multi-commit
   or multi-PR sequence before implementation continues.
+- Splitting one change into more files does not reduce its review scope. Crossing the 25-path target
+  requires an explicit reviewability decision before implementation, even when each file is small.
 
 Before each commit round, the primary agent reports:
 
@@ -234,7 +272,9 @@ reviewer compare predicted and actual path counts and report both.
 - `AGENTS.md` contains the small routing policy loaded for every task.
 
 Start a new Codex task after changing these files so the project instructions and custom-agent
-definitions are loaded afresh.
+definitions are loaded afresh. The loading check confirms the selected models and normal efforts,
+the two-thread cap, bounded task history, and read-only architecture/reviewer defaults; it does not
+reuse the implementation conversation as final-review context.
 
 ## 9. Lean flow and durable records
 
@@ -257,6 +297,26 @@ Each actionable issue has exactly one `type:*` label, all applicable `area:*` la
 triage conditions. [`CONTRIBUTING.md`](../CONTRIBUTING.md#classify-the-issue) is the canonical list
 of valid labels; task packets use only those names. Priority and the normal `Todo` → `In Progress`
 → `Done` lifecycle live in GitHub Project fields instead of duplicative labels.
+
+### Token-efficiency evidence
+
+When the product exposes per-agent counters, record representative primary and subagent input,
+cached-input, output, and reasoning tokens. Always record agent turns and repeated tool/check
+invocations. If token counters are unavailable, say so and compare measurable proxies: bounded
+packet size, inherited-history size, role-instruction words or bytes, agent turns, repeated reads,
+repeated broad validation, elapsed time, and valid post-push findings.
+
+For issue #18, this repository's pre-change configuration baseline was 5,244 words and 37,402 bytes
+across `AGENTS.md`, this document, `.codex/config.toml`, and the four role files. The task product did
+not expose per-agent input, cached-input, output, or reasoning-token counters. The representative
+before state used three possible concurrent agent threads, high default effort for architecture,
+implementation, and review, reusable reviewer context, and no explicit once-per-head validation or
+stopping rule. After the change, the same set is 5,329 words and 37,908 bytes: words rise 1.6% and
+bytes rise 1.4%. The four role files fall from 1,573 to 907 words (42.3%); possible concurrency
+falls from three to two; and high effort is concentrated in the gated architect
+and final reviewer rather than the routine implementation path. Acceptance
+still requires no unresolved valid high or medium finding and no skipped
+validation.
 
 This repository does not maintain Markdown task cards, separate story files, another backlog, or a
 routine ADR stream. The issue records intent and acceptance, the PR records review and validation,
