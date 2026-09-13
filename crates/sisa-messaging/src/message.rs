@@ -4,9 +4,7 @@ use std::fmt;
 use std::str::FromStr;
 
 const MAX_WIRE_IDENTIFIER_BYTES: usize = 255;
-
 const MAX_ORDERING_KEY_BYTES: usize = 512;
-
 const MAX_METADATA_VALUE_BYTES: usize = 1_024;
 
 /// A validation failure for a bounded messaging string.
