@@ -36,10 +36,12 @@ fn metadata(header_count: usize) -> Metadata {
     let mut headers = Headers::new();
 
     for index in 0..header_count {
-        headers.insert(
-            HeaderName::new(format!("x-bench-{index}")).unwrap(),
-            HeaderValue::new(format!("value-{index}")).unwrap(),
-        );
+        headers
+            .insert(
+                HeaderName::new(format!("x-bench-{index}")).unwrap(),
+                HeaderValue::new(format!("value-{index}")).unwrap(),
+            )
+            .unwrap();
     }
 
     Metadata {
@@ -61,6 +63,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
         ("default", 0, false),
         ("typical", 8, true),
         ("large", 32, false),
+        ("limit", 64, false),
     ] {
         let metadata = metadata(header_count);
         let order_id = ordered.then(|| OrderingKey::new("order-42").unwrap());
@@ -81,6 +84,63 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
                 criterion::BatchSize::SmallInput,
             );
         });
+    }
+
+    group.finish();
+
+    let mut group = criterion.benchmark_group("custom_header_mutation");
+
+    for header_count in [8, 32, 64] {
+        let entries = (0..header_count)
+            .map(|index| {
+                (
+                    HeaderName::new(format!("x-bench-{index}")).unwrap(),
+                    HeaderValue::new(format!("value-{index}")).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let replacements = (0..header_count)
+            .map(|index| HeaderValue::new(format!("replacement-{index}")).unwrap())
+            .collect::<Vec<_>>();
+
+        group.bench_with_input(
+            BenchmarkId::new("insert", header_count),
+            &header_count,
+            |bencher, _| {
+                bencher.iter_batched(
+                    Headers::new,
+                    |mut headers| {
+                        for (name, value) in &entries {
+                            headers.insert(name.clone(), value.clone()).unwrap();
+                        }
+                        black_box(headers)
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
+            },
+        );
+
+        let mut populated = Headers::new();
+        for (name, value) in &entries {
+            populated.insert(name.clone(), value.clone()).unwrap();
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("replace", header_count),
+            &header_count,
+            |bencher, _| {
+                bencher.iter_batched(
+                    || populated.clone(),
+                    |mut headers| {
+                        for ((name, _), value) in entries.iter().zip(&replacements) {
+                            headers.insert(name.clone(), value.clone()).unwrap();
+                        }
+                        black_box(headers)
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
+            },
+        );
     }
 
     group.finish();

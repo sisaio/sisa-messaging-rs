@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::future::{Future, ready};
 use std::num::NonZeroU64;
@@ -7,8 +8,9 @@ use std::time::Duration;
 use sisa_messaging::{
     ContentType, ConversationId, Delivery, DeliverySource, Envelope, EnvelopeMapper,
     ErrorClassifier, ErrorSummary, FailureKind, FrameworkHeader, HeaderName, HeaderNameError,
-    HeaderValue, HeaderValueError, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType,
-    Metadata, MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
+    HeaderValue, HeaderValueError, Headers, HeadersError, MAX_CUSTOM_HEADER_BYTES,
+    MAX_CUSTOM_HEADER_COUNT, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata,
+    MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
     ValidationError,
 };
 
@@ -137,6 +139,219 @@ fn custom_headers_reject_injection_and_framework_collisions() {
         HeaderName::new("X-Import-Batch").unwrap().as_str(),
         "x-import-batch"
     );
+}
+
+fn header_name(index: usize) -> HeaderName {
+    HeaderName::new(format!("x-{index}")).unwrap()
+}
+
+#[test]
+fn custom_headers_enforce_exact_count_boundaries_atomically() {
+    let mut headers = Headers::new();
+
+    for index in 0..MAX_CUSTOM_HEADER_COUNT {
+        assert_eq!(
+            headers
+                .insert(header_name(index), HeaderValue::new("v").unwrap())
+                .unwrap(),
+            None
+        );
+    }
+
+    let snapshot = headers.clone();
+    let error = headers
+        .insert(
+            header_name(MAX_CUSTOM_HEADER_COUNT),
+            HeaderValue::new("sensitive-count-sentinel").unwrap(),
+        )
+        .unwrap_err();
+
+    assert_eq!(headers.len(), MAX_CUSTOM_HEADER_COUNT);
+    assert_eq!(headers, snapshot);
+    assert_eq!(error, HeadersError::TooManyHeaders);
+    assert_eq!(error.to_string(), "too many custom headers");
+    assert!(!error.to_string().contains("sensitive-count-sentinel"));
+}
+
+#[test]
+fn custom_headers_enforce_exact_aggregate_byte_boundaries_atomically() {
+    const VALUE_BYTES: usize = 8_191;
+
+    let mut headers = Headers::new();
+    let full_value = HeaderValue::new("a".repeat(VALUE_BYTES)).unwrap();
+
+    for index in 0..7 {
+        headers
+            .insert(
+                HeaderName::new(format!("x{index}")).unwrap(),
+                full_value.clone(),
+            )
+            .unwrap();
+    }
+
+    let retained_bytes = 7 * (2 + VALUE_BYTES);
+    let boundary_name = HeaderName::new("x").unwrap();
+    let boundary_value =
+        HeaderValue::new("b".repeat(MAX_CUSTOM_HEADER_BYTES - retained_bytes - 1)).unwrap();
+    headers.insert(boundary_name, boundary_value).unwrap();
+
+    let snapshot = headers.clone();
+    let error = headers
+        .insert(HeaderName::new("y").unwrap(), HeaderValue::new("").unwrap())
+        .unwrap_err();
+
+    assert_eq!(headers, snapshot);
+    assert_eq!(error, HeadersError::TooManyBytes);
+    assert_eq!(error.to_string(), "custom headers exceed the byte limit");
+}
+
+#[test]
+fn custom_header_byte_accounting_uses_utf8_bytes_and_replacement_delta() {
+    let mut headers = Headers::new();
+    let name = HeaderName::new("x-label").unwrap();
+    let utf8_value = HeaderValue::new("é").unwrap();
+
+    assert_eq!(
+        headers.insert(name.clone(), utf8_value.clone()).unwrap(),
+        None
+    );
+    assert_eq!(
+        headers
+            .insert(name.clone(), HeaderValue::new("ab").unwrap())
+            .unwrap(),
+        Some(utf8_value)
+    );
+
+    let smaller = HeaderValue::new("").unwrap();
+    assert_eq!(
+        headers.insert(name.clone(), smaller.clone()).unwrap(),
+        Some(HeaderValue::new("ab").unwrap())
+    );
+    assert_eq!(headers.get(&name), Some(&smaller));
+}
+
+#[test]
+fn replacement_at_count_and_byte_limits_succeeds_or_rolls_back() {
+    const MAX_VALUE_BYTES: usize = 8_192;
+
+    let mut count_limited = Headers::new();
+
+    for index in 0..MAX_CUSTOM_HEADER_COUNT {
+        count_limited
+            .insert(header_name(index), HeaderValue::new("").unwrap())
+            .unwrap();
+    }
+
+    let first = header_name(0);
+    assert_eq!(
+        count_limited
+            .insert(first, HeaderValue::new("replacement").unwrap())
+            .unwrap(),
+        Some(HeaderValue::new("").unwrap())
+    );
+
+    let mut byte_limited = Headers::new();
+    let full_value = HeaderValue::new("a".repeat(MAX_VALUE_BYTES)).unwrap();
+
+    for index in 0..7 {
+        byte_limited
+            .insert(header_name(index), full_value.clone())
+            .unwrap();
+    }
+
+    let retained_bytes = 7 * (3 + MAX_VALUE_BYTES);
+    let boundary_name = HeaderName::new("x").unwrap();
+    let boundary_value =
+        HeaderValue::new("b".repeat(MAX_CUSTOM_HEADER_BYTES - retained_bytes - 1)).unwrap();
+    byte_limited
+        .insert(boundary_name.clone(), boundary_value.clone())
+        .unwrap();
+
+    assert_eq!(
+        byte_limited
+            .insert(boundary_name.clone(), boundary_value.clone())
+            .unwrap(),
+        Some(boundary_value.clone())
+    );
+
+    let snapshot = byte_limited.clone();
+    let larger_value = HeaderValue::new(format!("{}c", boundary_value.as_str())).unwrap();
+    let error = byte_limited
+        .insert(boundary_name.clone(), larger_value)
+        .unwrap_err();
+
+    assert_eq!(error, HeadersError::TooManyBytes);
+    assert_eq!(byte_limited, snapshot);
+    assert_eq!(byte_limited.get(&boundary_name), Some(&boundary_value));
+
+    let smaller = HeaderValue::new("small").unwrap();
+    assert_eq!(
+        byte_limited
+            .insert(boundary_name.clone(), smaller.clone())
+            .unwrap(),
+        Some(boundary_value)
+    );
+    assert_eq!(byte_limited.get(&boundary_name), Some(&smaller));
+}
+
+#[test]
+fn custom_header_operations_match_a_deterministic_bounded_model() {
+    let mut seed = 0x5eed_cafe_f00d_beef_u64;
+    let mut headers = Headers::new();
+    let mut model = BTreeMap::<String, String>::new();
+
+    for _ in 0..256 {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+
+        let index = (seed.rotate_left(17) % 72) as usize;
+        let input_name = if seed & 1 == 0 {
+            format!("X-{index}")
+        } else {
+            format!("x-{index}")
+        };
+        let value = "v".repeat((seed.rotate_right(11) % 8_193) as usize);
+        let name = HeaderName::new(input_name).unwrap();
+        let header_value = HeaderValue::new(value.clone()).unwrap();
+        let canonical_name = name.as_str().to_owned();
+        let previous = model.get(&canonical_name);
+        let current_bytes = model
+            .iter()
+            .map(|(name, value)| name.len() + value.len())
+            .sum::<usize>();
+        let previous_bytes = previous.map_or(0, |value| canonical_name.len() + value.len());
+        let candidate_bytes = current_bytes - previous_bytes + canonical_name.len() + value.len();
+        let expected_error = if previous.is_none() && model.len() == MAX_CUSTOM_HEADER_COUNT {
+            Some(HeadersError::TooManyHeaders)
+        } else if candidate_bytes > MAX_CUSTOM_HEADER_BYTES {
+            Some(HeadersError::TooManyBytes)
+        } else {
+            None
+        };
+
+        let result = headers.insert(name, header_value);
+
+        match expected_error {
+            Some(error) => assert_eq!(result, Err(error)),
+            None => {
+                let expected_previous = model
+                    .insert(canonical_name.clone(), value)
+                    .map(|value| HeaderValue::new(value).unwrap());
+                assert_eq!(result.unwrap(), expected_previous);
+            }
+        }
+
+        assert_eq!(headers.len(), model.len());
+        for (name, value) in &model {
+            assert_eq!(
+                headers
+                    .get(&HeaderName::new(name.clone()).unwrap())
+                    .map(HeaderValue::as_str),
+                Some(value.as_str())
+            );
+        }
+    }
 }
 
 #[test]
@@ -416,10 +631,12 @@ mod json_contract {
     fn full_metadata() -> Metadata {
         let mut headers = Headers::new();
 
-        headers.insert(
-            HeaderName::new("x-import-batch").unwrap(),
-            HeaderValue::new("2026-09-11").unwrap(),
-        );
+        headers
+            .insert(
+                HeaderName::new("x-import-batch").unwrap(),
+                HeaderValue::new("2026-09-11").unwrap(),
+            )
+            .unwrap();
 
         Metadata {
             correlation: CorrelationMetadata {
@@ -549,6 +766,142 @@ mod json_contract {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn custom_header_json_round_trips_exact_count_and_byte_boundaries() {
+        const MAX_VALUE_BYTES: usize = 8_192;
+
+        let mut count_limited = Headers::new();
+
+        for index in 0..MAX_CUSTOM_HEADER_COUNT {
+            count_limited
+                .insert(header_name(index), HeaderValue::new("v").unwrap())
+                .unwrap();
+        }
+
+        let count_json = serde_json::to_string(&count_limited).unwrap();
+        let count_decoded: Headers = serde_json::from_str(&count_json).unwrap();
+
+        assert_eq!(count_decoded, count_limited);
+
+        let mut byte_limited = Headers::new();
+        let full_value = HeaderValue::new("a".repeat(MAX_VALUE_BYTES)).unwrap();
+
+        for index in 0..7 {
+            byte_limited
+                .insert(header_name(index), full_value.clone())
+                .unwrap();
+        }
+
+        let retained_bytes = 7 * (3 + MAX_VALUE_BYTES);
+        byte_limited
+            .insert(
+                HeaderName::new("x").unwrap(),
+                HeaderValue::new(
+                    "é".repeat((MAX_CUSTOM_HEADER_BYTES - retained_bytes - 1) / "é".len()),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let byte_json = serde_json::to_string(&byte_limited).unwrap();
+        let byte_decoded: Headers = serde_json::from_str(&byte_json).unwrap();
+
+        assert_eq!(byte_decoded, byte_limited.clone());
+        assert_eq!(byte_limited, byte_limited.clone());
+        assert_eq!(serde_json::to_string(&Headers::default()).unwrap(), "{}");
+    }
+
+    #[test]
+    fn custom_header_json_rejects_a_sixty_fifth_key_before_its_value() {
+        let mut entries = (0..MAX_CUSTOM_HEADER_COUNT)
+            .map(|index| format!(r#""x-{index}":"v""#))
+            .collect::<Vec<_>>();
+        entries.push(r#""x-64":{"secret":"sensitive-unconsumed-value-sentinel"}"#.to_owned());
+        let input = format!("{{{}}}", entries.join(","));
+
+        let error = serde_json::from_str::<Headers>(&input).unwrap_err();
+        let rendered = error.to_string();
+
+        assert!(rendered.contains("too many custom headers"));
+        assert!(!rendered.contains("sensitive-unconsumed-value-sentinel"));
+    }
+
+    #[test]
+    fn custom_header_json_preserves_canonical_duplicate_replacement() {
+        let decoded: Headers =
+            serde_json::from_str(r#"{"X-Label":"first","x-label":"second"}"#).unwrap();
+
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(
+            decoded
+                .get(&HeaderName::new("x-label").unwrap())
+                .map(HeaderValue::as_str),
+            Some("second")
+        );
+        assert_eq!(
+            serde_json::to_string(&decoded).unwrap(),
+            r#"{"x-label":"second"}"#
+        );
+    }
+
+    #[test]
+    fn custom_header_json_errors_do_not_echo_oversized_or_malformed_inputs() {
+        let oversized_name = format!("sensitive-name-sentinel-{}", "x".repeat(255));
+        let oversized_value = format!("sensitive-value-sentinel-{}", "x".repeat(8_192));
+        let cases = [
+            format!(
+                "{{{}:\"safe\"}}",
+                serde_json::to_string(&oversized_name).unwrap()
+            ),
+            format!(
+                "{{\"x-safe\":{}}}",
+                serde_json::to_string(&oversized_value).unwrap()
+            ),
+            r#"{"x-safe":{"secret":"malformed-sensitive-sentinel"}}"#.to_owned(),
+        ];
+
+        for input in cases {
+            let rendered = serde_json::from_str::<Headers>(&input)
+                .unwrap_err()
+                .to_string();
+
+            assert!(!rendered.contains("sensitive-name-sentinel"));
+            assert!(!rendered.contains("sensitive-value-sentinel"));
+            assert!(!rendered.contains("malformed-sensitive-sentinel"));
+        }
+    }
+
+    #[test]
+    fn custom_header_json_rejects_the_aggregate_byte_limit_plus_one() {
+        const MAX_VALUE_BYTES: usize = 8_192;
+
+        let mut entries = (0..7)
+            .map(|index| {
+                format!(
+                    r#""x-{index}":{}"#,
+                    serde_json::to_string(&"a".repeat(MAX_VALUE_BYTES)).unwrap()
+                )
+            })
+            .collect::<Vec<_>>();
+        let retained_bytes = 7 * (3 + MAX_VALUE_BYTES);
+        let sentinel = "sensitive-byte-sentinel-";
+        let oversized = format!(
+            "{sentinel}{}",
+            "b".repeat(MAX_CUSTOM_HEADER_BYTES - retained_bytes - sentinel.len())
+        );
+        entries.push(format!(
+            r#""x":{}"#,
+            serde_json::to_string(&oversized).unwrap()
+        ));
+        let input = format!("{{{}}}", entries.join(","));
+
+        let error = serde_json::from_str::<Headers>(&input).unwrap_err();
+        let rendered = error.to_string();
+
+        assert!(rendered.contains("custom headers exceed the byte limit"));
+        assert!(!rendered.contains("sensitive-byte-sentinel"));
     }
 
     #[test]

@@ -8,6 +8,15 @@ const MAX_HEADER_NAME_BYTES: usize = 255;
 
 const MAX_HEADER_VALUE_BYTES: usize = 8_192;
 
+/// Maximum number of distinct canonical custom headers retained by [`Headers`].
+pub const MAX_CUSTOM_HEADER_COUNT: usize = 64;
+
+/// Maximum aggregate bytes retained by custom header names and values.
+///
+/// The bound counts the UTF-8 bytes of each canonical name and its value exactly once. It excludes
+/// serialization syntax, allocator overhead, framework headers, and other metadata fields.
+pub const MAX_CUSTOM_HEADER_BYTES: usize = 65_536;
+
 /// A framework-owned wire header.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
@@ -156,6 +165,12 @@ impl HeaderName {
     pub fn new(value: impl Into<String>) -> Result<Self, HeaderNameError> {
         let mut value = value.into();
 
+        Self::validate(&value)?;
+        value.make_ascii_lowercase();
+        Ok(Self(value))
+    }
+
+    fn validate(value: &str) -> Result<(), HeaderNameError> {
         if value.is_empty() {
             return Err(HeaderNameError::Empty);
         }
@@ -168,12 +183,11 @@ impl HeaderName {
             return Err(HeaderNameError::InvalidCharacter);
         }
 
-        if FrameworkHeader::is_reserved(&value) {
+        if FrameworkHeader::is_reserved(value) {
             return Err(HeaderNameError::Reserved);
         }
 
-        value.make_ascii_lowercase();
-        Ok(Self(value))
+        Ok(())
     }
 
     /// Borrows the validated name.
@@ -267,6 +281,11 @@ impl HeaderValue {
     pub fn new(value: impl Into<String>) -> Result<Self, HeaderValueError> {
         let value = value.into();
 
+        Self::validate(&value)?;
+        Ok(Self(value))
+    }
+
+    fn validate(value: &str) -> Result<(), HeaderValueError> {
         if value.len() > MAX_HEADER_VALUE_BYTES {
             return Err(HeaderValueError::TooLong);
         }
@@ -279,7 +298,7 @@ impl HeaderValue {
             return Err(HeaderValueError::ControlCharacter);
         }
 
-        Ok(Self(value))
+        Ok(())
     }
 
     /// Borrows the validated value.
@@ -315,45 +334,106 @@ impl FromStr for HeaderValue {
     }
 }
 
-/// A deterministic collection of validated custom headers.
+/// A custom-header collection validation failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum HeadersError {
+    /// The number of distinct canonical names exceeded [`MAX_CUSTOM_HEADER_COUNT`].
+    TooManyHeaders,
+
+    /// The retained canonical names and values exceeded [`MAX_CUSTOM_HEADER_BYTES`].
+    TooManyBytes,
+}
+
+impl fmt::Display for HeadersError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooManyHeaders => formatter.write_str("too many custom headers"),
+            Self::TooManyBytes => formatter.write_str("custom headers exceed the byte limit"),
+        }
+    }
+}
+
+impl std::error::Error for HeadersError {}
+
+/// A deterministic, bounded collection of validated custom headers.
+///
+/// The collection retains at most [`MAX_CUSTOM_HEADER_COUNT`] distinct canonical names and at most
+/// [`MAX_CUSTOM_HEADER_BYTES`] UTF-8 bytes across those names and their values.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct Headers(BTreeMap<HeaderName, HeaderValue>);
+pub struct Headers {
+    values: BTreeMap<HeaderName, HeaderValue>,
+
+    aggregate_bytes: usize,
+}
 
 impl Headers {
     /// Creates an empty collection.
     #[must_use]
     pub const fn new() -> Self {
-        Self(BTreeMap::new())
+        Self {
+            values: BTreeMap::new(),
+            aggregate_bytes: 0,
+        }
     }
 
     /// Inserts a validated value, returning the previous value when present.
-    pub fn insert(&mut self, name: HeaderName, value: HeaderValue) -> Option<HeaderValue> {
-        self.0.insert(name, value)
+    ///
+    /// Replacement uses the canonical name and does not consume another count slot. If the
+    /// resulting retained aggregate would exceed a collection bound, the collection is unchanged.
+    pub fn insert(
+        &mut self,
+        name: HeaderName,
+        value: HeaderValue,
+    ) -> Result<Option<HeaderValue>, HeadersError> {
+        let previous = self.values.get(&name);
+        let previous_bytes = previous.map_or(0, |previous| name.0.len() + previous.0.len());
+
+        if previous.is_none() && self.values.len() >= MAX_CUSTOM_HEADER_COUNT {
+            return Err(HeadersError::TooManyHeaders);
+        }
+
+        let candidate_bytes = name
+            .0
+            .len()
+            .checked_add(value.0.len())
+            .and_then(|new_bytes| {
+                self.aggregate_bytes
+                    .checked_sub(previous_bytes)?
+                    .checked_add(new_bytes)
+            })
+            .ok_or(HeadersError::TooManyBytes)?;
+
+        if candidate_bytes > MAX_CUSTOM_HEADER_BYTES {
+            return Err(HeadersError::TooManyBytes);
+        }
+
+        let previous = self.values.insert(name, value);
+        self.aggregate_bytes = candidate_bytes;
+        Ok(previous)
     }
 
     /// Gets a value by its validated canonical-lowercase name.
     #[must_use]
     pub fn get(&self, name: &HeaderName) -> Option<&HeaderValue> {
-        self.0.get(name)
+        self.values.get(name)
     }
 
     /// Iterates in deterministic name order.
     pub fn iter(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
-        self.0.iter()
+        self.values.iter()
     }
 
     /// Returns the number of custom headers.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.values.len()
     }
 
     /// Reports whether the collection is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.values.is_empty()
     }
 }
 
@@ -373,8 +453,45 @@ impl<'de> serde::Deserialize<'de> for HeaderName {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
+        deserializer.deserialize_str(HeaderNameVisitor)
+    }
+}
+
+#[cfg(feature = "serde")]
+struct HeaderNameVisitor;
+
+#[cfg(feature = "serde")]
+impl serde::de::Visitor<'_> for HeaderNameVisitor {
+    type Value = HeaderName;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a valid custom header name")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        HeaderName::validate(value).map_err(E::custom)?;
+        let mut value = value.to_owned();
+        value.make_ascii_lowercase();
+        Ok(HeaderName(value))
+    }
+
+    fn visit_borrowed_str<E>(self, value: &'_ str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(value)
+    }
+
+    fn visit_string<E>(self, mut value: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        HeaderName::validate(&value).map_err(E::custom)?;
+        value.make_ascii_lowercase();
+        Ok(HeaderName(value))
     }
 }
 
@@ -394,7 +511,160 @@ impl<'de> serde::Deserialize<'de> for HeaderValue {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
+        deserializer.deserialize_str(HeaderValueVisitor)
+    }
+}
+
+#[cfg(feature = "serde")]
+struct HeaderValueVisitor;
+
+#[cfg(feature = "serde")]
+impl serde::de::Visitor<'_> for HeaderValueVisitor {
+    type Value = HeaderValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a valid custom header value")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        HeaderValue::validate(value).map_err(E::custom)?;
+        Ok(HeaderValue(value.to_owned()))
+    }
+
+    fn visit_borrowed_str<E>(self, value: &'_ str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(value)
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        HeaderValue::validate(&value).map_err(E::custom)?;
+        Ok(HeaderValue(value))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Headers {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.values.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Headers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(HeadersVisitor)
+    }
+}
+
+#[cfg(feature = "serde")]
+struct HeadersVisitor;
+
+#[cfg(feature = "serde")]
+impl<'de> serde::de::Visitor<'de> for HeadersVisitor {
+    type Value = Headers;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a bounded custom header map")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut headers = Headers::new();
+
+        while let Some(name) = map.next_key::<HeaderName>()? {
+            if !headers.values.contains_key(&name)
+                && headers.values.len() >= MAX_CUSTOM_HEADER_COUNT
+            {
+                return Err(serde::de::Error::custom(HeadersError::TooManyHeaders));
+            }
+
+            let value = map.next_value::<HeaderValue>()?;
+            headers
+                .insert(name, value)
+                .map_err(serde::de::Error::custom)?;
+        }
+
+        Ok(headers)
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use serde::de::{DeserializeSeed, MapAccess, Visitor};
+
+    use super::Headers;
+
+    struct HugeSizeHintDeserializer;
+
+    impl<'de> serde::Deserializer<'de> for HugeSizeHintDeserializer {
+        type Error = serde::de::value::Error;
+
+        fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: Visitor<'de>,
+        {
+            visitor.visit_map(HugeSizeHintMap)
+        }
+
+        fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: Visitor<'de>,
+        {
+            visitor.visit_map(HugeSizeHintMap)
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+            byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct struct enum
+            identifier ignored_any
+        }
+    }
+
+    struct HugeSizeHintMap;
+
+    impl<'de> MapAccess<'de> for HugeSizeHintMap {
+        type Error = serde::de::value::Error;
+
+        fn next_key_seed<K>(&mut self, _seed: K) -> Result<Option<K::Value>, Self::Error>
+        where
+            K: DeserializeSeed<'de>,
+        {
+            Ok(None)
+        }
+
+        fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
+        where
+            V: DeserializeSeed<'de>,
+        {
+            unreachable!("the empty test map never requests a value")
+        }
+
+        fn size_hint(&self) -> Option<usize> {
+            Some(usize::MAX)
+        }
+    }
+
+    #[test]
+    fn deserialization_ignores_untrusted_map_size_hints() {
+        let headers = <Headers as serde::Deserialize>::deserialize(HugeSizeHintDeserializer)
+            .expect("empty header map must deserialize");
+
+        assert!(headers.is_empty());
     }
 }

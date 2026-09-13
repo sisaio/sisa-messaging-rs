@@ -7,9 +7,9 @@ use sisa_messaging::{
     ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata, DeliverySource,
     Envelope, EnvelopeError, EnvelopeMapper, ErrorClassifier, ErrorSummary, FailureKind,
     FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers,
-    MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata, MetadataValue, OrderingKey,
-    Publisher, RequestId, RoutingMetadata, SerializedEnvelope, Serializer, Settlement,
-    TraceMetadata, ValidationError,
+    HeadersError, MAX_CUSTOM_HEADER_BYTES, MAX_CUSTOM_HEADER_COUNT, MAX_ERROR_SUMMARY_BYTES,
+    Message, MessageId, MessageType, Metadata, MetadataValue, OrderingKey, Publisher, RequestId,
+    RoutingMetadata, SerializedEnvelope, Serializer, Settlement, TraceMetadata, ValidationError,
 };
 
 #[cfg(feature = "json")]
@@ -18,6 +18,8 @@ use sisa_messaging::{JsonSerializer, JsonSerializerError};
 
 #[allow(dead_code)]
 const _: usize = MAX_ERROR_SUMMARY_BYTES;
+const _: usize = MAX_CUSTOM_HEADER_BYTES;
+const _: usize = MAX_CUSTOM_HEADER_COUNT;
 
 #[test]
 fn crate_root_reexports_match_the_public_api_inventory() {
