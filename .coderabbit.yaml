@@ -28,6 +28,15 @@ reviews:
     - "!Cargo.lock"
 
   path_instructions:
+    - path: "**/*.rs"
+      instructions: >-
+        Apply docs/api-conventions.md section 8. Require rustdoc on public APIs and public semantic
+        contracts, with useful explanations of guarantees, ownership, failure behavior, and caller
+        obligations. Private helpers, trait implementations, test functions, and benchmark
+        functions do not need boilerplate documentation. Do not invent source-shape heuristics or
+        enforce documentation percentage thresholds; any broader documentation metric is
+        informational and non-blocking.
+
     - path: "crates/sisa-messaging/**"
       instructions: >-
         Apply docs/architecture.md and docs/api-conventions.md. This crate owns only

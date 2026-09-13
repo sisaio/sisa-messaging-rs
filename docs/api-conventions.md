@@ -180,6 +180,84 @@ src/
     └── shutdown.rs
 ```
 
+### Rust presentation
+
+Use the same grouping convention in production source, tests, examples, and benchmarks. A
+declaration group is either a comment, documentation, and attributes together with the declaration
+they describe, or consecutive declarations that serve one purpose. Put one blank line between
+declaration groups; do not separate documentation or attributes from their declaration.
+
+Treat each struct field as its own declaration group, including private fields. Keep a field's
+documentation and attributes attached to that field, and put one blank line before the next field.
+Apply the same rule to individually documented enum variants. This makes each property boundary
+visible even when adjacent fields or variants have related roles:
+
+```rust,ignore
+pub struct DeliveryContext {
+    /// Stable identity used for deduplication.
+    pub message_id: MessageId,
+
+    /// Contract resolved by the mapper.
+    pub message_type: MessageType,
+
+    /// Attempt reported by the transport.
+    pub delivery_attempt: NonZeroU32,
+}
+```
+
+Within a function, keep consecutive local declarations for one purpose together, then put one
+blank line before the action, loop, assertion, or returned expression that consumes them. Do not
+insert blank lines inside one expression merely to create visual symmetry:
+
+```rust,ignore
+let message_id = MessageId::new();
+let metadata = Metadata::default();
+
+let envelope = Envelope::new(message_id, ExampleMessage, metadata)?;
+
+assert_eq!(envelope.message_id(), message_id);
+```
+
+Tests use visibly distinct arrange, act, and assert/result phases. Benchmarks use the equivalent
+fixture/setup, measurement, and result phases. Keep repeated fixtures and measurement scaffolding
+in consistent groups; comments are useful only when spacing and names do not already explain a
+phase.
+
+Apply these rules by semantic review. Do not add an automated blank-line or source-shape rule unless
+it can distinguish semantic groups without noisy false positives.
+
+### Rust documentation
+
+Every public API item must have useful rustdoc, including public fields, variants, associated items,
+and semantic contracts exposed through traits. Document guarantees, ownership, failure behavior,
+and caller obligations where they apply. Documentation is not complete merely because an item has
+a summary sentence.
+
+Private helpers, trait implementation methods, test functions, and benchmark functions do not
+require documentation. Document them only when they carry a non-obvious invariant or constraint
+that names and structure cannot communicate. Never add boilerplate comments solely to raise a
+documentation percentage.
+
+CodeRabbit review follows this public-surface policy. Any docstring metric that measures the broader
+private, test, or benchmark surface is advisory and non-blocking; actionable findings must identify
+a missing or inadequate public contract rather than cite the percentage alone.
+
+### Cargo manifest presentation
+
+In workspace and crate manifests, group related features and dependencies by role. Introduce each
+group with one concise comment and separate groups with one blank line. Keep the comment about why
+the group exists rather than repeating package names:
+
+```toml
+[dependencies]
+# Core domain representation.
+uuid = { workspace = true }
+
+# Optional serialization surfaces.
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+```
+
 ## 9. Test layers
 
 - Unit: validation, retry math, codecs, mapping, and redaction.
