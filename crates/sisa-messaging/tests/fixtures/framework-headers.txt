@@ -1,0 +1,17 @@
+message-id
+message-type
+message-version
+content-type
+ordering-key
+correlation-id
+conversation-id
+causation-id
+request-id
+source
+destination
+reply-to
+sent-at-ms
+deduplication-id
+tenant-id
+traceparent
+tracestate

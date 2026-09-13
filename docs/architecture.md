@@ -100,7 +100,7 @@ The public API is organized around what a caller can do, not around internal lay
 - `Serializer` and the optional JSON implementation.
 - `Publisher`: one acknowledged publish attempt.
 - `DeliverySource`, `Delivery`, and `Settlement`: transport-neutral inbound contracts.
-- `Classify` and `FailureKind`: retryability attached to errors that cross retry boundaries.
+- `ErrorClassifier` and `FailureKind`: retryability attached to errors that cross retry boundaries.
 - `EnvelopeMapper`: transport wire conversion.
 
 ### `sisa-messaging-outbox`
@@ -133,7 +133,7 @@ lower-level caller uses `claim`/`complete`/`fail` explicitly and owns every oper
 ### `sisa-messaging-consumer`
 
 - `ConsumerHandler<M, Tx>`: application business logic over a typed envelope and transaction.
-- `ConsumerSettings`: concurrency, timeout, progress, negative-ack, and drain policy.
+- `ConsumerSettings`: concurrency, timeout, heartbeat, negative-ack, and drain policy.
 - `Consumer`: bounded typed receive/process/settle loop.
 - `ConsumerExit` and `ConsumerError`: clean source/cancellation exits versus fatal supervision
   failures.

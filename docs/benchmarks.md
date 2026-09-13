@@ -139,7 +139,7 @@ Run against a real NATS server with JetStream and a pre-created stream/consumer.
 - Direct publish with awaited acknowledgement at concurrency 1, 8, 32, and 128.
 - Ordered and unordered subject resolution.
 - Consumer receive plus confirmed acknowledgement.
-- Delayed nak, term, and progress acknowledgement costs.
+- Delayed nak, terminate, and heartbeat acknowledgement costs.
 - Redelivery after withheld acknowledgement.
 - Small, typical, and large data profiles.
 
@@ -157,8 +157,8 @@ Measure both the generic runtime overhead and the real integration:
 - decoded delivery → transaction → claim → no-op handler → complete → commit → ack;
 - already-completed delivery → rollback → ack;
 - transient handler failure → rollback → failure record → nak;
-- permanent handler failure → rollback → dead record → term;
-- slow handler with periodic progress acknowledgements;
+- permanent handler failure → rollback → dead record → terminate;
+- slow handler with periodic heartbeat acknowledgements;
 - independent messages at concurrency 1, 8, 32, and 128;
 - duplicate contention for the same `(scope, message_id)`;
 - graceful drain with 0%, 50%, and 100% of tasks complete at cancellation.
@@ -242,8 +242,8 @@ maintainability tradeoff recorded in the change.
 The final workspace exposes stable commands:
 
 ```text
-cargo bench --workspace --no-run                 # compile every microbenchmark
-cargo bench -p sisa-messaging                    # shared hot paths
+cargo bench --workspace --all-features --no-run  # compile every microbenchmark
+cargo bench -p sisa-messaging --all-features     # shared hot paths, including optional JSON
 cargo bench -p sisa-messaging-nats               # mapping and local broker benches
 cargo run -p sisa-messaging-system-bench --release -- --profile smoke
 cargo run -p sisa-messaging-system-bench --release -- --profile standard

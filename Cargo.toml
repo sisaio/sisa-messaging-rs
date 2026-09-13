@@ -9,14 +9,29 @@ license = "MIT"
 repository = "https://github.com/sisaio/sisa-messaging-rs"
 
 [workspace.dependencies]
+# Benchmark harnesses and formatting helpers used across workspace crates.
+criterion = { version = "0.7.0", default-features = false }
+
+# Shared tokenization and syntax helpers.
 proc-macro2 = { version = "1.0.107", default-features = false }
+
+# Serialization primitives and payload codecs.
+serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0.145", default-features = false, features = ["std"] }
+
+# Workspace crate pins.
 sisa-messaging = { version = "=0.1.0", path = "crates/sisa-messaging" }
 sisa-messaging-consumer = { version = "=0.1.0", path = "crates/sisa-messaging-consumer" }
 sisa-messaging-inbox = { version = "=0.1.0", path = "crates/sisa-messaging-inbox" }
 sisa-messaging-nats = { version = "=0.1.0", path = "crates/sisa-messaging-nats" }
 sisa-messaging-outbox = { version = "=0.1.0", path = "crates/sisa-messaging-outbox" }
 sisa-messaging-postgres = { version = "=0.1.0", path = "crates/sisa-messaging-postgres" }
+
+# Parsing and syntax-tree utilities.
 syn = { version = "3.0.5", default-features = false, features = ["full", "parsing", "visit"] }
+
+# Identifier primitives.
+uuid = { version = "1.18.1", default-features = false, features = ["std", "v7"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

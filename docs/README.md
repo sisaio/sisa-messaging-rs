@@ -22,7 +22,7 @@ broker connections, telemetry exporters, or process shutdown.
 4. [Runtime flows](runtime-flows.md) — Mermaid sequences and decision flows for enqueue, dispatch,
    retry, shutdown, inbox processing, NATS publication, and maintenance.
 5. [Consumer framework](consumer-framework.md) — typed handlers, delivery settlement,
-   concurrency, progress acknowledgement, and graceful shutdown.
+   concurrency, heartbeat acknowledgement, and graceful shutdown.
 6. [API and code conventions](api-conventions.md) — settings, constructors, validation, errors,
    IDs, async traits, and module rules.
 7. [Observability](observability.md) — tracing, logging, direct OpenTelemetry metrics, names,

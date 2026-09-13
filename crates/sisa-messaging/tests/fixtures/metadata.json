@@ -1,0 +1,25 @@
+{
+  "correlation": {
+    "correlation_id": "checkout-42",
+    "conversation_id": "0198f3e2-40f0-7b15-8a4a-843d24f68d10",
+    "causation_id": "0198f3e2-40f0-7b15-8a4a-843d24f68d11",
+    "request_id": "0198f3e2-40f0-7b15-8a4a-843d24f68d12"
+  },
+  "trace": {
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "tracestate": "vendor=value"
+  },
+  "routing": {
+    "source": "orders-api",
+    "destination": "fulfilment",
+    "reply_to": "orders-api"
+  },
+  "delivery": {
+    "sent_at_ms": 1789056000000,
+    "deduplication_id": "order-42-v1"
+  },
+  "tenant_id": "acme",
+  "headers": {
+    "x-import-batch": "2026-09-11"
+  }
+}
