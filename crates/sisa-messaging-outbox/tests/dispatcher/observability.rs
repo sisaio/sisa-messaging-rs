@@ -11,6 +11,23 @@ const FOREIGN_DISPLAY_MARKERS: [&str; 3] = [
     "foreign-display-marker-gamma",
 ];
 
+async fn run_redacted_failure() -> FakeStore {
+    let mut secret_record = record(1, 0);
+    secret_record.envelope.payload = b"TOP_SECRET_PAYLOAD".to_vec();
+    let store = FakeStore::new(vec![secret_record]);
+    let cancellation = CancellationToken::new();
+    let dispatcher = OutboxDispatcher::new(store.clone(), SecretPublisher, settings(1))
+        .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+    let run_cancel = cancellation.clone();
+    let cancel_after_failure = async {
+        wait_for(|| !store.lock().failures.is_empty()).await;
+        cancellation.cancel();
+    };
+    let (result, ()) = tokio::join!(dispatcher.run(run_cancel), cancel_after_failure);
+    result.unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+    store
+}
+
 #[test]
 fn instrumentation_and_persisted_failure_never_record_foreign_sensitive_text() {
     let output = Arc::new(Mutex::new(Vec::new()));
@@ -21,38 +38,36 @@ fn instrumentation_and_persisted_failure_never_record_foreign_sensitive_text() {
         .without_time()
         .with_writer(SharedWriter(Arc::clone(&output)))
         .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .unwrap_or_else(|error| panic!("test subscriber failed: {error}"));
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap_or_else(|error| panic!("test runtime failed: {error}"));
 
-    runtime.block_on(async {
-        let mut secret_record = record(1, 0);
-        secret_record.envelope.payload = b"TOP_SECRET_PAYLOAD".to_vec();
-        let store = FakeStore::new(vec![secret_record]);
-        let cancellation = CancellationToken::new();
-        let dispatcher = OutboxDispatcher::new(store.clone(), SecretPublisher, settings(1))
-            .unwrap_or_else(|error| panic!("settings rejected: {error}"));
-        let run_cancel = cancellation.clone();
-        let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
-
-        wait_for(|| !store.lock().failures.is_empty()).await;
-        cancellation.cancel();
-        task.await
-            .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
-            .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
-        let state = store.lock();
-        let persisted = state.failures[0][0].error.as_str();
-        assert_eq!(persisted, "publisher failed transiently");
-        for marker in FOREIGN_DISPLAY_MARKERS {
-            assert!(
-                !persisted.contains(marker),
-                "persisted foreign marker {marker}"
-            );
-        }
+    tracing::info!(target: "messaging.outbox", "outside-scope-before");
+    tracing::subscriber::with_default(subscriber, || {
+        // Register the complete static callsite set under this scoped dispatcher before the
+        // asserted pass. Other integration tests may have cached some callsites first.
+        runtime.block_on(run_redacted_failure());
+        tracing::callsite::rebuild_interest_cache();
+        output
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        runtime.block_on(async {
+            let store = run_redacted_failure().await;
+            let state = store.lock();
+            let persisted = state.failures[0][0].error.as_str();
+            assert_eq!(persisted, "publisher failed transiently");
+            for marker in FOREIGN_DISPLAY_MARKERS {
+                assert!(
+                    !persisted.contains(marker),
+                    "persisted foreign marker {marker}"
+                );
+            }
+        });
     });
+    tracing::callsite::rebuild_interest_cache();
+    tracing::info!(target: "messaging.outbox", "outside-scope-after");
 
     let rendered = String::from_utf8(
         output
@@ -73,10 +88,11 @@ fn instrumentation_and_persisted_failure_never_record_foreign_sensitive_text() {
             "missing {expected}: {rendered}"
         );
     }
-    for forbidden in FOREIGN_DISPLAY_MARKERS
-        .into_iter()
-        .chain(["TOP_SECRET_PAYLOAD"])
-    {
+    for forbidden in FOREIGN_DISPLAY_MARKERS.into_iter().chain([
+        "TOP_SECRET_PAYLOAD",
+        "outside-scope-before",
+        "outside-scope-after",
+    ]) {
         assert!(!rendered.contains(forbidden), "leaked {forbidden}");
     }
 }

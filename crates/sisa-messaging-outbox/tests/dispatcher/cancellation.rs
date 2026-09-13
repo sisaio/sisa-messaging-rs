@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use sisa_messaging::Publisher;
 use sisa_messaging_outbox::OutboxDispatcher;
 use tokio_util::sync::CancellationToken;
 
@@ -106,10 +107,112 @@ fn select_branches_are_readiness_only() {
     let shutdown = include_str!("../../src/dispatcher/shutdown.rs");
 
     for selected in [source, shutdown] {
-        for block in selected.split("tokio::select!").skip(1) {
-            let block = block.split('}').next().unwrap_or(block);
-            assert!(!block.contains("store."));
-            assert!(!block.contains("publisher.publish"));
-        }
+        assert_readiness_only(selected);
     }
+}
+
+#[tokio::test]
+async fn publisher_gate_releases_existing_and_late_waiters() {
+    for behavior in [PUBLISH_GATE, PUBLISH_MIXED_GATE] {
+        let publisher = FakePublisher::new(behavior);
+        let envelope = record(0, 0).envelope;
+        let waiting_publisher = publisher.clone();
+        let waiting_envelope = envelope.clone();
+        let waiting =
+            tokio::spawn(async move { waiting_publisher.publish(&waiting_envelope).await });
+
+        wait_for(|| publisher.gate_waiter_count() == 1).await;
+        publisher.release();
+        tokio::time::timeout(Duration::from_millis(50), waiting)
+            .await
+            .unwrap_or_else(|_| panic!("registered publisher missed persistent release"))
+            .unwrap_or_else(|error| panic!("waiting publisher task failed: {error}"))
+            .unwrap_or_else(|error| panic!("waiting publisher failed: {error}"));
+
+        tokio::time::timeout(Duration::from_millis(50), publisher.publish(&envelope))
+            .await
+            .unwrap_or_else(|_| panic!("late publisher missed persistent release"))
+            .unwrap_or_else(|error| panic!("late publisher failed: {error}"));
+    }
+}
+
+fn assert_readiness_only(source: &str) {
+    for body in select_bodies(source) {
+        assert!(!body.contains("store."), "store call inside select body");
+        assert!(
+            !body.contains("publisher.publish"),
+            "publisher call inside select body"
+        );
+    }
+}
+
+fn select_bodies(mut source: &str) -> Vec<&str> {
+    const SELECT: &str = "tokio::select!";
+    let mut bodies = Vec::new();
+
+    while let Some(select_at) = source.find(SELECT) {
+        let after_select = &source[select_at + SELECT.len()..];
+        let open = after_select
+            .find('{')
+            .unwrap_or_else(|| panic!("select macro is missing its body"));
+        let body_and_rest = &after_select[open + 1..];
+        let mut depth = 1_usize;
+        let mut close = None;
+
+        for (offset, character) in body_and_rest.char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let close = close.unwrap_or_else(|| panic!("select macro body is unbalanced"));
+        bodies.push(&body_and_rest[..close]);
+        source = &body_and_rest[close + 1..];
+    }
+
+    bodies
+}
+
+#[test]
+fn select_body_extractor_keeps_empty_and_nested_later_branches() {
+    let source = r#"
+        tokio::select! {
+            first = ready() => {},
+            second = ready() => {
+                if nested() {
+                    publisher.publish(message).await;
+                }
+            },
+        }
+    "#;
+
+    let bodies = select_bodies(source);
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].contains("first = ready() => {}"));
+    assert!(bodies[0].contains("publisher.publish(message).await"));
+}
+
+#[test]
+#[should_panic(expected = "store call inside select body")]
+fn readiness_guard_detects_forbidden_call_in_later_nested_branch() {
+    assert_readiness_only(
+        r#"
+            tokio::select! {
+                first = ready() => {},
+                later = ready() => {
+                    if nested() {
+                        store.complete(claims).await;
+                    }
+                },
+            }
+        "#,
+    );
 }

@@ -1,10 +1,10 @@
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use sisa_messaging::{ErrorClassifier, FailureKind, Publisher, SerializedEnvelope};
-use tokio::sync::Notify;
+use tokio::sync::watch;
 
 use super::ProtocolError;
 
@@ -61,8 +61,7 @@ pub(crate) struct FakePublisher {
     pub(crate) calls: Arc<AtomicUsize>,
     pub(crate) active: Arc<AtomicUsize>,
     pub(crate) maximum: Arc<AtomicUsize>,
-    open: Arc<AtomicBool>,
-    notify: Arc<Notify>,
+    gate: Arc<watch::Sender<bool>>,
 }
 
 impl FakePublisher {
@@ -72,14 +71,25 @@ impl FakePublisher {
             calls: Arc::new(AtomicUsize::new(0)),
             active: Arc::new(AtomicUsize::new(0)),
             maximum: Arc::new(AtomicUsize::new(0)),
-            open: Arc::new(AtomicBool::new(false)),
-            notify: Arc::new(Notify::new()),
+            gate: Arc::new(watch::channel(false).0),
         }
     }
 
     pub(crate) fn release(&self) {
-        self.open.store(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
+        self.gate.send_replace(true);
+    }
+
+    pub(crate) fn gate_waiter_count(&self) -> usize {
+        self.gate.receiver_count()
+    }
+
+    async fn wait_until_released(&self) {
+        let mut gate = self.gate.subscribe();
+        while !*gate.borrow() {
+            if gate.changed().await.is_err() {
+                return;
+            }
+        }
     }
 }
 
@@ -103,16 +113,12 @@ impl Publisher for FakePublisher {
                 kind: FailureKind::Permanent,
             }),
             PUBLISH_GATE => {
-                while !self.open.load(Ordering::SeqCst) {
-                    self.notify.notified().await;
-                }
+                self.wait_until_released().await;
                 Ok(())
             }
             PUBLISH_PANIC => panic!("intentional publisher panic"),
             PUBLISH_MIXED_GATE => {
-                while !self.open.load(Ordering::SeqCst) {
-                    self.notify.notified().await;
-                }
+                self.wait_until_released().await;
                 match envelope.payload.first().copied().unwrap_or_default() {
                     0 => Ok(()),
                     1 => Err(ProtocolError {
