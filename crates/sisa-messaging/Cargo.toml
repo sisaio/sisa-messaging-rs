@@ -22,10 +22,8 @@ serde = ["dep:serde", "uuid/serde"]
 # Transport protocol primitives and identifiers.
 uuid = { workspace = true }
 
-# Optional JSON payload codec.
+# Optional serialization surfaces.
 serde = { workspace = true, optional = true }
-
-# Optional JSON serializer engine for `JsonSerializer`.
 serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]

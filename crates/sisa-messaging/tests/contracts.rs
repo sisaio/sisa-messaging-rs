@@ -80,6 +80,7 @@ fn bounded_values_reject_empty_control_and_oversized_input_without_echoing_it() 
             Err(ValidationError::InvalidCharacter)
         );
     }
+
     assert!(OrderingKey::new("x".repeat(512)).is_ok());
     assert_eq!(
         OrderingKey::new("x".repeat(513)),
@@ -113,6 +114,7 @@ fn custom_headers_reject_injection_and_framework_collisions() {
         HeaderValue::new("safe\x01"),
         Err(HeaderValueError::ControlCharacter)
     );
+
     for byte in (0_u8..=31).chain(std::iter::once(127)) {
         let expected = if byte == b'\r' || byte == b'\n' {
             HeaderValueError::Newline
@@ -129,6 +131,7 @@ fn custom_headers_reject_injection_and_framework_collisions() {
             Err(expected)
         );
     }
+
     assert!(HeaderValue::new("Zażółć gęślą").is_ok());
     assert_eq!(
         HeaderName::new("X-Import-Batch").unwrap().as_str(),
@@ -234,6 +237,7 @@ impl Error for DeepSafeChain {
 #[test]
 fn safe_error_summary_bounds_deep_source_chains_and_their_separators() {
     let mut chain = DeepSafeChain { source: None };
+
     for _ in 0..2_000 {
         chain = DeepSafeChain {
             source: Some(Box::new(chain)),
@@ -313,14 +317,18 @@ impl Settlement for ContractSettlement {
     }
 }
 
-struct ContractDelivery(Vec<u8>, ContractSettlement);
+struct ContractDelivery {
+    wire: Vec<u8>,
+
+    settlement: ContractSettlement,
+}
 
 impl Delivery for ContractDelivery {
     type Wire = Vec<u8>;
     type Settlement = ContractSettlement;
 
     fn into_parts(self) -> (Self::Wire, Self::Settlement) {
-        (self.0, self.1)
+        (self.wire, self.settlement)
     }
 }
 
@@ -362,6 +370,7 @@ fn async_capabilities_use_send_native_futures_and_static_dispatch() {
         metadata: Metadata::default(),
         ordering_key: None,
     };
+
     assert_send(ContractPublisher.publish(&serialized));
 
     let mut source = ContractSource;
@@ -378,7 +387,10 @@ fn async_capabilities_use_send_native_futures_and_static_dispatch() {
     assert_send(ContractSettlement.nak(Duration::from_secs(1)));
     assert_send(ContractSettlement.terminate());
 
-    let delivery = ContractDelivery(Vec::new(), ContractSettlement);
+    let delivery = ContractDelivery {
+        wire: Vec::new(),
+        settlement: ContractSettlement,
+    };
 
     let (wire, _settlement) = delivery.into_parts();
 
@@ -403,10 +415,12 @@ mod json_contract {
 
     fn full_metadata() -> Metadata {
         let mut headers = Headers::new();
+
         headers.insert(
             HeaderName::new("x-import-batch").unwrap(),
             HeaderValue::new("2026-09-11").unwrap(),
         );
+
         Metadata {
             correlation: CorrelationMetadata {
                 correlation_id: Some(MetadataValue::new("checkout-42").unwrap()),
@@ -444,6 +458,7 @@ mod json_contract {
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     struct JsonMessage {
         order_id: String,
+
         secret: String,
     }
 
@@ -460,6 +475,7 @@ mod json_contract {
     fn metadata_json_matches_the_additive_contract_fixture() {
         let fixture = include_str!("fixtures/metadata.json");
         let expected = full_metadata();
+
         let decoded: Metadata = serde_json::from_str(fixture).unwrap();
         let encoded = serde_json::to_string_pretty(&decoded).unwrap() + "\n";
 
@@ -546,6 +562,7 @@ mod json_contract {
             full_metadata(),
         )
         .unwrap();
+
         let serialized = JsonSerializer.serialize(&envelope).unwrap();
         let decoded: Envelope<JsonMessage> = JsonSerializer.deserialize(serialized).unwrap();
 
@@ -588,6 +605,7 @@ mod json_contract {
         let error =
             <JsonSerializer as Serializer<JsonMessage>>::deserialize(&JsonSerializer, serialized)
                 .unwrap_err();
+
         assert_eq!(error, JsonSerializerError::ContentTypeMismatch);
     }
 
@@ -606,6 +624,7 @@ mod json_contract {
         let error =
             <JsonSerializer as Serializer<JsonMessage>>::deserialize(&JsonSerializer, serialized)
                 .unwrap_err();
+
         assert_eq!(error, JsonSerializerError::MessageTypeMismatch);
         assert_eq!(error.classify(), FailureKind::Permanent);
     }
@@ -625,6 +644,7 @@ mod json_contract {
         let error =
             <JsonSerializer as Serializer<JsonMessage>>::deserialize(&JsonSerializer, serialized)
                 .unwrap_err();
+
         assert_eq!(error, JsonSerializerError::MessageVersionMismatch);
         assert_eq!(error.classify(), FailureKind::Permanent);
     }
@@ -648,6 +668,7 @@ mod json_contract {
         let error =
             <JsonSerializer as Serializer<JsonMessage>>::deserialize(&JsonSerializer, serialized)
                 .unwrap_err();
+
         assert_eq!(error, JsonSerializerError::OrderingKeyMismatch);
         assert_eq!(error.classify(), FailureKind::Permanent);
         assert!(!error.to_string().contains("must not be rendered"));

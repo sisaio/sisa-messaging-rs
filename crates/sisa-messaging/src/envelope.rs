@@ -29,20 +29,16 @@ impl<T: Message> Envelope<T> {
     ) -> Result<Self, EnvelopeError> {
         let message_type =
             MessageType::new(T::TYPE).map_err(EnvelopeError::invalid_message_type)?;
-
         let ordering_key = payload.order_by();
 
         Ok(Self {
             message_id,
-
             message_type,
-
             message_version: T::VERSION,
 
             payload,
 
             metadata,
-
             ordering_key,
         })
     }

@@ -94,17 +94,13 @@ where
 
         Ok(SerializedEnvelope {
             message_id: envelope.message_id(),
-
             message_type: envelope.message_type().clone(),
-
             message_version: envelope.message_version(),
 
             content_type,
-
             payload,
 
             metadata: envelope.metadata().clone(),
-
             ordering_key: envelope.ordering_key().cloned(),
         })
     }
