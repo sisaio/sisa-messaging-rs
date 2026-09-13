@@ -18,9 +18,9 @@ use tracing::Instrument;
 
 use crate::{DispatcherError, DispatcherSettings, OutboxStore, RetryPolicy, SettingsError};
 
-use self::leases::{RenewalOutcome, RenewalTurn};
+use self::leases::{RenewalOutcome, RenewalTurn, StoreSafety};
 use self::outcomes::accounting::{self, PersistenceTurn};
-use self::publish::PublishResult;
+use self::publish::{JoinOutcome, PublishResult};
 use self::state::State;
 
 pub use self::report::OutboxRunReport;
@@ -99,6 +99,7 @@ where
                 &self.settings.retry_policy,
                 &mut state,
                 &mut tasks,
+                &mut report,
             ) {
                 return Err(shutdown::publisher_failure(
                     &self.store,
@@ -113,36 +114,47 @@ where
 
             match leases::renew_due(&self.store, &self.settings, &mut state, &mut report).await {
                 RenewalTurn::Finished(outcome) => {
-                    match outcome {
-                        RenewalOutcome::Completed { lost } if lost > 0 => tracing::warn!(
-                            target: "messaging.outbox",
-                            operation = "extend_lease",
-                            shortfall = lost,
-                            "claim fencing shortfall"
-                        ),
-                        RenewalOutcome::Failed { permanent_error } => {
-                            tracing::warn!(
-                                target: "messaging.outbox",
-                                operation = "extend_lease",
-                                "lease renewal failed; claims will be released"
-                            );
-                            if let Some(error) = permanent_error {
-                                return Err(shutdown::store_failure(
-                                    &self.store,
-                                    &mut state,
-                                    &mut tasks,
-                                    &mut report,
-                                    self.settings.store_timeout,
-                                    error,
-                                )
-                                .await);
-                            }
-                        }
-                        RenewalOutcome::Completed { .. } => {}
+                    if let Some(error) = renewal_error(outcome) {
+                        return Err(shutdown::store_failure(
+                            &self.store,
+                            &mut state,
+                            &mut tasks,
+                            &mut report,
+                            self.settings.store_timeout,
+                            error,
+                        )
+                        .await);
                     }
                     continue;
                 }
                 RenewalTurn::NotDue => {}
+            }
+
+            if state.has_persistence() || state.has_rejected() {
+                match leases::protect_store_call(
+                    &self.store,
+                    &self.settings,
+                    &mut state,
+                    &mut report,
+                )
+                .await
+                {
+                    StoreSafety::Safe => {}
+                    StoreSafety::Renewed(outcome) => {
+                        if let Some(error) = renewal_error(outcome) {
+                            return Err(shutdown::store_failure(
+                                &self.store,
+                                &mut state,
+                                &mut tasks,
+                                &mut report,
+                                self.settings.store_timeout,
+                                error,
+                            )
+                            .await);
+                        }
+                        continue;
+                    }
+                }
             }
 
             match accounting::persist_ready(
@@ -191,7 +203,13 @@ where
                 PersistenceTurn::Idle => {}
             }
 
-            if !state.has_rejected() && state.available() > 0 && Instant::now() >= next_claim {
+            let claim_eligible = !state.has_rejected() && state.available() > 0;
+            let claim_safe = claim_eligible
+                && state
+                    .store_call_blockers(Instant::now(), self.settings.store_timeout)
+                    .is_empty();
+            let claim_due = claim_safe && Instant::now() >= next_claim;
+            if claim_due {
                 if let Some(error) = claim::available(
                     &self.store,
                     &self.settings,
@@ -214,33 +232,69 @@ where
                 continue;
             }
 
-            let wake_at = state
-                .next_renewal()
-                .map_or(next_claim, |renewal| renewal.min(next_claim));
+            let wake_at = match (state.next_renewal(), claim_safe.then_some(next_claim)) {
+                (Some(renewal), Some(claim)) => Some(renewal.min(claim)),
+                (Some(renewal), None) => Some(renewal),
+                (None, Some(claim)) => Some(claim),
+                (None, None) => None,
+            };
+            let readiness = async move {
+                match wake_at {
+                    Some(wake_at) => tokio::time::sleep_until(wake_at).await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 biased;
                 () = cancellation.cancelled() => {},
                 joined = tasks.join_next_with_id(), if state.has_tasks() => {
-                    if let Some(joined) = joined
-                        && let Err(error) = publish::finish_join(
+                    if let Some(joined) = joined {
+                        match publish::finish_join(
                             joined,
                             &self.settings.retry_policy,
                             &mut state,
-                        )
-                    {
-                        return Err(shutdown::publisher_failure(
-                            &self.store,
-                            &mut state,
-                            &mut tasks,
-                            &mut report,
-                            self.settings.store_timeout,
-                            error,
-                        )
-                        .await);
+                        ) {
+                            Ok(JoinOutcome::Retired) => report.aborted += 1,
+                            Ok(JoinOutcome::Finished) => {}
+                            Err(error) => {
+                                return Err(shutdown::publisher_failure(
+                                    &self.store,
+                                    &mut state,
+                                    &mut tasks,
+                                    &mut report,
+                                    self.settings.store_timeout,
+                                    error,
+                                )
+                                .await);
+                            }
+                        }
                     }
                 }
-                () = tokio::time::sleep_until(wake_at) => {},
+                () = readiness => {},
             }
         }
+    }
+}
+
+fn renewal_error<E>(outcome: RenewalOutcome<E>) -> Option<E> {
+    match outcome {
+        RenewalOutcome::Completed { lost } if lost > 0 => {
+            tracing::warn!(
+                target: "messaging.outbox",
+                operation = "extend_lease",
+                shortfall = lost,
+                "claim fencing shortfall"
+            );
+            None
+        }
+        RenewalOutcome::Failed { permanent_error } => {
+            tracing::warn!(
+                target: "messaging.outbox",
+                operation = "extend_lease",
+                "lease renewal failed; claims will be released"
+            );
+            permanent_error
+        }
+        RenewalOutcome::Completed { .. } => None,
     }
 }

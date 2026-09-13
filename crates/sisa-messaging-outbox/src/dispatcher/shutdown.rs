@@ -9,9 +9,9 @@ use crate::{DispatcherError, DispatcherSettings, OutboxStore, RetryPolicy};
 
 use self::persistence::{persist_one, persist_rejected_one};
 use super::OutboxRunReport;
-use super::leases::{self, RenewalOutcome};
+use super::leases::{self, RenewalOutcome, StoreSafety};
 use super::outcomes::{self, StoreCall};
-use super::publish::{self, PublishResult};
+use super::publish::{self, JoinOutcome, PublishResult};
 use super::state::State;
 
 pub(crate) async fn graceful<S, R>(
@@ -53,6 +53,7 @@ where
                 started,
                 result,
                 &due,
+                settings.lease,
                 settings.renewal_offset(),
                 state,
                 report,
@@ -61,6 +62,21 @@ where
                 permanent_error = Some(error);
             }
             continue;
+        }
+
+        if state.has_persistence() || state.has_rejected() {
+            match leases::protect_store_call(store, settings, state, report).await {
+                StoreSafety::Safe => {}
+                StoreSafety::Renewed(RenewalOutcome::Failed {
+                    permanent_error: Some(error),
+                }) => {
+                    if permanent_error.is_none() {
+                        permanent_error = Some(error);
+                    }
+                    continue;
+                }
+                StoreSafety::Renewed(_) => continue,
+            }
         }
 
         if persist_one(store, settings, state, report, &mut permanent_error).await {
@@ -105,6 +121,7 @@ where
         );
     }
 
+    state.retire_publishers(&unresolved);
     tasks.abort_all();
     while let Some(joined) = tasks.join_next_with_id().await {
         if let Some(error) = resolve_join(joined, settings, state, report) {
@@ -192,21 +209,17 @@ fn resolve_join<R: RetryPolicy>(
     state: &mut State,
     report: &mut OutboxRunReport,
 ) -> Option<tokio::task::JoinError> {
-    match joined {
-        Err(error) if error.is_cancelled() => {
+    match publish::finish_join(joined, &settings.retry_policy, state) {
+        Ok(JoinOutcome::Finished) => None,
+        Ok(JoinOutcome::Retired) => {
+            report.aborted += 1;
+            None
+        }
+        Err(error) => {
             if state.publisher_task_failed(error.id()).is_some() {
                 report.aborted += 1;
             }
-            None
+            Some(error)
         }
-        joined => match publish::finish_join(joined, &settings.retry_policy, state) {
-            Ok(()) => None,
-            Err(error) => {
-                if state.publisher_task_failed(error.id()).is_some() {
-                    report.aborted += 1;
-                }
-                Some(error)
-            }
-        },
     }
 }

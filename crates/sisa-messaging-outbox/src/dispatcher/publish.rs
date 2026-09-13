@@ -10,6 +10,7 @@ use tracing::Instrument;
 
 use crate::{Claim, DeadReason, FailureAction, RetryPolicy};
 
+use super::OutboxRunReport;
 use super::state::{PublishWork, ResolvedOutcome};
 
 pub(crate) struct PublishResult {
@@ -28,6 +29,11 @@ pub(crate) struct ClassifiedFailure {
     pub(crate) summary: ErrorSummary,
 
     pub(crate) error_type: &'static str,
+}
+
+pub(crate) enum JoinOutcome {
+    Finished,
+    Retired,
 }
 
 struct InFlightGuard;
@@ -145,6 +151,7 @@ pub(crate) fn advance_ready<P, R>(
     retry: &R,
     state: &mut super::state::State,
     tasks: &mut JoinSet<PublishResult>,
+    report: &mut OutboxRunReport,
 ) -> Result<(), tokio::task::JoinError>
 where
     P: Publisher + 'static,
@@ -152,7 +159,9 @@ where
 {
     start_pending(publisher, publish_timeout, state, tasks);
     while let Some(joined) = tasks.try_join_next_with_id() {
-        finish_join(joined, retry, state)?;
+        if matches!(finish_join(joined, retry, state)?, JoinOutcome::Retired) {
+            report.aborted += 1;
+        }
     }
     Ok(())
 }
@@ -161,22 +170,105 @@ pub(crate) fn finish_join<R: RetryPolicy>(
     joined: Result<(Id, PublishResult), tokio::task::JoinError>,
     retry: &R,
     state: &mut super::state::State,
-) -> Result<(), tokio::task::JoinError> {
+) -> Result<JoinOutcome, tokio::task::JoinError> {
     match joined {
         Ok((task_id, result)) => {
             let error_type = result.failure.as_ref().map(|failure| failure.error_type);
             crate::telemetry::publish_finished(result.elapsed, error_type);
             let Some(active_claim) = state.task_claim(task_id) else {
-                return Ok(());
+                return Ok(JoinOutcome::Finished);
             };
             debug_assert_eq!(active_claim, result.claim);
             state.resolve(task_id, resolve(&result, retry));
-            Ok(())
+            Ok(JoinOutcome::Finished)
         }
-        Err(error) if error.is_cancelled() && state.task_claim(error.id()).is_none() => Ok(()),
+        Err(error)
+            if error.is_cancelled() && state.finish_retiring_cancelled(error.id()).is_some() =>
+        {
+            Ok(JoinOutcome::Retired)
+        }
+        Err(error) if error.is_cancelled() && state.task_claim(error.id()).is_none() => {
+            Ok(JoinOutcome::Finished)
+        }
         Err(error) => {
             crate::telemetry::publish_finished(Duration::ZERO, Some("publisher.panic"));
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future;
+
+    use sisa_messaging::{ContentType, MessageId, MessageType, Metadata, SerializedEnvelope};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{ClaimToken, ClaimedRecord, ExponentialBackoff, OutboxId};
+
+    fn record() -> ClaimedRecord {
+        ClaimedRecord {
+            claim: Claim {
+                id: OutboxId::from_uuid(Uuid::from_u128(1)),
+                token: ClaimToken::from_uuid(Uuid::from_u128(2)),
+            },
+            envelope: SerializedEnvelope {
+                message_id: MessageId::from_uuid(Uuid::from_u128(3)),
+                message_type: MessageType::new("test.message")
+                    .unwrap_or_else(|error| panic!("static message type rejected: {error}")),
+                message_version: 1,
+                content_type: ContentType::new("application/test")
+                    .unwrap_or_else(|error| panic!("static content type rejected: {error}")),
+                payload: vec![1],
+                metadata: Metadata::default(),
+                ordering_key: None,
+            },
+            attempts: 0,
+        }
+    }
+
+    async fn cancelled_join(retiring: bool) -> Result<JoinOutcome, tokio::task::JoinError> {
+        let mut state = super::super::state::State::new(1);
+        let now = Instant::now();
+        let claimed = record();
+        let claim = claimed.claim;
+        state.insert_claimed(vec![claimed], now, now);
+        let _work = state
+            .next_publish()
+            .unwrap_or_else(|| panic!("record was not queued for publication"));
+        let mut tasks = JoinSet::new();
+        let abort = tasks.spawn(async { future::pending::<PublishResult>().await });
+        let task_id = abort.id();
+        let control = abort.clone();
+        state.publishing(claim, task_id, abort);
+        if retiring {
+            assert_eq!(state.retire_publishers(&[claim]), 1);
+        } else {
+            control.abort();
+        }
+        let joined = tasks
+            .join_next_with_id()
+            .await
+            .unwrap_or_else(|| panic!("cancelled task was not joined"));
+        let retry = ExponentialBackoff::new(
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            std::num::NonZeroU32::MIN,
+        )
+        .unwrap_or_else(|error| panic!("retry policy rejected: {error}"));
+
+        finish_join(joined, &retry, &mut state)
+    }
+
+    #[tokio::test]
+    async fn only_tracked_retirement_makes_task_cancellation_benign() {
+        let retired = cancelled_join(true)
+            .await
+            .unwrap_or_else(|error| panic!("retiring cancellation was terminal: {error}"));
+        assert!(matches!(retired, JoinOutcome::Retired));
+
+        let active = cancelled_join(false).await;
+        assert!(active.is_err(), "unexpected active cancellation was benign");
     }
 }

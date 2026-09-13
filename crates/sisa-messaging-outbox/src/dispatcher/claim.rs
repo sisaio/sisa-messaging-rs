@@ -62,13 +62,14 @@ where
 {
     match result {
         ClaimCall::Completed(batch) => {
+            let completed = Instant::now();
             let returned = batch.records.len();
             let delay = if batch.records.is_empty() {
                 settings.idle_poll_interval
             } else {
                 settings.poll_interval
             };
-            *next_claim = Instant::now() + delay;
+            *next_claim = completed.checked_add(delay).unwrap_or(completed);
             report.poisoned += u64::from(batch.poison.observed);
             report.dead += u64::from(batch.poison.marked_dead);
             if batch.poison.marked_dead > 0 {
@@ -85,8 +86,11 @@ where
                     "poison rows isolated during claim"
                 );
             }
-            let insertion =
-                state.insert_claimed(batch.records, started + settings.renewal_offset());
+            let renewal_at = completed
+                .checked_add(settings.renewal_offset())
+                .unwrap_or(completed);
+            let lease_safe_until = started.checked_add(settings.lease).unwrap_or(started);
+            let insertion = state.insert_claimed(batch.records, renewal_at, lease_safe_until);
             report.claimed += insertion.inserted as u64;
             crate::telemetry::claimed(insertion.inserted);
             if insertion.inserted < returned {

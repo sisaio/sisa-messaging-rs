@@ -22,6 +22,11 @@ pub(crate) enum RenewalTurn<E> {
     Finished(RenewalOutcome<E>),
 }
 
+pub(crate) enum StoreSafety<E> {
+    Safe,
+    Renewed(RenewalOutcome<E>),
+}
+
 pub(crate) async fn extend<S: OutboxStore>(
     store: &S,
     claims: &[Claim],
@@ -45,25 +50,22 @@ pub(crate) async fn extend<S: OutboxStore>(
     (started, call)
 }
 
-pub(crate) fn renewal_deadline(started: Instant, offset: Duration) -> Instant {
-    started + offset
-}
-
 pub(crate) fn finish<E: ErrorClassifier>(
     started: Instant,
     result: StoreCall<E>,
     claims: &[Claim],
+    lease: Duration,
     renewal_offset: Duration,
     state: &mut State,
     report: &mut OutboxRunReport,
 ) -> RenewalOutcome<E> {
     match result {
         StoreCall::Completed(matches) => {
-            let loss = state.apply_renewal(
-                claims,
-                &matches.confirmed,
-                renewal_deadline(started, renewal_offset),
-            );
+            let completed = Instant::now();
+            let renewal_at = completed.checked_add(renewal_offset).unwrap_or(completed);
+            let lease_safe_until = started.checked_add(lease).unwrap_or(started);
+            let loss =
+                state.apply_renewal(claims, &matches.confirmed, renewal_at, lease_safe_until);
             report.fenced += loss.total as u64;
             report.aborted += loss.retired_publishers as u64;
             RenewalOutcome::Completed { lost: loss.total }
@@ -105,8 +107,51 @@ where
         started,
         result,
         &due,
+        settings.lease,
         settings.renewal_offset(),
         state,
         report,
     ))
+}
+
+pub(crate) async fn protect_store_call<S, R>(
+    store: &S,
+    settings: &DispatcherSettings<R>,
+    state: &mut State,
+    report: &mut OutboxRunReport,
+) -> StoreSafety<S::Error>
+where
+    S: OutboxStore,
+    R: RetryPolicy,
+{
+    let blocking = state.store_call_blockers(Instant::now(), settings.store_timeout);
+    if blocking.is_empty() {
+        return StoreSafety::Safe;
+    }
+
+    let (started, result) = extend(store, &blocking, settings.lease, settings.store_timeout).await;
+    let outcome = finish(
+        started,
+        result,
+        &blocking,
+        settings.lease,
+        settings.renewal_offset(),
+        state,
+        report,
+    );
+
+    if matches!(outcome, RenewalOutcome::Completed { .. }) {
+        let still_blocking = state.store_call_blockers(Instant::now(), settings.store_timeout);
+        if !still_blocking.is_empty() {
+            let retiring = state.retire_publishers(&still_blocking);
+            tracing::warn!(
+                target: "messaging.outbox",
+                blocking = still_blocking.len(),
+                retiring,
+                "publisher claims retired after insufficient lease headroom"
+            );
+        }
+    }
+
+    StoreSafety::Renewed(outcome)
 }

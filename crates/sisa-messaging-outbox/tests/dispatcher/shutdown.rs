@@ -151,3 +151,73 @@ async fn successful_publish_racing_deadline_is_completed_before_hanging_work_is_
         "resolved outcomes must persist before releases: {operations:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pre_deadline_shutdown_renews_unsafe_live_peer_before_persisting_completion() {
+    let completed = record(0, 0);
+    let publishing = record(2, 0);
+    let store = FakeStore::new(vec![completed.clone(), publishing]);
+    store.claim_delay_ms.store(10, Ordering::SeqCst);
+    store.renew_delay_ms.store(18, Ordering::SeqCst);
+    let publisher = FakePublisher::new(PUBLISH_MIXED_GATE);
+    let cancellation = CancellationToken::new();
+    let mut configured = settings(2);
+    configured.lease = Duration::from_millis(40);
+    configured.store_timeout = Duration::from_millis(19);
+    let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
+        .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+    let run_cancel = cancellation.clone();
+    let mut task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
+
+    let publishers_started = tokio::time::timeout(
+        Duration::from_secs(1),
+        wait_for(|| publisher.active.load(Ordering::SeqCst) == 2),
+    )
+    .await;
+    if publishers_started.is_err() {
+        task.abort();
+        let _ = task.await;
+        panic!("publishers did not start: {:?}", store.lock().operations);
+    }
+    publisher.release();
+    cancellation.cancel();
+    let renewal_started = tokio::time::timeout(
+        Duration::from_secs(1),
+        wait_for(|| store.renew_entered.load(Ordering::SeqCst)),
+    )
+    .await;
+    if renewal_started.is_err() {
+        task.abort();
+        let _ = task.await;
+        panic!("renewal did not start: {:?}", store.lock().operations);
+    }
+    assert!(store.lock().completes.is_empty());
+    let joined = tokio::select! {
+        joined = &mut task => joined,
+        () = tokio::time::sleep(Duration::from_secs(1)) => {
+            task.abort();
+            let _ = task.await;
+            panic!("unsafe shutdown did not finish: {:?}", store.lock().operations);
+        }
+    };
+    let report = joined
+        .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
+        .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+
+    let operations = store.lock().operations.clone();
+    let renewal = operations
+        .iter()
+        .position(|operation| *operation == "renew")
+        .unwrap_or_else(|| panic!("renew operation missing: {operations:?}"));
+    let complete = operations
+        .iter()
+        .position(|operation| *operation == "complete")
+        .unwrap_or_else(|| panic!("complete operation missing: {operations:?}"));
+    assert!(
+        renewal < complete,
+        "unsafe persistence order: {operations:?}"
+    );
+    assert_eq!(store.lock().completes, vec![vec![completed.claim]]);
+    assert_eq!(report.completed, 1);
+    assert_eq!(report.aborted, 1);
+}
