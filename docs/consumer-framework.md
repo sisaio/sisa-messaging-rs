@@ -42,7 +42,7 @@ Transport-neutral inbound contracts live in `sisa-messaging`:
 
 - `DeliverySource`: asynchronously yields deliveries and stops cleanly when its source closes;
 - `Delivery`: splits once into an owned transport wire value and settlement handle;
-- `Settlement`: supports `ack`, delayed `nak`, `term`, and optional progress acknowledgement;
+- `Settlement`: supports `ack`, delayed `nak`, `terminate`, and optional heartbeat acknowledgement;
 - `EnvelopeMapper<Wire>`: the same mapping contract used for publication decodes the wire value
   into `SerializedEnvelope`.
 
@@ -50,12 +50,12 @@ Their semantic shape is:
 
 ```rust,ignore
 pub trait Settlement: Send + 'static {
-    type Error: std::error::Error + Send + Sync + 'static + Classify;
+    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
 
-    fn progress(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn heartbeat(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn ack(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn nak(self, delay: Duration) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn term(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn terminate(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait Delivery: Send + 'static {
@@ -67,7 +67,7 @@ pub trait Delivery: Send + 'static {
 
 pub trait DeliverySource: Send {
     type Delivery: Delivery;
-    type Error: std::error::Error + Send + Sync + 'static + Classify;
+    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
 
     fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
@@ -86,7 +86,7 @@ reply/acknowledgement capability. `None` from `receive` means a clean source clo
 fatal source result. `open` performs one-time source initialization when `Consumer::run` starts;
 constructors remain I/O-free. After opening, `receive` must be cancel-safe: dropping its readiness
 wait must neither lose nor settle a delivery. `ack_wait` returns `None` when the transport has no
-acknowledgement deadline or progress capability, in which case `progress_interval` must also be
+acknowledgement deadline or heartbeat capability, in which case `progress_interval` must also be
 `None`. `max_deliver` returns `None` for unlimited/unknown delivery count.
 
 `sisa-messaging-inbox` owns `InboxUnitOfWork`, the ability to begin, commit, and roll back the
@@ -97,7 +97,7 @@ recorded-failure bound so consumer construction can compare it with a finite bro
 ```rust,ignore
 pub trait InboxUnitOfWork: Send + Sync {
     type Transaction: Send + 'static;
-    type Error: std::error::Error + Send + Sync + 'static + Classify;
+    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
 
     fn begin(
         &self,
@@ -129,7 +129,7 @@ The public shape is intentionally small:
 
 ```rust,ignore
 pub trait ConsumerHandler<M, Tx>: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static + Classify;
+    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
 
     fn handle(
         &self,
@@ -182,7 +182,7 @@ Settings semantics are fixed:
   on a timeout loop.
 - `database_timeout` bounds each framework-owned begin, inbox, commit, rollback, and failure-record
   operation separately. It does not time out application handler code.
-- `settlement_timeout` bounds each ack, nak, term, and progress operation.
+- `settlement_timeout` bounds each ack, nak, terminate, and heartbeat operation.
 - `nak_delay` is the broker redelivery delay for retryable/in-progress work.
 - `progress_interval` is optional and must be non-zero and below half a source-reported ack wait.
 - `drain_timeout` bounds the whole graceful drain after receiving stops.
@@ -232,10 +232,10 @@ records its dead transition.
 ```text
 receive delivery
       │
-      ├─ map/decode wire failure ───────────────────────────────▶ term
+      ├─ map/decode wire failure ───────────────────────────────▶ terminate
       │
       ├─ wrong type/version or body decode failure
-      │        └─ record permanent failure when identity is safe ─▶ term
+      │        └─ record permanent failure when identity is safe ─▶ terminate
       │
       └─ valid typed envelope
                │
@@ -243,13 +243,13 @@ receive delivery
                ├─ inbox claim
                │      ├─ completed ─▶ rollback ─▶ ack
                │      ├─ in progress ▶ rollback ─▶ delayed nak
-               │      ├─ dead ───────▶ rollback ─▶ term
+               │      ├─ dead ───────▶ rollback ─▶ terminate
                │      └─ claimed
                │             ├─ handler
                │             │    ├─ success ▶ complete ▶ commit ▶ ack
                │             │    └─ error ─▶ rollback ▶ record failure
                │             │                              ├─ retry ▶ delayed nak
-               │             │                              ├─ dead ─▶ term
+               │             │                              ├─ dead ─▶ terminate
                │             │                              └─ completed elsewhere ▶ ack
                │             ├─ transient store/commit ambiguity ▶ delayed nak
                │             └─ permanent provider failure ─────▶ leave unacked; stop runtime
@@ -280,10 +280,10 @@ Rules:
     stream of messages that cannot be settled.
 
 For NATS, successful processing uses a confirmed acknowledgement when the client supports it.
-`nak`, `term`, and progress operations remain bounded by `settlement_timeout`. Failure to settle is
+`nak`, `terminate`, and heartbeat operations remain bounded by `settlement_timeout`. Failure to settle is
 observable but does not change the database result.
 
-## 6. Concurrency, progress and backpressure
+## 6. Concurrency, heartbeat and backpressure
 
 `max_in_flight` bounds deliveries that have been received but not terminally settled. The source
 is not polled for more work when all permits are occupied. This bounds:
@@ -294,11 +294,11 @@ is not polled for more work when all permits are occupied. This bounds:
 - pressure on the database pool.
 
 Each in-flight delivery has one coordinator. The database/handler workflow runs in an owned task;
-the coordinator selects only over task readiness, cancellation, and a progress timer. A progress
+the coordinator selects only over task readiness, cancellation, and a heartbeat timer. A heartbeat
 acknowledgement is performed inside the selected arm, so externally visible I/O is not embedded in
 a cancellable `select!` branch future.
 
-Progress acknowledgement covers database work and handler work. It reduces needless redelivery
+Heartbeat acknowledgement covers database work and handler work. It reduces needless redelivery
 of slow messages but does not promise exclusivity; the inbox remains the correctness mechanism.
 Progress failures are warnings and do not cancel a handler whose transaction is still healthy.
 

@@ -188,3 +188,38 @@ src/
 - System: outbox-to-JetStream, direct-publish rollback behavior, and inbox commit/ack windows.
 
 Do not use a large in-memory store to claim proof of PostgreSQL transaction behavior.
+
+## 10. Source layout and spacing
+
+Treat vertical spacing as a readability signal across `src/`, `tests/`, and `benches/`.
+
+- Group related declarations with a single blank line between groups.
+  This applies to:
+  - `const`, `let`, `static`, and struct/enum field declarations;
+  - struct and enum documentation+field/variant groups;
+  - setup/action/assertion blocks in tests and benchmarks.
+
+- In structs and data blocks, keep each documented field group separated by one blank line:
+
+```rust,ignore
+pub struct Example {
+    /// Stable ID.
+    pub id: MessageId,
+
+    /// Human label.
+    pub label: String,
+}
+```
+
+- Keep setup/arrange, execution, and assertion phases clearly separated.
+
+```rust,ignore
+let envelope = Envelope::new(...)?;
+
+let serialized = serializer.serialize(&envelope)?;
+
+assert_eq!(...);
+```
+
+- Keep `Cargo.toml` manifest families readable with one comment-per-group before each logical dependency
+  block (for example: IDs, runtime primitives, codecs, workspace crates, tests/bench utilities).
