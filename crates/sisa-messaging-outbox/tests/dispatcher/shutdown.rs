@@ -1,0 +1,80 @@
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+use sisa_messaging_outbox::OutboxDispatcher;
+use tokio_util::sync::CancellationToken;
+
+use super::support::*;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drain_deadline_aborts_unresolved_publish_and_releases_claim() {
+    let store = FakeStore::new(vec![record(1, 0)]);
+    let publisher = FakePublisher::new(PUBLISH_GATE);
+    let cancellation = CancellationToken::new();
+    let mut configured = settings(1);
+    configured.drain_timeout = Duration::from_millis(25);
+    let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
+        .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+    let run_cancel = cancellation.clone();
+    let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
+
+    wait_for(|| publisher.active.load(Ordering::SeqCst) == 1).await;
+    cancellation.cancel();
+    let report = task
+        .await
+        .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
+        .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+    assert_eq!(report.aborted, 1);
+    assert_eq!(report.released, 1);
+    assert_eq!(publisher.active.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_polls_due_renewal_between_bounded_store_calls() {
+    let store = FakeStore::new(vec![record(0, 0), record(1, 0), record(2, 0)]);
+    store
+        .complete_mode
+        .store(COMPLETE_TRANSIENT_ONCE, Ordering::SeqCst);
+    store.complete_delay_ms.store(18, Ordering::SeqCst);
+    store.fail_delay_ms.store(18, Ordering::SeqCst);
+    store.release_delay_ms.store(18, Ordering::SeqCst);
+    let publisher = FakePublisher::new(PUBLISH_MIXED_GATE);
+    let cancellation = CancellationToken::new();
+    let mut configured = settings(3);
+    configured.lease = Duration::from_millis(40);
+    configured.store_timeout = Duration::from_millis(19);
+    configured.drain_timeout = Duration::from_millis(70);
+    let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
+        .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+    let run_cancel = cancellation.clone();
+    let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
+
+    wait_for(|| publisher.active.load(Ordering::SeqCst) == 3).await;
+    cancellation.cancel();
+    publisher.release();
+    task.await
+        .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
+        .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+
+    let operations = &store.lock().operations;
+    let complete = operations
+        .iter()
+        .position(|operation| *operation == "complete")
+        .unwrap_or_else(|| panic!("complete operation missing: {operations:?}"));
+    let renewal = operations
+        .iter()
+        .position(|operation| *operation == "renew")
+        .unwrap_or_else(|| panic!("renew operation missing: {operations:?}"));
+    let release = operations
+        .iter()
+        .position(|operation| *operation == "release")
+        .unwrap_or_else(|| panic!("release operation missing: {operations:?}"));
+    assert!(
+        complete < renewal,
+        "unexpected operation order: {operations:?}"
+    );
+    assert!(
+        renewal < release,
+        "unexpected operation order: {operations:?}"
+    );
+}
