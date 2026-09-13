@@ -8,5 +8,40 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Keep behavior explicit and add features only when needed.
+default = []
+
+# JSON codec feature enables serde-backed serializer support.
+json = ["serde", "dep:serde_json"]
+
+# Core serde plumbing for message contracts and IDs.
+serde = ["dep:serde", "uuid/serde"]
+
+[dependencies]
+# Transport protocol primitives and identifiers.
+uuid = { workspace = true }
+
+# Optional JSON payload codec.
+serde = { workspace = true, optional = true }
+
+# Optional JSON serializer engine for `JsonSerializer`.
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Benchmarks for envelope/serde hot-path validation.
+criterion = { workspace = true }
+
+[[bench]]
+# Core envelope construction and metadata benchmark.
+name = "envelope"
+harness = false
+
+[[bench]]
+# JSON encode/decode benchmark.
+name = "serialization"
+harness = false
+required-features = ["json"]
+
 [lints]
 workspace = true
