@@ -30,10 +30,12 @@ fn envelope(payload_size: usize, header_count: usize, ordered: bool) -> Envelope
     let mut headers = Headers::new();
 
     for index in 0..header_count {
-        headers.insert(
-            HeaderName::new(format!("x-bench-{index}")).unwrap(),
-            HeaderValue::new(format!("value-{index}")).unwrap(),
-        );
+        headers
+            .insert(
+                HeaderName::new(format!("x-bench-{index}")).unwrap(),
+                HeaderValue::new(format!("value-{index}")).unwrap(),
+            )
+            .unwrap();
     }
 
     Envelope::new(
@@ -57,6 +59,7 @@ fn serialization_benchmarks(criterion: &mut Criterion) {
         ("small", 256, 0, false),
         ("typical", 4 * 1_024, 8, true),
         ("large", 64 * 1_024, 32, false),
+        ("header_limit", 64 * 1_024, 64, false),
     ] {
         let envelope = envelope(payload_size, header_count, ordered);
 

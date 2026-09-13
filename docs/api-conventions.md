@@ -76,6 +76,11 @@ Validate strings according to their boundary:
 - Header names use transport-neutral name grammar and reject the framework-reserved namespace.
 - Header values reject ASCII control bytes (including CR and LF), plus excess size; they need not be
   limited to visible ASCII.
+- Custom-header collections retain at most 64 distinct canonical names and 65,536 decoded UTF-8
+  bytes across retained canonical names plus values. Count every retained canonical name and value
+  exactly once; exclude JSON syntax and escaping, allocator or map overhead, framework headers, and
+  other metadata fields. Replacements use the canonical name, do not consume another count slot,
+  and must leave the collection unchanged if their resulting aggregate exceeds the byte bound.
 - NATS subject rules live in `sisa-messaging-nats`.
 
 Do not apply `char::is_control()` indiscriminately to all application strings. The purpose is to
@@ -124,6 +129,9 @@ Use `thiserror` for mechanical `Display`, `Error`, and source implementations. D
 in the workspace and in every crate using its derive; its transitive presence through SQLx or
 async-nats is insufficient. `thiserror` does not replace explicit retry classification or careful
 redaction.
+
+The small, source-free header validation errors in `sisa-messaging` retain manual `Display` and
+`Error` implementations so this core boundary does not add a dependency solely for those enums.
 
 Error mapping rules:
 

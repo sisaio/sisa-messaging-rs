@@ -27,6 +27,7 @@ pub use error::{ErrorSummary, MAX_ERROR_SUMMARY_BYTES};
 pub use failure::{ErrorClassifier, FailureKind};
 pub use headers::{
     FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers,
+    HeadersError, MAX_CUSTOM_HEADER_BYTES, MAX_CUSTOM_HEADER_COUNT,
 };
 pub use ids::{ConversationId, MessageId, RequestId};
 pub use mapper::EnvelopeMapper;

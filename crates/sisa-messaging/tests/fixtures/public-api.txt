@@ -2,7 +2,7 @@ delivery::{Delivery,DeliverySource,Settlement}
 envelope::{Envelope,EnvelopeError,SerializedEnvelope}
 error::{ErrorSummary,MAX_ERROR_SUMMARY_BYTES}
 failure::{ErrorClassifier,FailureKind}
-headers::{FrameworkHeader,HeaderName,HeaderNameError,HeaderValue,HeaderValueError,Headers}
+headers::{FrameworkHeader,HeaderName,HeaderNameError,HeaderValue,HeaderValueError,Headers,HeadersError,MAX_CUSTOM_HEADER_BYTES,MAX_CUSTOM_HEADER_COUNT}
 ids::{ConversationId,MessageId,RequestId}
 mapper::EnvelopeMapper
 message::{ContentType,Message,MessageType,MetadataValue,OrderingKey,ValidationError}
