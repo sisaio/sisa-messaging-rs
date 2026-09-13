@@ -34,6 +34,7 @@ impl Error for SafeBenchError {}
 
 fn metadata(header_count: usize) -> Metadata {
     let mut headers = Headers::new();
+
     for index in 0..header_count {
         headers.insert(
             HeaderName::new(format!("x-bench-{index}")).unwrap(),
@@ -62,6 +63,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
         ("large", 32, false),
     ] {
         let metadata = metadata(header_count);
+
         let order_id = ordered.then(|| OrderingKey::new("order-42").unwrap());
 
         group.bench_with_input(BenchmarkId::new("profile", name), &name, |bencher, _| {

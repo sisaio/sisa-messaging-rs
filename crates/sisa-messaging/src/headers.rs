@@ -333,7 +333,7 @@ impl Headers {
         self.0.insert(name, value)
     }
 
-    /// Gets a value by its case-preserving validated name.
+    /// Gets a value by its validated canonical-lowercase name.
     #[must_use]
     pub fn get(&self, name: &HeaderName) -> Option<&HeaderValue> {
         self.0.get(name)

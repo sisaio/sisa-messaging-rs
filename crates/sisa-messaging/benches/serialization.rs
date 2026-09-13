@@ -27,6 +27,7 @@ impl Message for BenchMessage {
 
 fn envelope(payload_size: usize, header_count: usize, ordered: bool) -> Envelope<BenchMessage> {
     let mut headers = Headers::new();
+
     for index in 0..header_count {
         headers.insert(
             HeaderName::new(format!("x-bench-{index}")).unwrap(),
@@ -57,6 +58,7 @@ fn serialization_benchmarks(criterion: &mut Criterion) {
         ("large", 64 * 1_024, 32, false),
     ] {
         let envelope = envelope(payload_size, header_count, ordered);
+
         let serialized = JsonSerializer.serialize(&envelope).unwrap();
 
         group.bench_with_input(BenchmarkId::new("serialize", name), &name, |bencher, _| {

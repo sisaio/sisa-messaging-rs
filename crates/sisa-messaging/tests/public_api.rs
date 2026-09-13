@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+// Import every crate-root export so missing or relocated names fail at compile time.
 #[allow(unused_imports)]
 use sisa_messaging::{
     ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata, DeliverySource,
