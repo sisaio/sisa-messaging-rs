@@ -144,19 +144,23 @@ impl State {
         Some(claim)
     }
 
-    pub(crate) fn mark_release(&mut self, claims: &[Claim]) {
+    pub(crate) fn mark_release(&mut self, claims: &[Claim]) -> usize {
+        let mut retired_publishers = 0;
         for claim in claims {
             if let Some(owned) = self.claims.get_mut(claim) {
                 if let Phase::Publishing { task_id, abort } = &owned.phase {
                     abort.abort();
                     self.tasks.remove(task_id);
+                    retired_publishers += 1;
                 }
                 owned.phase = Phase::Release;
             }
         }
+        retired_publishers
     }
 
-    pub(crate) fn remove(&mut self, claims: &[Claim]) {
+    pub(crate) fn remove(&mut self, claims: &[Claim]) -> usize {
+        let mut retired_publishers = 0;
         for claim in claims {
             self.envelopes.remove(claim);
             if let Some(owned) = self.claims.remove(claim)
@@ -164,8 +168,10 @@ impl State {
             {
                 abort.abort();
                 self.tasks.remove(&task_id);
+                retired_publishers += 1;
             }
         }
+        retired_publishers
     }
 
     pub(crate) fn all_claims(&self) -> Vec<Claim> {

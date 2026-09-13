@@ -112,3 +112,33 @@ async fn ambiguous_complete_is_released_without_local_republish() {
     assert_eq!(publisher.calls.load(Ordering::SeqCst), 1);
     assert_eq!(store.lock().completes.len(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resolved_outcome_is_persisted_while_only_publishing_claim_is_renewed() {
+    let completed = record(0, 0);
+    let publishing = record(2, 0);
+    let store = FakeStore::new(vec![completed.clone(), publishing.clone()]);
+    store.renew_mode.store(RENEW_NONE, Ordering::SeqCst);
+    let publisher = FakePublisher::new(PUBLISH_MIXED_GATE);
+    let cancellation = CancellationToken::new();
+    let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), settings(2))
+        .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+    let run_cancel = cancellation.clone();
+    let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
+
+    wait_for(|| publisher.active.load(Ordering::SeqCst) == 2).await;
+    publisher.release();
+    wait_for(|| !store.lock().completes.is_empty()).await;
+    wait_for(|| !store.lock().renewals.is_empty()).await;
+    cancellation.cancel();
+    let report = task
+        .await
+        .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
+        .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+
+    assert_eq!(report.completed, 1);
+    assert_eq!(report.fenced, 1);
+    assert_eq!(report.aborted, 1);
+    assert_eq!(store.lock().completes, vec![vec![completed.claim]]);
+    assert_eq!(store.lock().renewals, vec![vec![publishing.claim]]);
+}

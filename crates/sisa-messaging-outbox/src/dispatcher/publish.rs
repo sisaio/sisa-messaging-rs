@@ -164,9 +164,12 @@ pub(crate) fn finish_join<R: RetryPolicy>(
 ) -> Result<(), tokio::task::JoinError> {
     match joined {
         Ok((task_id, result)) => {
-            debug_assert_eq!(state.task_claim(task_id), Some(result.claim));
             let error_type = result.failure.as_ref().map(|failure| failure.error_type);
             crate::telemetry::publish_finished(result.elapsed, error_type);
+            let Some(active_claim) = state.task_claim(task_id) else {
+                return Ok(());
+            };
+            debug_assert_eq!(active_claim, result.claim);
             state.resolve(task_id, resolve(&result, retry));
             Ok(())
         }

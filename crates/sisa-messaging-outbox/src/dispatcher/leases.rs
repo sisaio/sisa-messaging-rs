@@ -59,28 +59,26 @@ pub(crate) fn finish<E: ErrorClassifier>(
 ) -> RenewalOutcome<E> {
     match result {
         StoreCall::Completed(matches) => {
-            let lost = state.apply_renewal(
+            let loss = state.apply_renewal(
                 claims,
                 &matches.confirmed,
                 renewal_deadline(started, renewal_offset),
             );
-            report.fenced += lost as u64;
-            report.aborted += lost as u64;
-            RenewalOutcome::Completed { lost }
+            report.fenced += loss.total as u64;
+            report.aborted += loss.retired_publishers as u64;
+            RenewalOutcome::Completed { lost: loss.total }
         }
         StoreCall::Failed(error) => {
             let permanent = !error.classify().is_retryable();
             report.store_failures += 1;
-            report.aborted += claims.len() as u64;
-            state.mark_release(claims);
+            report.aborted += state.mark_release(claims) as u64;
             RenewalOutcome::Failed {
                 permanent_error: permanent.then_some(error),
             }
         }
         StoreCall::TimedOut => {
             report.store_failures += 1;
-            report.aborted += claims.len() as u64;
-            state.mark_release(claims);
+            report.aborted += state.mark_release(claims) as u64;
             RenewalOutcome::Failed {
                 permanent_error: None,
             }

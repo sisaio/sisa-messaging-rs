@@ -39,6 +39,10 @@ where
             }
         }
 
+        if Instant::now() >= deadline {
+            break;
+        }
+
         let due = state.due_renewals(Instant::now());
         if !due.is_empty() {
             let (started, result) =
@@ -62,7 +66,7 @@ where
         if persist_one(store, settings, state, report, &mut permanent_error).await {
             continue;
         }
-        if !state.has_tasks() || Instant::now() >= deadline {
+        if !state.has_tasks() {
             break;
         }
 
@@ -88,12 +92,14 @@ where
             unresolved = unresolved.len(),
             "dispatcher drain deadline reached"
         );
-        report.aborted += unresolved.len() as u64;
-        state.mark_release(&unresolved);
     }
 
     tasks.abort_all();
-    while tasks.join_next().await.is_some() {}
+    while let Some(joined) = tasks.join_next_with_id().await {
+        if let Some(error) = resolve_join(joined, settings, state, report) {
+            publisher_error.get_or_insert(error);
+        }
+    }
 
     while persist_one(store, settings, state, report, &mut permanent_error).await {}
 
@@ -156,12 +162,21 @@ fn resolve_join<R: RetryPolicy>(
     state: &mut State,
     report: &mut OutboxRunReport,
 ) -> Option<tokio::task::JoinError> {
-    match publish::finish_join(joined, &settings.retry_policy, state) {
-        Ok(()) => None,
-        Err(error) => {
-            report.aborted += 1;
-            state.publisher_task_failed(error.id());
-            Some(error)
+    match joined {
+        Err(error) if error.is_cancelled() => {
+            if state.publisher_task_failed(error.id()).is_some() {
+                report.aborted += 1;
+            }
+            None
         }
+        joined => match publish::finish_join(joined, &settings.retry_policy, state) {
+            Ok(()) => None,
+            Err(error) => {
+                if state.publisher_task_failed(error.id()).is_some() {
+                    report.aborted += 1;
+                }
+                Some(error)
+            }
+        },
     }
 }

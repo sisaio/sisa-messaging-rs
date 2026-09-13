@@ -19,20 +19,6 @@ where
     S: OutboxStore,
     R: RetryPolicy,
 {
-    let releases = state.release_batch();
-    if !releases.is_empty() {
-        match outcomes::release(store, &releases, settings.store_timeout).await {
-            StoreCall::Completed(matches) => {
-                report.released += matches.confirmed.len() as u64;
-                report.fenced += releases.len().saturating_sub(matches.confirmed.len()) as u64;
-            }
-            StoreCall::Failed(error) => capture_permanent(error, permanent_error, report),
-            StoreCall::TimedOut => report.store_failures += 1,
-        }
-        state.remove(&releases);
-        return true;
-    }
-
     let completions = state.completion_batch();
     if !completions.is_empty() {
         match outcomes::complete(store, &completions, settings.store_timeout).await {
@@ -70,6 +56,20 @@ where
                 state.mark_release(&claims);
             }
         }
+        return true;
+    }
+
+    let releases = state.release_batch();
+    if !releases.is_empty() {
+        match outcomes::release(store, &releases, settings.store_timeout).await {
+            StoreCall::Completed(matches) => {
+                report.released += matches.confirmed.len() as u64;
+                report.fenced += releases.len().saturating_sub(matches.confirmed.len()) as u64;
+            }
+            StoreCall::Failed(error) => capture_permanent(error, permanent_error, report),
+            StoreCall::TimedOut => report.store_failures += 1,
+        }
+        state.remove(&releases);
         return true;
     }
 

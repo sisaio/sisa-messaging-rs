@@ -8,12 +8,17 @@ use crate::Claim;
 
 use super::{Phase, State};
 
+pub(crate) struct RenewalLoss {
+    pub(crate) total: usize,
+    pub(crate) retired_publishers: usize,
+}
+
 impl State {
     pub(crate) fn due_renewals(&self, now: Instant) -> Vec<Claim> {
         self.claims
             .iter()
             .filter_map(|(claim, owned)| {
-                (!matches!(owned.phase, Phase::Release) && owned.renewal_at <= now)
+                (matches!(owned.phase, Phase::Publishing { .. }) && owned.renewal_at <= now)
                     .then_some(*claim)
             })
             .collect()
@@ -22,7 +27,7 @@ impl State {
     pub(crate) fn next_renewal(&self) -> Option<Instant> {
         self.claims
             .values()
-            .filter(|owned| !matches!(owned.phase, Phase::Release))
+            .filter(|owned| matches!(owned.phase, Phase::Publishing { .. }))
             .map(|owned| owned.renewal_at)
             .min()
     }
@@ -32,7 +37,7 @@ impl State {
         requested: &[Claim],
         confirmed: &[Claim],
         renewal_at: Instant,
-    ) -> usize {
+    ) -> RenewalLoss {
         let matches = confirmed.iter().copied().collect::<HashSet<_>>();
         let mut lost = Vec::new();
 
@@ -46,8 +51,11 @@ impl State {
             }
         }
 
-        let lost_count = lost.len();
-        self.remove(&lost);
-        lost_count
+        let total = lost.len();
+        let retired_publishers = self.remove(&lost);
+        RenewalLoss {
+            total,
+            retired_publishers,
+        }
     }
 }
