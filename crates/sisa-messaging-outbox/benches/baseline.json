@@ -1,0 +1,85 @@
+{
+  "git_revision": "ee1617c2443b98d362c44c9277a891e549c5ce85",
+  "dirty": false,
+  "status": "initial clean Phase 3 baseline",
+  "rust_version": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "target": "aarch64-apple-darwin",
+  "profile": "bench",
+  "features": "all",
+  "os": "Darwin 25.5.0 arm64",
+  "cpu": "Apple arm64; exact model unavailable in sandbox",
+  "cpu_count": null,
+  "memory_bytes": null,
+  "container_runtime": null,
+  "postgresql_version": null,
+  "nats_version": null,
+  "warm_up_seconds": 3.0,
+  "measurement_seconds": 5.0,
+  "samples": 100,
+  "seed": null,
+  "results": {
+    "outbox_capacity_accounting.available.1": {
+      "estimate_low_ns": 2.0759,
+      "estimate_mid_ns": 2.0927,
+      "estimate_high_ns": 2.1115
+    },
+    "outbox_capacity_accounting.available.32": {
+      "estimate_low_ns": 2.0820,
+      "estimate_mid_ns": 2.0977,
+      "estimate_high_ns": 2.1138
+    },
+    "outbox_capacity_accounting.available.256": {
+      "estimate_low_ns": 2.0443,
+      "estimate_mid_ns": 2.0735,
+      "estimate_high_ns": 2.1148
+    },
+    "outbox_capacity_accounting.available.1024": {
+      "estimate_low_ns": 2.0031,
+      "estimate_mid_ns": 2.0137,
+      "estimate_high_ns": 2.0246
+    },
+    "outbox_outcome_grouping_fencing.group_and_reduce.1": {
+      "estimate_low_ns": 48.701,
+      "estimate_mid_ns": 48.770,
+      "estimate_high_ns": 48.834
+    },
+    "outbox_outcome_grouping_fencing.group_and_reduce.32": {
+      "estimate_low_ns": 558.87,
+      "estimate_mid_ns": 562.95,
+      "estimate_high_ns": 568.39
+    },
+    "outbox_outcome_grouping_fencing.group_and_reduce.256": {
+      "estimate_low_ns": 4369.5,
+      "estimate_mid_ns": 4378.6,
+      "estimate_high_ns": 4387.8
+    },
+    "outbox_outcome_grouping_fencing.group_and_reduce.1024": {
+      "estimate_low_ns": 17123.0,
+      "estimate_mid_ns": 17222.0,
+      "estimate_high_ns": 17334.0
+    },
+    "outbox_retry_delay.1": {
+      "estimate_low_ns": 1.5148,
+      "estimate_mid_ns": 1.5187,
+      "estimate_high_ns": 1.5229
+    },
+    "outbox_retry_delay.5": {
+      "estimate_low_ns": 1.5237,
+      "estimate_mid_ns": 1.5286,
+      "estimate_high_ns": 1.5341
+    },
+    "outbox_retry_delay.9": {
+      "estimate_low_ns": 1.5234,
+      "estimate_mid_ns": 1.5356,
+      "estimate_high_ns": 1.5544
+    },
+    "outbox_retry_delay.10": {
+      "estimate_low_ns": 0.96399,
+      "estimate_mid_ns": 0.97207,
+      "estimate_high_ns": 0.98159
+    }
+  },
+  "error_count": 0,
+  "retry_count": 0,
+  "oracle": "CPU-only retry, capacity, grouping, and fencing operations completed; no database or broker throughput claim"
+}
