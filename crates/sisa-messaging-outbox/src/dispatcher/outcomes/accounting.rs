@@ -17,6 +17,26 @@ pub(crate) enum PersistenceTurn<E> {
     Permanent(E),
 }
 
+pub(crate) fn warn_suppressed(operation: &'static str, category: &'static str, count: usize) {
+    if count > 0 {
+        tracing::warn!(
+            target: "messaging.outbox",
+            operation,
+            category,
+            count,
+            "outbox persistence outcome suppressed"
+        );
+    }
+}
+
+pub(crate) fn warn_fencing_shortfall(operation: &'static str, requested: usize, confirmed: usize) {
+    warn_suppressed(
+        operation,
+        "fencing_shortfall",
+        requested.saturating_sub(confirmed),
+    );
+}
+
 pub(crate) async fn persist_ready<S: OutboxStore>(
     store: &S,
     timeout: Duration,
@@ -53,15 +73,22 @@ pub(crate) async fn persist_rejected_ready<S: OutboxStore>(
     let error = match result {
         StoreCall::Completed(matches) => {
             report.released += matches.confirmed.len() as u64;
-            report.fenced += requested.len().saturating_sub(matches.confirmed.len()) as u64;
+            let shortfall = requested.len().saturating_sub(matches.confirmed.len());
+            report.fenced += shortfall as u64;
+            warn_fencing_shortfall("rejected_release", requested.len(), matches.confirmed.len());
             None
         }
         StoreCall::Failed(error) => {
             report.store_failures += 1;
-            (!error.classify().is_retryable()).then_some(error)
+            let retryable = error.classify().is_retryable();
+            if retryable {
+                warn_suppressed("rejected_release", "transient_failure", requested.len());
+            }
+            (!retryable).then_some(error)
         }
         StoreCall::TimedOut => {
             report.store_failures += 1;
+            warn_suppressed("rejected_release", "timeout", requested.len());
             None
         }
     };
@@ -138,11 +165,15 @@ pub(crate) fn finish_completions<E: ErrorClassifier>(
             let permanent = !error.classify().is_retryable();
             report.store_failures += 1;
             state.mark_release(requested);
+            if !permanent {
+                warn_suppressed("complete", "transient_failure", requested.len());
+            }
             permanent.then_some(error)
         }
         StoreCall::TimedOut => {
             report.store_failures += 1;
             state.mark_release(requested);
+            warn_suppressed("complete", "timeout", requested.len());
             None
         }
     }
@@ -157,7 +188,9 @@ pub(crate) fn finish_releases<E: ErrorClassifier>(
     match result {
         StoreCall::Completed(matches) => {
             report.released += matches.confirmed.len() as u64;
-            report.fenced += requested.len().saturating_sub(matches.confirmed.len()) as u64;
+            let shortfall = requested.len().saturating_sub(matches.confirmed.len());
+            report.fenced += shortfall as u64;
+            warn_fencing_shortfall("release", requested.len(), matches.confirmed.len());
             state.remove(requested);
             None
         }
@@ -165,11 +198,15 @@ pub(crate) fn finish_releases<E: ErrorClassifier>(
             let permanent = !error.classify().is_retryable();
             report.store_failures += 1;
             state.remove(requested);
+            if !permanent {
+                warn_suppressed("release", "transient_failure", requested.len());
+            }
             permanent.then_some(error)
         }
         StoreCall::TimedOut => {
             report.store_failures += 1;
             state.remove(requested);
+            warn_suppressed("release", "timeout", requested.len());
             None
         }
     }
@@ -191,11 +228,15 @@ pub(crate) fn finish_failures<E: ErrorClassifier>(
             let permanent = !error.classify().is_retryable();
             report.store_failures += 1;
             state.mark_release(requested);
+            if !permanent {
+                warn_suppressed("fail", "transient_failure", requested.len());
+            }
             permanent.then_some(error)
         }
         StoreCall::TimedOut => {
             report.store_failures += 1;
             state.mark_release(requested);
+            warn_suppressed("fail", "timeout", requested.len());
             None
         }
     }
@@ -211,7 +252,9 @@ pub(crate) fn confirmed_completions(
     if !matches.confirmed.is_empty() {
         crate::telemetry::published(matches.confirmed.len());
     }
-    report.fenced += requested.len().saturating_sub(matches.confirmed.len()) as u64;
+    let shortfall = requested.len().saturating_sub(matches.confirmed.len());
+    report.fenced += shortfall as u64;
+    warn_fencing_shortfall("complete", requested.len(), matches.confirmed.len());
     state.remove(requested);
 }
 
@@ -224,7 +267,9 @@ pub(crate) fn confirmed_failures(
 ) {
     let confirmed = matches.confirmed.iter().copied().collect::<HashSet<_>>();
     observe_confirmed_failures(failures, &confirmed, report);
-    report.fenced += requested.len().saturating_sub(confirmed.len()) as u64;
+    let shortfall = requested.len().saturating_sub(confirmed.len());
+    report.fenced += shortfall as u64;
+    warn_fencing_shortfall("fail", requested.len(), confirmed.len());
     state.remove(requested);
 }
 

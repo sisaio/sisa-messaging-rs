@@ -163,8 +163,29 @@ pub(crate) async fn cleanup_after_fatal<S: OutboxStore>(
         StoreCall::Completed(matches) => {
             report.released += matches.confirmed.len() as u64;
             report.fenced += claims.len().saturating_sub(matches.confirmed.len()) as u64;
+            super::outcomes::accounting::warn_fencing_shortfall(
+                "cleanup_release",
+                claims.len(),
+                matches.confirmed.len(),
+            );
         }
-        StoreCall::Failed(_) | StoreCall::TimedOut => report.store_failures += 1,
+        StoreCall::Failed(error) => {
+            report.store_failures += 1;
+            let category = if sisa_messaging::ErrorClassifier::classify(&error).is_retryable() {
+                "transient_failure"
+            } else {
+                "permanent_failure"
+            };
+            super::outcomes::accounting::warn_suppressed("cleanup_release", category, claims.len());
+        }
+        StoreCall::TimedOut => {
+            report.store_failures += 1;
+            super::outcomes::accounting::warn_suppressed(
+                "cleanup_release",
+                "timeout",
+                claims.len(),
+            );
+        }
     }
     state.remove(&claims);
 
