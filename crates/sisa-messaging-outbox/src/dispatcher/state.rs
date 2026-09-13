@@ -3,7 +3,7 @@
 mod leases;
 mod outcomes;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use sisa_messaging::SerializedEnvelope;
 use tokio::task::{AbortHandle, Id};
@@ -38,6 +38,16 @@ pub(crate) struct PublishWork {
     pub(crate) attempts: u32,
 }
 
+pub(crate) struct ClaimInsert {
+    pub(crate) inserted: usize,
+
+    pub(crate) retained_rejected: usize,
+
+    pub(crate) dropped_to_expiry: usize,
+
+    pub(crate) duplicates: usize,
+}
+
 pub(crate) struct State {
     capacity: usize,
 
@@ -48,6 +58,10 @@ pub(crate) struct State {
     pending_order: VecDeque<Claim>,
 
     tasks: HashMap<Id, Claim>,
+
+    rejected: VecDeque<Claim>,
+
+    rejected_set: HashSet<Claim>,
 }
 
 impl State {
@@ -58,6 +72,8 @@ impl State {
             envelopes: HashMap::with_capacity(capacity),
             pending_order: VecDeque::with_capacity(capacity),
             tasks: HashMap::with_capacity(capacity),
+            rejected: VecDeque::with_capacity(capacity),
+            rejected_set: HashSet::with_capacity(capacity),
         }
     }
 
@@ -69,12 +85,26 @@ impl State {
         &mut self,
         records: Vec<ClaimedRecord>,
         renewal_at: Instant,
-    ) -> Vec<Claim> {
-        let mut overflow = Vec::new();
+    ) -> ClaimInsert {
+        let mut inserted = 0_usize;
+        let mut retained_rejected = 0_usize;
+        let mut dropped_to_expiry = 0_usize;
+        let mut duplicates = 0_usize;
 
         for record in records {
-            if self.available() == 0 || self.claims.contains_key(&record.claim) {
-                overflow.push(record.claim);
+            if self.claims.contains_key(&record.claim) || self.rejected_set.contains(&record.claim)
+            {
+                duplicates = duplicates.saturating_add(1);
+                continue;
+            }
+            if self.available() == 0 {
+                if self.rejected.len() < self.capacity {
+                    self.rejected_set.insert(record.claim);
+                    self.rejected.push_back(record.claim);
+                    retained_rejected = retained_rejected.saturating_add(1);
+                } else {
+                    dropped_to_expiry = dropped_to_expiry.saturating_add(1);
+                }
                 continue;
             }
 
@@ -89,9 +119,15 @@ impl State {
                 },
             );
             self.pending_order.push_back(claim);
+            inserted = inserted.saturating_add(1);
         }
 
-        overflow
+        ClaimInsert {
+            inserted,
+            retained_rejected,
+            dropped_to_expiry,
+            duplicates,
+        }
     }
 
     pub(crate) fn next_publish(&mut self) -> Option<PublishWork> {
@@ -196,5 +232,22 @@ impl State {
 
     pub(crate) fn has_tasks(&self) -> bool {
         !self.tasks.is_empty()
+    }
+
+    pub(crate) fn has_rejected(&self) -> bool {
+        !self.rejected.is_empty()
+    }
+
+    pub(crate) fn rejected_batch(&self) -> Vec<Claim> {
+        self.rejected.iter().take(self.capacity).copied().collect()
+    }
+
+    pub(crate) fn retire_rejected(&mut self, count: usize) {
+        for _ in 0..count {
+            let Some(claim) = self.rejected.pop_front() else {
+                break;
+            };
+            self.rejected_set.remove(&claim);
+        }
     }
 }

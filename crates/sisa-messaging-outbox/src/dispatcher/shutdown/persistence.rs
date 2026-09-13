@@ -76,6 +76,25 @@ where
     false
 }
 
+pub(super) async fn persist_rejected_one<S: OutboxStore>(
+    store: &S,
+    timeout: std::time::Duration,
+    state: &mut State,
+    report: &mut OutboxRunReport,
+    permanent_error: &mut Option<S::Error>,
+) -> bool {
+    match accounting::persist_rejected_ready(store, timeout, state, report).await {
+        accounting::PersistenceTurn::Idle => false,
+        accounting::PersistenceTurn::Progressed => true,
+        accounting::PersistenceTurn::Permanent(error) => {
+            if permanent_error.is_none() {
+                *permanent_error = Some(error);
+            }
+            true
+        }
+    }
+}
+
 pub(super) fn capture_permanent<E: ErrorClassifier>(
     error: E,
     permanent_error: &mut Option<E>,

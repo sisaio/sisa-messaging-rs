@@ -62,6 +62,7 @@ where
 {
     match result {
         ClaimCall::Completed(batch) => {
+            let returned = batch.records.len();
             let delay = if batch.records.is_empty() {
                 settings.idle_poll_interval
             } else {
@@ -84,16 +85,19 @@ where
                     "poison rows isolated during claim"
                 );
             }
-            let accepted = batch.records.len().min(state.available());
-            report.claimed += accepted as u64;
-            crate::telemetry::claimed(accepted);
-            let overflow = state.insert_claimed(batch.records, started + settings.renewal_offset());
-            if !overflow.is_empty() {
+            let insertion =
+                state.insert_claimed(batch.records, started + settings.renewal_offset());
+            report.claimed += insertion.inserted as u64;
+            crate::telemetry::claimed(insertion.inserted);
+            if insertion.inserted < returned {
                 report.store_failures += 1;
                 tracing::error!(
                     target: "messaging.outbox",
-                    overflow = overflow.len(),
-                    "store exceeded requested claim capacity"
+                    inserted = insertion.inserted,
+                    retained_rejected = insertion.retained_rejected,
+                    dropped_to_expiry = insertion.dropped_to_expiry,
+                    duplicates = insertion.duplicates,
+                    "store returned duplicate or excess claims"
                 );
             }
             None

@@ -7,7 +7,7 @@ use tokio::time::Instant;
 
 use crate::{DispatcherError, DispatcherSettings, OutboxStore, RetryPolicy};
 
-use self::persistence::persist_one;
+use self::persistence::{persist_one, persist_rejected_one};
 use super::OutboxRunReport;
 use super::leases::{self, RenewalOutcome};
 use super::outcomes::{self, StoreCall};
@@ -66,6 +66,17 @@ where
         if persist_one(store, settings, state, report, &mut permanent_error).await {
             continue;
         }
+        if persist_rejected_one(
+            store,
+            settings.store_timeout,
+            state,
+            report,
+            &mut permanent_error,
+        )
+        .await
+        {
+            continue;
+        }
         if !state.has_tasks() {
             break;
         }
@@ -102,6 +113,15 @@ where
     }
 
     while persist_one(store, settings, state, report, &mut permanent_error).await {}
+    while persist_rejected_one(
+        store,
+        settings.store_timeout,
+        state,
+        report,
+        &mut permanent_error,
+    )
+    .await
+    {}
 
     if let Some(error) = publisher_error {
         return Err(DispatcherError::PublisherTask(error));
@@ -130,6 +150,16 @@ pub(crate) async fn cleanup_after_fatal<S: OutboxStore>(
         StoreCall::Failed(_) | StoreCall::TimedOut => report.store_failures += 1,
     }
     state.remove(&claims);
+
+    while state.has_rejected() {
+        match super::outcomes::accounting::persist_rejected_ready(store, timeout, state, report)
+            .await
+        {
+            super::outcomes::accounting::PersistenceTurn::Idle => break,
+            super::outcomes::accounting::PersistenceTurn::Progressed
+            | super::outcomes::accounting::PersistenceTurn::Permanent(_) => {}
+        }
+    }
 }
 
 pub(crate) async fn store_failure<S: OutboxStore>(

@@ -38,6 +38,37 @@ pub(crate) async fn persist_ready<S: OutboxStore>(
     PersistenceTurn::Idle
 }
 
+pub(crate) async fn persist_rejected_ready<S: OutboxStore>(
+    store: &S,
+    timeout: Duration,
+    state: &mut State,
+    report: &mut OutboxRunReport,
+) -> PersistenceTurn<S::Error> {
+    let requested = state.rejected_batch();
+    if requested.is_empty() {
+        return PersistenceTurn::Idle;
+    }
+
+    let result = super::release(store, &requested, timeout).await;
+    let error = match result {
+        StoreCall::Completed(matches) => {
+            report.released += matches.confirmed.len() as u64;
+            report.fenced += requested.len().saturating_sub(matches.confirmed.len()) as u64;
+            None
+        }
+        StoreCall::Failed(error) => {
+            report.store_failures += 1;
+            (!error.classify().is_retryable()).then_some(error)
+        }
+        StoreCall::TimedOut => {
+            report.store_failures += 1;
+            None
+        }
+    };
+    state.retire_rejected(requested.len());
+    turn(error)
+}
+
 fn turn<E>(error: Option<E>) -> PersistenceTurn<E> {
     error.map_or(PersistenceTurn::Progressed, PersistenceTurn::Permanent)
 }

@@ -168,7 +168,30 @@ where
                 PersistenceTurn::Idle => {}
             }
 
-            if state.available() > 0 && Instant::now() >= next_claim {
+            match accounting::persist_rejected_ready(
+                &self.store,
+                self.settings.store_timeout,
+                &mut state,
+                &mut report,
+            )
+            .await
+            {
+                PersistenceTurn::Permanent(error) => {
+                    return Err(shutdown::store_failure(
+                        &self.store,
+                        &mut state,
+                        &mut tasks,
+                        &mut report,
+                        self.settings.store_timeout,
+                        error,
+                    )
+                    .await);
+                }
+                PersistenceTurn::Progressed => continue,
+                PersistenceTurn::Idle => {}
+            }
+
+            if !state.has_rejected() && state.available() > 0 && Instant::now() >= next_claim {
                 if let Some(error) = claim::available(
                     &self.store,
                     &self.settings,

@@ -18,6 +18,9 @@ pub(crate) const COMPLETE_PERMANENT: u8 = 3;
 pub(crate) const COMPLETE_NONE: u8 = 4;
 pub(crate) const RENEW_ALL: u8 = 0;
 pub(crate) const RENEW_NONE: u8 = 1;
+pub(crate) const RELEASE_ALL: u8 = 0;
+pub(crate) const RELEASE_TRANSIENT: u8 = 1;
+pub(crate) const RELEASE_PERMANENT: u8 = 2;
 
 #[derive(Default)]
 pub(crate) struct StoreState {
@@ -36,6 +39,7 @@ pub(crate) struct FakeStore {
     pub(crate) claim_calls: Arc<AtomicUsize>,
     pub(crate) claim_entered: Arc<AtomicBool>,
     pub(crate) claim_delay_ms: Arc<AtomicUsize>,
+    pub(crate) claim_limit_extra: Arc<AtomicUsize>,
     pub(crate) complete_entered: Arc<AtomicBool>,
     pub(crate) complete_delay_ms: Arc<AtomicUsize>,
     pub(crate) fail_entered: Arc<AtomicBool>,
@@ -46,6 +50,7 @@ pub(crate) struct FakeStore {
     pub(crate) renew_delay_ms: Arc<AtomicUsize>,
     pub(crate) complete_mode: Arc<AtomicU8>,
     pub(crate) renew_mode: Arc<AtomicU8>,
+    pub(crate) release_mode: Arc<AtomicU8>,
 }
 
 impl FakeStore {
@@ -58,6 +63,7 @@ impl FakeStore {
             claim_calls: Arc::new(AtomicUsize::new(0)),
             claim_entered: Arc::new(AtomicBool::new(false)),
             claim_delay_ms: Arc::new(AtomicUsize::new(0)),
+            claim_limit_extra: Arc::new(AtomicUsize::new(0)),
             complete_entered: Arc::new(AtomicBool::new(false)),
             complete_delay_ms: Arc::new(AtomicUsize::new(0)),
             fail_entered: Arc::new(AtomicBool::new(false)),
@@ -68,6 +74,7 @@ impl FakeStore {
             renew_delay_ms: Arc::new(AtomicUsize::new(0)),
             complete_mode: Arc::new(AtomicU8::new(COMPLETE_ALL)),
             renew_mode: Arc::new(AtomicU8::new(RENEW_ALL)),
+            release_mode: Arc::new(AtomicU8::new(RELEASE_ALL)),
         }
     }
 
@@ -92,6 +99,7 @@ impl OutboxStore for FakeStore {
         let mut state = self.lock();
         let count = usize::try_from(request.limit.get())
             .unwrap_or(usize::MAX)
+            .saturating_add(self.claim_limit_extra.load(Ordering::SeqCst))
             .min(state.records.len());
         let records = state.records.drain(..count).collect();
         let poison = std::mem::take(&mut state.poison);
@@ -147,6 +155,19 @@ impl OutboxStore for FakeStore {
             tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         }
         self.lock().releases.push(claims.to_vec());
+        match self.release_mode.load(Ordering::SeqCst) {
+            RELEASE_TRANSIENT => {
+                return Err(ProtocolError {
+                    kind: FailureKind::Transient,
+                });
+            }
+            RELEASE_PERMANENT => {
+                return Err(ProtocolError {
+                    kind: FailureKind::Permanent,
+                });
+            }
+            _ => {}
+        }
         Ok(FencedClaims {
             confirmed: claims.to_vec(),
         })
