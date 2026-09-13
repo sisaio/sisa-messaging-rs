@@ -1,0 +1,148 @@
+//! Timed bounded claims and claim scheduling.
+
+use std::num::NonZeroU32;
+use std::time::Duration;
+use tokio::time::Instant;
+use tracing::Instrument;
+
+use sisa_messaging::ErrorClassifier;
+
+use crate::{ClaimBatch, ClaimRequest, DeadReason, DispatcherSettings, OutboxStore, RetryPolicy};
+
+use super::OutboxRunReport;
+use super::state::State;
+
+pub(crate) enum ClaimCall<E> {
+    Completed(ClaimBatch),
+    Failed(E),
+    TimedOut,
+}
+
+pub(crate) async fn claim<S: OutboxStore>(
+    store: &S,
+    worker_id: &str,
+    available: usize,
+    lease: Duration,
+    timeout: Duration,
+) -> (Instant, ClaimCall<S::Error>) {
+    let started = Instant::now();
+    let limit = u32::try_from(available).unwrap_or(u32::MAX).max(1);
+    let request = ClaimRequest {
+        worker_id: worker_id.to_owned(),
+        limit: NonZeroU32::new(limit).unwrap_or(NonZeroU32::MIN),
+        lease,
+    };
+
+    let result = tokio::time::timeout(timeout, store.claim(request))
+        .instrument(tracing::debug_span!(
+            target: "messaging.outbox",
+            "outbox.claim"
+        ))
+        .await;
+    let call = match result {
+        Ok(Ok(batch)) => ClaimCall::Completed(batch),
+        Ok(Err(error)) => ClaimCall::Failed(error),
+        Err(_) => ClaimCall::TimedOut,
+    };
+
+    (started, call)
+}
+
+pub(crate) fn finish<E, R>(
+    started: Instant,
+    result: ClaimCall<E>,
+    settings: &DispatcherSettings<R>,
+    state: &mut State,
+    report: &mut OutboxRunReport,
+    next_claim: &mut Instant,
+) -> Option<E>
+where
+    E: ErrorClassifier,
+    R: RetryPolicy,
+{
+    match result {
+        ClaimCall::Completed(batch) => {
+            let delay = if batch.records.is_empty() {
+                settings.idle_poll_interval
+            } else {
+                settings.poll_interval
+            };
+            *next_claim = Instant::now() + delay;
+            report.poisoned += u64::from(batch.poison.observed);
+            report.dead += u64::from(batch.poison.marked_dead);
+            if batch.poison.marked_dead > 0 {
+                crate::telemetry::dead(
+                    usize::try_from(batch.poison.marked_dead).unwrap_or(usize::MAX),
+                    DeadReason::Undecodable,
+                );
+            }
+            if batch.poison.observed > 0 {
+                tracing::warn!(
+                    target: "messaging.outbox",
+                    observed = batch.poison.observed,
+                    marked_dead = batch.poison.marked_dead,
+                    "poison rows isolated during claim"
+                );
+            }
+            let accepted = batch.records.len().min(state.available());
+            report.claimed += accepted as u64;
+            crate::telemetry::claimed(accepted);
+            let overflow = state.insert_claimed(batch.records, started + settings.renewal_offset());
+            if !overflow.is_empty() {
+                report.store_failures += 1;
+                tracing::error!(
+                    target: "messaging.outbox",
+                    overflow = overflow.len(),
+                    "store exceeded requested claim capacity"
+                );
+            }
+            None
+        }
+        ClaimCall::Failed(error) => {
+            report.store_failures += 1;
+            *next_claim = Instant::now() + settings.poll_interval;
+            if error.classify().is_retryable() {
+                tracing::warn!(
+                    target: "messaging.outbox",
+                    operation = "claim",
+                    "transient store failure; claim backed off"
+                );
+                None
+            } else {
+                Some(error)
+            }
+        }
+        ClaimCall::TimedOut => {
+            report.store_failures += 1;
+            *next_claim = Instant::now() + settings.poll_interval;
+            tracing::warn!(
+                target: "messaging.outbox",
+                operation = "claim",
+                "transient store failure; claim backed off"
+            );
+            None
+        }
+    }
+}
+
+pub(crate) async fn available<S, R>(
+    store: &S,
+    settings: &DispatcherSettings<R>,
+    state: &mut State,
+    report: &mut OutboxRunReport,
+    next_claim: &mut Instant,
+) -> Option<S::Error>
+where
+    S: OutboxStore,
+    R: RetryPolicy,
+{
+    let (started, result) = claim(
+        store,
+        &settings.worker_id,
+        state.available(),
+        settings.lease,
+        settings.store_timeout,
+    )
+    .await;
+    finish(started, result, settings, state, report, next_claim)
+}
