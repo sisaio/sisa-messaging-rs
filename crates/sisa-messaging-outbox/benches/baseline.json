@@ -1,5 +1,5 @@
 {
-  "git_revision": "ee1617c2443b98d362c44c9277a891e549c5ce85",
+  "git_revision": "a507f0b5fff2238a405f30ebb902a13af5b3fc9d",
   "dirty": false,
   "status": "initial clean Phase 3 baseline",
   "rust_version": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
@@ -19,64 +19,64 @@
   "seed": null,
   "results": {
     "outbox_capacity_accounting.available.1": {
-      "estimate_low_ns": 2.0759,
-      "estimate_mid_ns": 2.0927,
-      "estimate_high_ns": 2.1115
+      "estimate_low_ns": 1.9852,
+      "estimate_mid_ns": 2.0056,
+      "estimate_high_ns": 2.0279
     },
     "outbox_capacity_accounting.available.32": {
-      "estimate_low_ns": 2.0820,
-      "estimate_mid_ns": 2.0977,
-      "estimate_high_ns": 2.1138
+      "estimate_low_ns": 1.9679,
+      "estimate_mid_ns": 1.9774,
+      "estimate_high_ns": 1.9873
     },
     "outbox_capacity_accounting.available.256": {
-      "estimate_low_ns": 2.0443,
-      "estimate_mid_ns": 2.0735,
-      "estimate_high_ns": 2.1148
+      "estimate_low_ns": 2.0015,
+      "estimate_mid_ns": 2.0161,
+      "estimate_high_ns": 2.0328
     },
     "outbox_capacity_accounting.available.1024": {
-      "estimate_low_ns": 2.0031,
-      "estimate_mid_ns": 2.0137,
-      "estimate_high_ns": 2.0246
+      "estimate_low_ns": 1.9776,
+      "estimate_mid_ns": 1.9910,
+      "estimate_high_ns": 2.0054
     },
     "outbox_outcome_grouping_fencing.group_and_reduce.1": {
-      "estimate_low_ns": 48.701,
-      "estimate_mid_ns": 48.770,
-      "estimate_high_ns": 48.834
+      "estimate_low_ns": 47.423,
+      "estimate_mid_ns": 47.493,
+      "estimate_high_ns": 47.568
     },
     "outbox_outcome_grouping_fencing.group_and_reduce.32": {
-      "estimate_low_ns": 558.87,
-      "estimate_mid_ns": 562.95,
-      "estimate_high_ns": 568.39
+      "estimate_low_ns": 543.71,
+      "estimate_mid_ns": 544.66,
+      "estimate_high_ns": 545.65
     },
     "outbox_outcome_grouping_fencing.group_and_reduce.256": {
-      "estimate_low_ns": 4369.5,
-      "estimate_mid_ns": 4378.6,
-      "estimate_high_ns": 4387.8
+      "estimate_low_ns": 4181.6,
+      "estimate_mid_ns": 4187.1,
+      "estimate_high_ns": 4192.6
     },
     "outbox_outcome_grouping_fencing.group_and_reduce.1024": {
-      "estimate_low_ns": 17123.0,
-      "estimate_mid_ns": 17222.0,
-      "estimate_high_ns": 17334.0
+      "estimate_low_ns": 16792.0,
+      "estimate_mid_ns": 16823.0,
+      "estimate_high_ns": 16855.0
     },
     "outbox_retry_delay.1": {
-      "estimate_low_ns": 1.5148,
-      "estimate_mid_ns": 1.5187,
-      "estimate_high_ns": 1.5229
+      "estimate_low_ns": 1.5094,
+      "estimate_mid_ns": 1.5164,
+      "estimate_high_ns": 1.5260
     },
     "outbox_retry_delay.5": {
-      "estimate_low_ns": 1.5237,
-      "estimate_mid_ns": 1.5286,
-      "estimate_high_ns": 1.5341
+      "estimate_low_ns": 1.5075,
+      "estimate_mid_ns": 1.5109,
+      "estimate_high_ns": 1.5143
     },
     "outbox_retry_delay.9": {
-      "estimate_low_ns": 1.5234,
-      "estimate_mid_ns": 1.5356,
-      "estimate_high_ns": 1.5544
+      "estimate_low_ns": 1.5084,
+      "estimate_mid_ns": 1.5118,
+      "estimate_high_ns": 1.5150
     },
     "outbox_retry_delay.10": {
-      "estimate_low_ns": 0.96399,
-      "estimate_mid_ns": 0.97207,
-      "estimate_high_ns": 0.98159
+      "estimate_low_ns": 0.94565,
+      "estimate_mid_ns": 0.94861,
+      "estimate_high_ns": 0.95206
     }
   },
   "error_count": 0,
