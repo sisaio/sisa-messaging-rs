@@ -224,8 +224,8 @@ defines the issue link, branch, and commit rounds before implementation:
   by the final reviewer. The pinned CI secret-scan remains an independent non-bypassable check; a
   whole-tree or differently based scan does not replace the range-aligned evidence.
 - A commit targets at most 10 changed paths and has a hard limit of 20.
-- A task/PR targets at most 25 changed paths and has a hard limit of 90. The 90-file stop leaves a
-  ten-file margin below CodeRabbit's 100-file maximum.
+- A task/PR targets at most 25 changed paths and has a non-overridable hard limit of 99. The
+  99-file stop preserves CodeRabbit's strict less-than-100-file reviewability boundary.
 - A PR has a 250-commit auditability ceiling because GitHub's pull-request commits endpoint does
   not return a complete list beyond that point. CI fails closed rather than silently skipping the
   per-commit path audit; normal tasks should remain nowhere near this ceiling.
@@ -235,9 +235,10 @@ defines the issue link, branch, and commit rounds before implementation:
   limit is reached. A later PR may depend on an earlier one, but each must remain independently
   understandable and reviewable.
 - Exceeding the 10-file commit or 25-file task/PR target requires a documented reason and user
-  approval before implementation. The 20-file commit, 90-file PR, and CodeRabbit 100-file ceilings
-  are non-overridable; an atomic change that cannot fit must be split into an explicit multi-commit
-  or multi-PR sequence before implementation continues.
+  approval before implementation. The 20-file commit and 99-file PR/task ceilings are
+  non-overridable; CodeRabbit's reviewability boundary remains strictly below 100 files. An atomic
+  change that cannot fit must be split into an explicit multi-commit or multi-PR sequence before
+  implementation continues.
 - Splitting one change into more files does not reduce its review scope. Crossing the 25-path target
   requires an explicit reviewability decision before implementation, even when each file is small.
 
