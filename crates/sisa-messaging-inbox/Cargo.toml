@@ -8,8 +8,23 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Keep provider identity serialization opt-in.
+default = []
+serde = ["dep:serde", "uuid/serde"]
+
 [dependencies]
+# Transport-independent inbox contracts and classifications.
 sisa-messaging = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+# Optional serialization for provider-minted identity carriers.
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Feature-gated identity and validated scope serialization assertions.
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
