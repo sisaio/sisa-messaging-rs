@@ -32,7 +32,7 @@ jobs:
           set -Eeuo pipefail
 
           readonly max_commit_paths=20
-          readonly max_pr_paths=90
+          readonly max_pr_paths=99
           readonly max_pr_commits_from_api=250
           readonly allowed_branch_pattern='^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$'
           readonly conventional_header_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^()]+\))?(!)?: [^[:space:]].*$'

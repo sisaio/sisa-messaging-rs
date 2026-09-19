@@ -55,7 +55,7 @@
 - Before each commit round, state one exact Conventional Commits 1.0.0 message, intended paths, and
   validation. Use only repository commit types, include `Refs #<issue-number>`, run installed
   `prek` hooks, never use `--no-verify`, and do not commit unless the user asks.
-- Target at most 10 paths per commit and 25 per task/PR. Hard limits are 20 paths per commit, 90 per
+- Target at most 10 paths per commit and 25 per task/PR. Hard limits are 20 paths per commit, 99 per
   PR, and 250 commits per PR; all added, modified, deleted, renamed, generated, test, migration,
   checksum, and lockfile paths count. A target exception needs prior owner approval; hard limits do
   not. Split the work before a hard limit.

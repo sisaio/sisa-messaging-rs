@@ -124,7 +124,9 @@ reviews:
         jobs, safe interpolation of pull-request data, explicit failure propagation, dependency and
         secret scanning, Rust 1.94 MSRV, feature matrices, real PostgreSQL/NATS suites, Atlas clean
         replay, and release ordering. Require a PR-scope job that rejects commits above 20 changed
-        paths and PRs above 90; CodeRabbit path filters do not change the GitHub file count.
+        paths and PRs at 100 or more; the 99-path task/PR ceiling preserves CodeRabbit's strict
+        less-than-100 reviewability boundary. CodeRabbit path filters do not change the GitHub
+        file count.
 
     - path: "docs/**"
       instructions: >-

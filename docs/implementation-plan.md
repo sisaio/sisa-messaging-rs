@@ -83,8 +83,9 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
   feature-matrix jobs.
 - Add a repository-root `.coderabbit.yaml` as the AI review layer. Keep it aligned with the
   normative docs and crate boundaries; CodeRabbit remains review input rather than the source of
-  truth. GitHub CI separately rejects any commit above 20 changed paths and any PR above 90 changed
-  paths because CodeRabbit path filters do not change the PR's actual file count.
+  truth. GitHub CI separately rejects any commit above 20 changed paths and any PR at 100 or more
+  changed paths; the non-overridable 99-path ceiling preserves CodeRabbit's strict less-than-100
+  reviewability boundary because CodeRabbit path filters do not change the PR's actual file count.
 - Declare each dependency once in `[workspace.dependencies]` and inherit exact workspace choices.
 - Add architecture tests that reject provider-to-provider dependencies, library environment
   reads, exporter/SDK dependencies, `async-trait`, and unsafe code.
