@@ -26,6 +26,12 @@ jobs:
       PR_COMMIT_COUNT: ${{ github.event.pull_request.commits }}
       PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
     steps:
+      - name: Test changed-path policy boundaries
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run changed-path policy tests
+        run: tests/governance/pr-scope.sh
+
       - name: Enforce branch, commit, and path policy
         shell: bash
         run: |
