@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        -- Fixed IDs make predecessor ordering deterministic for the stats claimability predicate.\n        INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key, created_at, claimable_at, attempts)\n        VALUES ('00000000-0000-0000-0000-000000000001', uuidv7(), 'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() + interval '1 hour', 0),\n               ('00000000-0000-0000-0000-000000000002', uuidv7(), 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() - interval '1 hour', 0)\n    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b970f8b8b6fbc33109854f2eb944a3fb1dae1a89b959451c156d6735d6f4820e"
+}

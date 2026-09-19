@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO inbox_receipts (\n                scope,\n                message_id,\n                message_type,\n                message_version,\n                metadata\n            )\n            VALUES ($1, $2, $3, $4, $5)\n            -- Preserve original receipt diagnostics while reading its durable state.\n            ON CONFLICT (scope, message_id) DO UPDATE\n            SET scope = inbox_receipts.scope\n            RETURNING\n                id AS \"id!\",\n                attempts AS \"attempts!\",\n                completed_at,\n                dead_at,\n                dead_reason\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "dead_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "dead_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "c4d93ae4e0e6d520093c1a0ce8b5770a67ad940896f0143c0ef2d0c16d00c39e"
+}

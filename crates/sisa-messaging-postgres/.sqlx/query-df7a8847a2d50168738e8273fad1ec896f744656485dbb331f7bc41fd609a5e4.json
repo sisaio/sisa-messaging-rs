@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Schema-isolated rows let separate pool connections exercise SKIP LOCKED concurrently.\n            INSERT INTO outbox_messages (message_id, message_type, message_version, content_type, payload, metadata)\n            VALUES (uuidv7(), $1, 1, 'application/test', ''::bytea, '{}'::jsonb),\n                   (uuidv7(), $1, 1, 'application/test', ''::bytea, '{}'::jsonb),\n                   (uuidv7(), $1, 1, 'application/test', ''::bytea, '{}'::jsonb)\n            RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "df7a8847a2d50168738e8273fad1ec896f744656485dbb331f7bc41fd609a5e4"
+}
