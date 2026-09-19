@@ -1,0 +1,9 @@
+claim::{ClaimedReceipt,InboxClaimOutcome}
+dead_letters::{DeadLetterBatch,DeadLetterBatchError,DeadLetterCursor,DeadLetterQuery,DeadLetterRecord,InboxDeadLetters,MAX_DEAD_LETTER_BATCH_SIZE}
+error::{InboxScopeError,InboxSettingsError}
+failure::{DeadReason,InboxFailure,InboxFailureOutcome}
+maintenance::{InboxMaintenance,InboxPurgeReport,InboxPurgeRequest,InboxStats}
+record::{InboxId,InboxRecord,InboxScope,MAX_INBOX_SCOPE_BYTES}
+settings::InboxSettings
+store::InboxStore
+unit_of_work::InboxUnitOfWork
