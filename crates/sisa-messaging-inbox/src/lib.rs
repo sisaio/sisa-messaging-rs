@@ -6,16 +6,23 @@
 #![forbid(unsafe_code)]
 
 mod claim;
+mod dead_letters;
 mod error;
 mod failure;
+mod maintenance;
 mod record;
 mod settings;
 mod store;
 mod unit_of_work;
 
 pub use claim::{ClaimedReceipt, InboxClaimOutcome};
+pub use dead_letters::{
+    DeadLetterBatch, DeadLetterBatchError, DeadLetterCursor, DeadLetterQuery, DeadLetterRecord,
+    InboxDeadLetters, MAX_DEAD_LETTER_BATCH_SIZE,
+};
 pub use error::{InboxScopeError, InboxSettingsError};
 pub use failure::{DeadReason, InboxFailure, InboxFailureOutcome};
+pub use maintenance::{InboxMaintenance, InboxPurgeReport, InboxPurgeRequest, InboxStats};
 pub use record::{InboxId, InboxRecord, InboxScope, MAX_INBOX_SCOPE_BYTES};
 pub use settings::InboxSettings;
 pub use store::InboxStore;
