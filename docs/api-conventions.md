@@ -124,9 +124,16 @@ mistakes. They require no builder or doctest.
 - A row-returning statement uses `query_as!` with an explicit `Record` output type. Do not use
   `query!`'s anonymous generated row and then map that database row manually. Reserve `query!` for
   non-row commands and `query_scalar!` for genuine scalar outputs where a `Record` adds no value.
-- Format SQL as readable multiline statements. Add a concise SQL comment only when the correctness
-  reason is not apparent from the statement itself, such as fencing, locking, ordering, or index
-  intent.
+- Format SQL structurally; placing it in a multiline raw string is not enough. Put each `SELECT`
+  projection, `SET` assignment, `JOIN`/`FROM` item, material `WHERE` predicate, and `ORDER BY`,
+  locking, `LIMIT`, or `RETURNING` projection on readable lines. Indent nested CTEs, subqueries,
+  and `CASE` expressions, and decompose long expressions across lines.
+- Put a concise correctness comment immediately above each non-obvious CTE, anti-join,
+  join/`UNNEST`, advisory lock, fencing predicate, ordering rule, index intent, or
+  state-transition `CASE`. Do not use one generic comment for the whole query when a local comment
+  is needed.
+- Format query-macro arguments and the Rust fetch/`await`/error chain with normal readable Rust
+  layout.
 - Private models that supply SQL binds end in `Params`; private models decoded from SQL rows end in
   `Record`. These names make the input/output boundary visible at each query call site.
 - A statement helper neither accepts nor calls a store. Its first argument is the SQLx executor—a
