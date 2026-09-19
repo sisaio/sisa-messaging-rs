@@ -136,6 +136,14 @@ mistakes. They require no builder or doctest.
   layout.
 - Private models that supply SQL binds end in `Params`; private models decoded from SQL rows end in
   `Record`. These names make the input/output boundary visible at each query call site.
+- A `Params<'a>` model borrows caller-owned input such as `&str`, slices, references to non-`Copy`
+  cursors or other values when that avoids cloning or temporary ownership. Omit the lifetime when
+  its fields are naturally `Copy` or already owned without an extra allocation.
+- A `Record` normally owns its SQLx-decoded values and has no borrow lifetime: driver row buffers do
+  not outlive fetch/decode. Map a record into portable types by moving its fields, not cloning them.
+  Adding an output lifetime such as `DeadLetterRecordRow<'a>` neither reduces decoded database
+  memory nor creates a valid relationship to the driver buffer; it creates invalid or fragile
+  lifetime coupling instead.
 - A statement helper neither accepts nor calls a store. Its first argument is the SQLx executor—a
   pool reference or the transaction's underlying mutable connection/executor form required by SQLx
   (for example, `&mut *transaction`)—followed by exactly one typed `Params` value; it returns typed
