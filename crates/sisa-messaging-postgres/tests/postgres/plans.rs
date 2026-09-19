@@ -171,7 +171,15 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
                     AND p.ordering_key IS NOT NULL
                     AND p.published_at IS NULL
                     AND p.dead_at IS NULL
-                    AND (p.expires_at IS NULL OR p.expires_at > now())
+                    -- An expired predecessor still owns its key until its current lease ends.
+                    AND (
+                        p.expires_at IS NULL
+                        OR p.expires_at > now()
+                        OR (
+                            p.claim_token IS NOT NULL
+                            AND p.claimable_at > now()
+                        )
+                    )
                     AND p.id < o.id
               )
             ORDER BY o.claimable_at, o.id

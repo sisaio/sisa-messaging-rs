@@ -120,19 +120,19 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
 }
 
 #[tokio::test]
-async fn stats_excludes_a_due_successor_behind_a_backing_off_ordering_head() {
+async fn stats_excludes_a_due_successor_behind_an_expired_currently_leased_ordering_head() {
     let pool = isolated_outbox_pool().await;
     sqlx::query!(r#"
-        -- Fixed IDs make predecessor ordering deterministic for the stats claimability predicate.
-        INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key, created_at, claimable_at, attempts)
-        VALUES ('00000000-0000-0000-0000-000000000001', uuidv7(), 'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() + interval '1 hour', 0),
-               ('00000000-0000-0000-0000-000000000002', uuidv7(), 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() - interval '1 hour', 0)
+        -- An expired predecessor still blocks its same-key successor while its lease is current.
+        INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by, attempts)
+        VALUES ('00000000-0000-0000-0000-000000000001', uuidv7(), 'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() + interval '1 hour', now() - interval '1 hour', uuidv7(), 'postgres-test-worker', 0),
+               ('00000000-0000-0000-0000-000000000002', uuidv7(), 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() - interval '1 hour', NULL, NULL, NULL, 0)
     "#).execute(&pool).await.unwrap_or_else(|_| panic!("ordering stats setup failed"));
     let stats = PostgresOutboxStore::new(pool, ())
         .stats()
         .await
         .unwrap_or_else(|_| panic!("stats failed"));
-    assert_eq!(stats.pending, 2);
+    assert_eq!((stats.pending, stats.expired), (1, 1));
     assert_eq!(stats.oldest_pending_age, Duration::ZERO);
 }
 
@@ -192,12 +192,12 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
             -- Fixed death order makes the exclusive cursor boundary observable.
             INSERT INTO outbox_messages (
                 id, message_id, message_type, message_version, content_type, payload, metadata,
-                created_at, claimable_at, attempts, dead_at, dead_reason, last_error
+                created_at, claimable_at, expires_at, attempts, dead_at, dead_reason, last_error
             )
             VALUES
-                ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000301', 'postgres.dead-first', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), 4, now() - interval '3 minutes', 'permanent', 'safe test error'),
-                ('00000000-0000-0000-0000-000000000202', '00000000-0000-0000-0000-000000000302', 'postgres.dead-second', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), 2, now() - interval '2 minutes', 'exhausted', 'safe test error'),
-                ('00000000-0000-0000-0000-000000000203', '00000000-0000-0000-0000-000000000303', 'postgres.live', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), 0, NULL, NULL, NULL)
+                ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000301', 'postgres.dead-first', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), now() - interval '1 hour', 4, now() - interval '3 minutes', 'permanent', 'safe test error'),
+                ('00000000-0000-0000-0000-000000000202', '00000000-0000-0000-0000-000000000302', 'postgres.dead-second', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, 2, now() - interval '2 minutes', 'exhausted', 'safe test error'),
+                ('00000000-0000-0000-0000-000000000203', '00000000-0000-0000-0000-000000000303', 'postgres.live', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now() + interval '1 hour', NULL, 0, NULL, NULL, NULL)
         "#
     )
     .execute(&pool)
@@ -252,6 +252,21 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
         revived.dead_at.is_none() && revived.dead_reason.is_none() && revived.last_error.is_none()
     );
     assert!(revived.claim_token.is_none() && revived.locked_by.is_none());
+    let reclaimed = store
+        .claim(ClaimRequest {
+            worker_id: "postgres-retry-expired".into(),
+            limit: NonZeroU32::MIN,
+            lease: Duration::from_secs(30),
+        })
+        .await
+        .unwrap_or_else(|_| panic!("expired dead-letter re-claim failed"));
+    assert_eq!(reclaimed.records.len(), 1);
+    assert_eq!(reclaimed.records[0].claim.id.into_uuid(), first_id);
+    assert_eq!(
+        reclaimed.records[0].envelope.message_id.into_uuid(),
+        first_message_id
+    );
+    assert_eq!(reclaimed.records[0].envelope.metadata, Metadata::default());
     let deleted = store
         .delete(
             DeadLetterBatch::new(&[
@@ -599,6 +614,99 @@ async fn claim_serializes_an_ordering_key_head_while_progressing_a_distinct_key(
         types,
         ["postgres.ordering-head", "postgres.ordering-independent"]
     );
+}
+
+#[tokio::test]
+async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_barrier() {
+    let pool = isolated_outbox_pool().await;
+    let predecessor_id = Uuid::from_u128(0x21);
+    let successor_id = Uuid::from_u128(0x22);
+    sqlx::query!(
+        r#"
+            -- The expired predecessor's unexpired lease must still fence its same-key successor.
+            INSERT INTO outbox_messages (
+                id,
+                message_id,
+                message_type,
+                message_version,
+                content_type,
+                payload,
+                metadata,
+                ordering_key,
+                claimable_at,
+                expires_at,
+                claim_token,
+                locked_by
+            )
+            VALUES
+                (
+                    $1,
+                    uuidv7(),
+                    'postgres.expired-leased-predecessor',
+                    1,
+                    'application/test',
+                    ''::bytea,
+                    '{}'::jsonb,
+                    'postgres-expired-lease-key',
+                    now() + interval '1 hour',
+                    now() - interval '1 minute',
+                    uuidv7(),
+                    'current-worker'
+                ),
+                (
+                    $2,
+                    uuidv7(),
+                    'postgres.expired-leased-successor',
+                    1,
+                    'application/test',
+                    ''::bytea,
+                    '{}'::jsonb,
+                    'postgres-expired-lease-key',
+                    now(),
+                    NULL,
+                    NULL,
+                    NULL
+                )
+        "#,
+        predecessor_id,
+        successor_id,
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("expired leased ordering fixture setup failed"));
+    let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+    let blocked = store
+        .claim(ClaimRequest {
+            worker_id: "postgres-expired-lease-ordering".into(),
+            limit: NonZeroU32::MIN,
+            lease: Duration::from_secs(30),
+        })
+        .await
+        .unwrap_or_else(|_| panic!("blocked ordering claim failed"));
+    assert!(blocked.records.is_empty());
+
+    sqlx::query!(
+        r#"
+            -- Once the predecessor's lease is stale, its elapsed expiry no longer blocks the key.
+            UPDATE outbox_messages
+            SET claimable_at = now() - interval '1 second'
+            WHERE id = $1
+        "#,
+        predecessor_id,
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("expired predecessor lease expiry setup failed"));
+    let unblocked = store
+        .claim(ClaimRequest {
+            worker_id: "postgres-expired-lease-ordering".into(),
+            limit: NonZeroU32::MIN,
+            lease: Duration::from_secs(30),
+        })
+        .await
+        .unwrap_or_else(|_| panic!("unblocked ordering claim failed"));
+    assert_eq!(unblocked.records.len(), 1);
+    assert_eq!(unblocked.records[0].claim.id.into_uuid(), successor_id);
 }
 
 #[tokio::test]

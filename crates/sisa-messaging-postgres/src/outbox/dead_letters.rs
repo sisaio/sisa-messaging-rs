@@ -101,6 +101,8 @@ where
             UPDATE outbox_messages
             SET
                 claimable_at = now(),
+                -- An expired prior deadline must not immediately re-terminalize this new attempt.
+                expires_at = NULL,
                 attempts = 0,
                 dead_at = NULL,
                 dead_reason = NULL,

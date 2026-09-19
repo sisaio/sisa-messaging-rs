@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- The expired predecessor's unexpired lease must still fence its same-key successor.\n            INSERT INTO outbox_messages (\n                id,\n                message_id,\n                message_type,\n                message_version,\n                content_type,\n                payload,\n                metadata,\n                ordering_key,\n                claimable_at,\n                expires_at,\n                claim_token,\n                locked_by\n            )\n            VALUES\n                (\n                    $1,\n                    uuidv7(),\n                    'postgres.expired-leased-predecessor',\n                    1,\n                    'application/test',\n                    ''::bytea,\n                    '{}'::jsonb,\n                    'postgres-expired-lease-key',\n                    now() + interval '1 hour',\n                    now() - interval '1 minute',\n                    uuidv7(),\n                    'current-worker'\n                ),\n                (\n                    $2,\n                    uuidv7(),\n                    'postgres.expired-leased-successor',\n                    1,\n                    'application/test',\n                    ''::bytea,\n                    '{}'::jsonb,\n                    'postgres-expired-lease-key',\n                    now(),\n                    NULL,\n                    NULL,\n                    NULL\n                )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9b2430c6e2a9bdb840fcc93f266d82a0c980c1858ae8abad40c65825a3bf4d45"
+}
