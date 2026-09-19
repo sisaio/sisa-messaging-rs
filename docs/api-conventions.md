@@ -115,6 +115,50 @@ Request/report structs are data carriers with named public fields:
 Private SQL parameter structs remain useful because they name bindings and prevent positional
 mistakes. They require no builder or doctest.
 
+### PostgreSQL provider SQLx conventions
+
+- Every runtime SQLx statement uses a compile-time checked SQLx query macro that validates SQL plus
+  bind and result shape at compile time, whether it reads a live development database or SQLx
+  offline metadata. Runtime-only `query`/`query_as` APIs, dynamically assembled SQL, and unchecked
+  row decoding do not meet this rule for provider operations.
+- A row-returning statement uses `query_as!` with an explicit `Record` output type. Do not use
+  `query!`'s anonymous generated row and then map that database row manually. Reserve `query!` for
+  non-row commands and `query_scalar!` for genuine scalar outputs where a `Record` adds no value.
+- Format SQL structurally; placing it in a multiline raw string is not enough. Put each `SELECT`
+  projection, `SET` assignment, `JOIN`/`FROM` item, material `WHERE` predicate, and `ORDER BY`,
+  locking, `LIMIT`, or `RETURNING` projection on readable lines. Indent nested CTEs, subqueries,
+  and `CASE` expressions, and decompose long expressions across lines.
+- Put a concise correctness comment immediately above each non-obvious CTE, anti-join,
+  join/`UNNEST`, advisory lock, fencing predicate, ordering rule, index intent, or
+  state-transition `CASE`. Do not use one generic comment for the whole query when a local comment
+  is needed.
+- Format query-macro arguments and the Rust fetch/`await`/error chain with normal readable Rust
+  layout.
+- Private models that supply SQL binds end in `Params`; private models decoded from SQL rows end in
+  `Record`. These names make the input/output boundary visible at each query call site.
+- A `Params<'a>` model borrows caller-owned input such as `&str`, slices, references to non-`Copy`
+  cursors or other values when that avoids cloning or temporary ownership. Omit the lifetime when
+  its fields are naturally `Copy` or already owned without an extra allocation.
+- A `Record` normally owns its SQLx-decoded values and has no borrow lifetime: driver row buffers do
+  not outlive fetch/decode. Map a record into portable types by moving its fields, not cloning them.
+  Adding an output lifetime such as `DeadLetterRecordRow<'a>` neither reduces decoded database
+  memory nor creates a valid relationship to the driver buffer; it creates invalid or fragile
+  lifetime coupling instead.
+- A statement helper neither accepts nor calls a store. Its first argument is the SQLx executor—a
+  pool reference or the transaction's underlying mutable connection/executor form required by SQLx
+  (for example, `&mut *transaction`)—followed by exactly one typed `Params` value; it returns typed
+  `Record` values, or a genuine scalar or affected-row result.
+- The store/provider is the orchestration layer: it selects the pool or opens/uses a transaction,
+  invokes statement helpers, maps `Record` values into portable contract types, and owns
+  multi-statement transaction boundaries. Helpers do not call back into the store, preventing a
+  circular store-to-helper-to-store dependency.
+- Keep tests and test-only modules outside production `src/**`. Provider and database coverage
+  belongs under `tests/**`, where it runs against the documented PostgreSQL baseline rather than
+  relying on production-module test scaffolding.
+- Regenerate SQLx offline metadata whenever a checked query or its schema contract changes. Review
+  verifies that the metadata is current, query typing remains checked, statements follow these
+  presentation rules, and provider tests are outside production source.
+
 ## 6. Errors
 
 Use one error per boundary, not a global `MessagingError`:
