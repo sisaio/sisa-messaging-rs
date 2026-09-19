@@ -9,10 +9,12 @@ use uuid::Uuid;
 use crate::InboxScopeError;
 
 /// Maximum accepted UTF-8 byte length of an inbox scope.
-pub const MAX_INBOX_SCOPE_BYTES: usize = 255;
+pub const MAX_INBOX_SCOPE_BYTES: usize = 128;
 
 /// A validated consumer namespace used with a message identity for deduplication.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct InboxScope(String);
 
 impl InboxScope {
@@ -70,8 +72,22 @@ impl FromStr for InboxScope {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for InboxScope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A persistence-provider-minted durable inbox receipt identity.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct InboxId(Uuid);
 
 impl InboxId {

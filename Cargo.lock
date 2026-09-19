@@ -442,6 +442,8 @@ dependencies = [
 name = "sisa-messaging-inbox"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sisa-messaging",
  "thiserror",
  "uuid",
