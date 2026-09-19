@@ -87,7 +87,7 @@ jobs:
           issue_state="$(jq --exit-status --raw-output \
             'if (type == "object" and (.state | type) == "string") then .state else error("expected issue state") end' \
             <<<"${issue}")"
-          has_pull_request="$(jq --exit-status 'if has("pull_request") then "true" else "false" end' <<<"${issue}")"
+          has_pull_request="$(jq --exit-status --raw-output 'if has("pull_request") then "true" else "false" end' <<<"${issue}")"
           if ! issue_is_open_not_pull_request "${issue_number}" "${branch_issue_number}" "${issue_state}" "${has_pull_request}"; then
             echo "Branch issue #${branch_issue_number} must resolve to an existing open GitHub issue, not a pull request." >&2
             exit 1
