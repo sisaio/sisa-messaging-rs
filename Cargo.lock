@@ -443,6 +443,8 @@ name = "sisa-messaging-inbox"
 version = "0.1.0"
 dependencies = [
  "sisa-messaging",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
