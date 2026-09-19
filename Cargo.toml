@@ -42,6 +42,8 @@ sisa-messaging-postgres = { version = "=0.1.0", path = "crates/sisa-messaging-po
 
 # Identifier primitives.
 uuid = { version = "1.18.1", default-features = false, features = ["std", "v7"] }
+chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["chrono", "json", "macros", "postgres", "runtime-tokio", "uuid"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

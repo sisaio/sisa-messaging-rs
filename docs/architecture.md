@@ -266,15 +266,13 @@ crates/
 │       │   ├── claim.rs
 │       │   ├── outcomes.rs
 │       │   ├── maintenance.rs
-│       │   ├── dead_letters.rs
-│       │   └── rows.rs
+│       │   └── dead_letters.rs
 │       ├── inbox.rs            # PostgresInboxStore façade and trait implementations
 │       └── inbox/
 │           ├── claim.rs
 │           ├── outcomes.rs
 │           ├── maintenance.rs
-│           ├── dead_letters.rs
-│           └── rows.rs
+│           └── dead_letters.rs
 └── sisa-messaging-nats/
     └── src/
         ├── lib.rs

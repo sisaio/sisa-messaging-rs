@@ -9,9 +9,17 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-sisa-messaging = { workspace = true }
+sisa-messaging = { workspace = true, features = ["serde"] }
 sisa-messaging-inbox = { workspace = true }
 sisa-messaging-outbox = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lints]
 workspace = true
