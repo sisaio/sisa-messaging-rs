@@ -1,10 +1,13 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, str::FromStr};
 
 use sisa_messaging::{
     ContentType, Envelope, ErrorClassifier, FailureKind, Message, MessageId, Metadata,
     SerializedEnvelope, Serializer,
 };
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{
+    PgPool,
+    postgres::{PgConnectOptions, PgPoolOptions},
+};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,15 +70,38 @@ pub(super) fn test_envelope(message_id: MessageId, metadata: Metadata) -> Envelo
         .unwrap_or_else(|_| panic!("test envelope construction failed"))
 }
 
-pub(super) fn database_url() -> String {
-    std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| panic!("DATABASE_URL is required for PostgreSQL integration tests"))
+pub(super) fn connect_options() -> PgConnectOptions {
+    match std::env::var("DATABASE_URL") {
+        Ok(url) => PgConnectOptions::from_str(&url)
+            .unwrap_or_else(|_| panic!("PostgreSQL integration connection configuration failed")),
+        Err(std::env::VarError::NotPresent) => {
+            let host = required_postgres_component("PGHOST");
+            let port = required_postgres_component("PGPORT")
+                .parse::<u16>()
+                .unwrap_or_else(|_| {
+                    panic!("PostgreSQL integration connection configuration failed")
+                });
+            let user = required_postgres_component("PGUSER");
+            let database = required_postgres_component("PGDATABASE");
+            PgConnectOptions::new()
+                .host(&host)
+                .port(port)
+                .username(&user)
+                .database(&database)
+        }
+        Err(_) => panic!("PostgreSQL integration connection configuration failed"),
+    }
+}
+
+fn required_postgres_component(name: &str) -> String {
+    std::env::var(name)
+        .unwrap_or_else(|_| panic!("PostgreSQL integration connection configuration failed"))
 }
 
 pub(super) async fn pool() -> PgPool {
     PgPoolOptions::new()
         .max_connections(4)
-        .connect(&database_url())
+        .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("PostgreSQL integration connection failed"))
 }
@@ -83,7 +109,7 @@ pub(super) async fn pool() -> PgPool {
 pub(super) async fn isolated_outbox_pool() -> PgPool {
     let pool = PgPoolOptions::new()
         .max_connections(1)
-        .connect(&database_url())
+        .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("PostgreSQL integration connection failed"));
     sqlx::query!(
@@ -164,7 +190,7 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
                 .map(|_| ())
             })
         })
-        .connect(&database_url())
+        .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("concurrent PostgreSQL integration connection failed"));
     ConcurrentOutboxFixture { pool, schema }

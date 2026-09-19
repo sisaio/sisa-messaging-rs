@@ -198,7 +198,7 @@ async fn isolated_inbox_fixture() -> InboxFixture {
                 .map(|_| ())
             })
         })
-        .connect(&crate::support::database_url())
+        .connect_with(crate::support::connect_options())
         .await
         .unwrap_or_else(|_| panic!("isolated inbox PostgreSQL connection failed"));
     InboxFixture { pool, schema }
