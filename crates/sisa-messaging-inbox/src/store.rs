@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 
 use sisa_messaging::ErrorClassifier;
 
-use crate::{ClaimedReceipt, InboxClaimOutcome, InboxFailure, InboxFailureOutcome, InboxRecord};
+use crate::{InboxClaimOutcome, InboxFailure, InboxFailureOutcome, InboxReceipt, InboxRecord};
 
 /// Persistence operations used by manual inbox callers and the consumer framework.
 ///
@@ -18,6 +18,12 @@ pub trait InboxStore<Tx: Send>: Send + Sync + 'static {
     /// Provider error with structured retry classification and safe rendering.
     type Error: Error + ErrorClassifier + Send + Sync + 'static;
 
+    /// Provider-controlled evidence returned by a successful claim.
+    ///
+    /// Its fields and construction remain provider-controlled; completion accepts only this exact
+    /// associated receipt type and consumes it.
+    type Receipt: InboxReceipt;
+
     /// Configured bound used when recording transient failures.
     fn max_attempts(&self) -> NonZeroU32;
 
@@ -26,13 +32,16 @@ pub trait InboxStore<Tx: Send>: Send + Sync + 'static {
         &self,
         transaction: &mut Tx,
         record: &InboxRecord,
-    ) -> impl Future<Output = Result<InboxClaimOutcome, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<InboxClaimOutcome<Self::Receipt>, Self::Error>> + Send;
 
-    /// Marks a claim complete inside the same transaction that owns its business effects.
+    /// Marks the exact claimed receipt complete inside the transaction owning its business effects.
+    ///
+    /// Completion consumes the provider's associated receipt. If completion returns an error, the
+    /// caller must roll back the transaction and leave the delivery available for redelivery.
     fn complete(
         &self,
         transaction: &mut Tx,
-        receipt: ClaimedReceipt,
+        receipt: Self::Receipt,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Atomically records a classified handler failure after the caller rolled back its transaction.

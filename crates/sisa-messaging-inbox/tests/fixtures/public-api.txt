@@ -1,4 +1,4 @@
-claim::{ClaimedReceipt,InboxClaimOutcome}
+claim::{InboxClaimOutcome,InboxReceipt}
 dead_letters::{DeadLetterBatch,DeadLetterBatchError,DeadLetterCursor,DeadLetterQuery,DeadLetterRecord,InboxDeadLetters,MAX_DEAD_LETTER_BATCH_SIZE}
 error::{InboxScopeError,InboxSettingsError}
 failure::{DeadReason,InboxFailure,InboxFailureOutcome}

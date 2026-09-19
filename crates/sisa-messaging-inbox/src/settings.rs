@@ -11,7 +11,11 @@ pub struct InboxSettings {
 }
 
 impl InboxSettings {
-    /// Validates an attempt limit representable by the supported provider contract.
+    /// Validates a portable provider attempt limit.
+    ///
+    /// Accepts non-zero values from 1 through `i32::MAX`. Larger values return
+    /// [`InboxSettingsError::MaxAttemptsNotRepresentable`] because providers persist attempts in a
+    /// signed database representation and must share this portable contract.
     pub fn new(max_attempts: NonZeroU32) -> Result<Self, InboxSettingsError> {
         if max_attempts.get() > i32::MAX as u32 {
             return Err(InboxSettingsError::MaxAttemptsNotRepresentable);

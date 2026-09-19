@@ -2,10 +2,12 @@ use std::fs;
 use std::path::Path;
 
 use sisa_messaging_inbox::{
-    ClaimedReceipt, DeadLetterBatchError, DeadLetterCursor, DeadLetterRecord, DeadReason,
-    InboxClaimOutcome, InboxFailure, InboxFailureOutcome, InboxId, InboxPurgeReport,
-    InboxPurgeRequest, InboxRecord, InboxScope, InboxSettings, InboxStats,
+    DeadLetterBatchError, DeadLetterCursor, DeadLetterRecord, DeadReason, InboxClaimOutcome,
+    InboxFailure, InboxFailureOutcome, InboxId, InboxPurgeReport, InboxPurgeRequest, InboxReceipt,
+    InboxRecord, InboxScope, InboxSettings, InboxStats,
 };
+
+use super::support::CompileReceipt;
 
 #[test]
 fn crate_root_reexports_match_the_public_api_inventory() {
@@ -44,15 +46,15 @@ fn crate_root_reexports_match_the_public_api_inventory() {
 
 #[allow(dead_code)]
 fn public_contract_data_carriers_compile() {
-    let _: Option<ClaimedReceipt> = None;
     let _: Option<DeadLetterBatchError> = None;
     let _: Option<DeadLetterCursor> = None;
     let _: Option<DeadLetterRecord> = None;
     let _: Option<DeadReason> = None;
-    let _: Option<InboxClaimOutcome> = None;
+    let _: Option<InboxClaimOutcome<CompileReceipt>> = None;
     let _: Option<InboxFailure> = None;
     let _: Option<InboxFailureOutcome> = None;
     let _: Option<InboxId> = None;
+    let _: Option<&dyn InboxReceipt> = None;
     let _: Option<InboxPurgeReport> = None;
     let _: Option<InboxPurgeRequest> = None;
     let _: Option<InboxRecord> = None;

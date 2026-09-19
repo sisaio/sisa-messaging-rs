@@ -136,8 +136,8 @@ pub trait InboxDeadLetters: Send + Sync + 'static {
 
     /// Resurrects dead receipts and returns exactly the identities confirmed by the provider.
     ///
-    /// Confirmed rows retain their identity and diagnostics, but clear `dead_at`, `dead_reason`,
-    /// `last_error`, and recorded attempts so the next failure starts a fresh retry budget.
+    /// Confirmed rows retain their identity while clearing `dead_at`, `dead_reason`, `last_error`,
+    /// and recorded attempts so the next failure starts a fresh retry budget.
     fn retry(
         &self,
         batch: DeadLetterBatch<'_>,

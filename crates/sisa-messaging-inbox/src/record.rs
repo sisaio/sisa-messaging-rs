@@ -18,7 +18,10 @@ pub const MAX_INBOX_SCOPE_BYTES: usize = 128;
 pub struct InboxScope(String);
 
 impl InboxScope {
-    /// Validates and owns a scope selected deliberately by the application.
+    /// Validates and owns an application-selected scope.
+    ///
+    /// Accepts non-empty UTF-8 text of at most 128 encoded bytes. Rejects empty or excessive text,
+    /// ASCII control bytes, and DEL so the value is safe for the persisted scope boundary.
     pub fn new(value: impl Into<String>) -> Result<Self, InboxScopeError> {
         let value = value.into();
 

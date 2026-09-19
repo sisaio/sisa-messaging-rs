@@ -2,26 +2,25 @@
 
 use crate::{DeadReason, InboxId};
 
-/// Evidence that this transaction may mark one receipt complete.
+/// Provider-controlled evidence that one transaction may mark a receipt complete.
 ///
-/// Providers mint a receipt only from a successful [`InboxClaimOutcome::Claimed`] result. It is
-/// intentionally non-`Clone`: completion consumes the evidence so callers cannot accidentally
-/// complete the same claim twice.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ClaimedReceipt {
-    /// Provider-minted receipt identity.
-    pub id: InboxId,
+/// Providers define the receipt fields and construction. Implementations should not make a receipt
+/// `Clone`, `Copy`, `Default`, deserializable, or constructible from [`InboxId`]; callers obtain
+/// it only from [`InboxClaimOutcome::Claimed`] and completion consumes that exact value.
+pub trait InboxReceipt: Send + 'static {
+    /// Returns the provider-minted durable receipt identity.
+    fn id(&self) -> InboxId;
 
-    /// Number of failures recorded before this claim.
-    pub recorded_failures: u32,
+    /// Returns the number of failures recorded before this claim.
+    fn recorded_failures(&self) -> u32;
 }
 
 /// Result of claiming a delivery inside the caller-owned transaction.
 #[derive(Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum InboxClaimOutcome {
+pub enum InboxClaimOutcome<R: InboxReceipt> {
     /// The caller owns processing in this transaction and may complete the supplied receipt.
-    Claimed(ClaimedReceipt),
+    Claimed(R),
 
     /// A committed transaction has already completed this delivery.
     CompletedDuplicate,

@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
 
 use sisa_messaging::{ErrorClassifier, FailureKind};
 use sisa_messaging_inbox::{
-    ClaimedReceipt, DeadLetterBatch, DeadLetterQuery, DeadLetterRecord, InboxClaimOutcome,
-    InboxDeadLetters, InboxFailure, InboxFailureOutcome, InboxMaintenance, InboxPurgeReport,
-    InboxPurgeRequest, InboxRecord, InboxStats, InboxStore, InboxUnitOfWork,
+    DeadLetterBatch, DeadLetterQuery, DeadLetterRecord, InboxClaimOutcome, InboxDeadLetters,
+    InboxFailure, InboxFailureOutcome, InboxId, InboxMaintenance, InboxPurgeReport,
+    InboxPurgeRequest, InboxReceipt, InboxRecord, InboxStats, InboxStore, InboxUnitOfWork,
 };
 
 #[derive(Debug)]
@@ -28,8 +28,26 @@ impl ErrorClassifier for SafeError {
 
 pub(crate) struct CompileCapabilities;
 
+pub(crate) struct CompileReceipt {
+    id: InboxId,
+
+    recorded_failures: u32,
+}
+
+impl InboxReceipt for CompileReceipt {
+    fn id(&self) -> InboxId {
+        self.id
+    }
+
+    fn recorded_failures(&self) -> u32 {
+        self.recorded_failures
+    }
+}
+
 impl InboxStore<()> for CompileCapabilities {
     type Error = SafeError;
+
+    type Receipt = CompileReceipt;
 
     fn max_attempts(&self) -> NonZeroU32 {
         NonZeroU32::MIN
@@ -39,14 +57,17 @@ impl InboxStore<()> for CompileCapabilities {
         &self,
         _transaction: &mut (),
         _record: &InboxRecord,
-    ) -> Result<InboxClaimOutcome, Self::Error> {
-        Ok(InboxClaimOutcome::CompletedDuplicate)
+    ) -> Result<InboxClaimOutcome<Self::Receipt>, Self::Error> {
+        Ok(InboxClaimOutcome::Claimed(CompileReceipt {
+            id: InboxId::from_uuid(uuid::Uuid::from_u128(1)),
+            recorded_failures: 2,
+        }))
     }
 
     async fn complete(
         &self,
         _transaction: &mut (),
-        _receipt: ClaimedReceipt,
+        _receipt: Self::Receipt,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

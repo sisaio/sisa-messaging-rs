@@ -15,7 +15,7 @@ mod settings;
 mod store;
 mod unit_of_work;
 
-pub use claim::{ClaimedReceipt, InboxClaimOutcome};
+pub use claim::{InboxClaimOutcome, InboxReceipt};
 pub use dead_letters::{
     DeadLetterBatch, DeadLetterBatchError, DeadLetterCursor, DeadLetterQuery, DeadLetterRecord,
     InboxDeadLetters, MAX_DEAD_LETTER_BATCH_SIZE,
