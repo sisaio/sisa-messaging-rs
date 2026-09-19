@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
-      GH_TOKEN: ${{ github.token }}
       GH_API_URL: ${{ github.api_url }}
       GH_REPOSITORY: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -28,20 +27,19 @@ jobs:
     steps:
       - name: Test changed-path policy boundaries
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Run changed-path policy tests
         run: tests/governance/pr-scope.sh
 
       - name: Enforce branch, commit, and path policy
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-
-          readonly max_commit_paths=20
-          readonly max_pr_paths=99
-          readonly max_pr_commits_from_api=250
-          readonly allowed_branch_pattern='^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$'
-          readonly conventional_header_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^()]+\))?(!)?: [^[:space:]].*$'
+          source .github/scripts/pr-scope-policy.sh
 
           api_get() {
             curl \
@@ -75,7 +73,7 @@ jobs:
 
           shopt -s nocasematch
           closing_reference_pattern="(^|[^[:alnum:]_])Closes[[:space:]]+#${branch_issue_number}([^[:alnum:]_]|$)"
-          if ! grep -Eiq "${closing_reference_pattern}" <<<"${pull_body}"; then
+          if ! has_closing_reference "${pull_body}" "${branch_issue_number}"; then
             echo "PR body must contain a closing reference for issue #${branch_issue_number}, matching its branch." >&2
             echo "Use canonical syntax: Closes #${branch_issue_number}" >&2
             exit 1
@@ -89,7 +87,8 @@ jobs:
           issue_state="$(jq --exit-status --raw-output \
             'if (type == "object" and (.state | type) == "string") then .state else error("expected issue state") end' \
             <<<"${issue}")"
-          if [[ "${issue_number}" != "${branch_issue_number}" ]] || [[ "${issue_state}" != open ]] || jq --exit-status 'has("pull_request")' <<<"${issue}" >/dev/null; then
+          has_pull_request="$(jq --exit-status 'if has("pull_request") then "true" else "false" end' <<<"${issue}")"
+          if ! issue_is_open_not_pull_request "${issue_number}" "${branch_issue_number}" "${issue_state}" "${has_pull_request}"; then
             echo "Branch issue #${branch_issue_number} must resolve to an existing open GitHub issue, not a pull request." >&2
             exit 1
           fi
@@ -98,13 +97,13 @@ jobs:
           pr_files="$(api_get "${pr_files_url}?per_page=$((max_pr_paths + 1))&page=1")"
           pr_path_count="$(jq --exit-status 'if type == "array" then length else error("expected array") end' <<<"${pr_files}")"
 
-          if ((pr_path_count > max_pr_paths)); then
+          if ! path_count_within_limit "${pr_path_count}"; then
             echo "PR #${PR_NUMBER} changes at least ${pr_path_count} paths; the hard limit is ${max_pr_paths}." >&2
             echo "Split the work into smaller capability-focused PRs." >&2
             exit 1
           fi
 
-          if ((PR_COMMIT_COUNT > max_pr_commits_from_api)); then
+          if ! commit_count_within_limit "${PR_COMMIT_COUNT}"; then
             echo "PR #${PR_NUMBER} has ${PR_COMMIT_COUNT} commits; GitHub's List commits on a pull request API caps results at ${max_pr_commits_from_api} total commits, even with pagination." >&2
             echo "The workflow cannot prove every commit is within the ${max_commit_paths}-path limit. Rebase or split the PR." >&2
             exit 1
@@ -158,16 +157,16 @@ jobs:
                 violating_messages=$((violating_messages + 1))
               fi
 
-              if ! grep -Eq "^[[:space:]]*Refs[[:space:]]+#${branch_issue_number}[[:space:]]*$" <<<"${commit_message}"; then
+              if ! has_refs_reference "${commit_message}" "${branch_issue_number}"; then
                 echo "Commit ${sha:0:12} must contain a standalone Refs #${branch_issue_number} line." >&2
                 violating_messages=$((violating_messages + 1))
               fi
-              if grep -Eiq "(^|[^[:alnum:]_])(Closes|Close|Closed|Fixes|Fix|Fixed|Resolves|Resolve|Resolved)[[:space:]]*:?[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)?#[1-9][0-9]*([^[:alnum:]_]|$)" <<<"${commit_message}"; then
+              if has_closing_keyword "${commit_message}"; then
                 echo "Commit ${sha:0:12} must not use GitHub closing keywords; use Refs #${branch_issue_number}." >&2
                 violating_messages=$((violating_messages + 1))
               fi
 
-              if ((commit_path_count > max_commit_paths)); then
+              if ! commit_path_count_within_limit "${commit_path_count}"; then
                 echo "Commit ${sha:0:12} changes at least ${commit_path_count} paths; the hard limit is ${max_commit_paths}." >&2
                 violating_commits=$((violating_commits + 1))
               else
