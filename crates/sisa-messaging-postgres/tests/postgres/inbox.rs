@@ -1,4 +1,8 @@
-use std::{num::NonZeroU32, sync::OnceLock, time::Duration};
+use std::{
+    num::NonZeroU32,
+    sync::OnceLock,
+    time::{Duration, SystemTime},
+};
 
 use sisa_messaging::{ErrorSummary, FailureKind, MessageId, MessageType, Metadata};
 use sisa_messaging_inbox::{
@@ -7,7 +11,7 @@ use sisa_messaging_inbox::{
     InboxMaintenance, InboxPurgeRequest, InboxReceipt, InboxRecord, InboxScope, InboxSettings,
     InboxStore, InboxUnitOfWork,
 };
-use sisa_messaging_postgres::PostgresInboxStore;
+use sisa_messaging_postgres::{PostgresError, PostgresInboxStore};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
@@ -39,6 +43,13 @@ fn failure_with_error(kind: FailureKind, error: &str) -> InboxFailure {
     InboxFailure {
         kind,
         error: ErrorSummary::from_safe_text(error),
+    }
+}
+
+fn out_of_chrono_range_system_time() -> SystemTime {
+    match SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(200_000_000_000_000)) {
+        Some(value) => value,
+        None => panic!("test platform cannot represent the intended out-of-range timestamp"),
     }
 }
 
@@ -191,6 +202,23 @@ async fn isolated_inbox_fixture() -> InboxFixture {
         .await
         .unwrap_or_else(|_| panic!("isolated inbox PostgreSQL connection failed"));
     InboxFixture { pool, schema }
+}
+
+#[tokio::test]
+async fn inbox_dead_letter_cursor_rejects_an_out_of_range_system_time_before_sql() {
+    let fixture = isolated_inbox_fixture().await;
+    let store = store(fixture.pool.clone(), 2);
+    let list = store
+        .list(DeadLetterQuery {
+            after: Some(DeadLetterCursor {
+                dead_at: out_of_chrono_range_system_time(),
+                id: InboxId::from_uuid(Uuid::nil()),
+            }),
+            limit: NonZeroU32::MIN,
+        })
+        .await;
+    assert!(matches!(list, Err(PostgresError::InvalidData)));
+    fixture.cleanup().await;
 }
 
 #[tokio::test]

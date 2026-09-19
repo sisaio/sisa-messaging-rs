@@ -13,8 +13,7 @@ mod outcomes;
 use std::num::NonZeroU32;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
-use sisa_messaging::{ErrorSummary, FailureKind, MessageId, MessageType};
+use sisa_messaging::{ErrorSummary, MessageId, MessageType};
 use sisa_messaging_inbox::{
     DeadLetterBatch, DeadLetterQuery, DeadLetterRecord, DeadReason, InboxClaimOutcome,
     InboxDeadLetters, InboxFailure, InboxFailureOutcome, InboxId, InboxMaintenance,
@@ -164,7 +163,8 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
                     message_version: i32::try_from(record.version)
                         .map_err(|_| PostgresError::InvalidData)?,
                     metadata: &encoded_metadata,
-                    permanent: matches!(failure.kind, FailureKind::Permanent),
+                    // Any future non-retryable classification remains terminal like the portable reducer.
+                    permanent: !failure.kind.is_retryable(),
                     max_attempts: i32::try_from(self.settings.max_attempts().get())
                         .map_err(|_| PostgresError::InvalidData)?,
                     error: failure.error.as_str(),
@@ -278,15 +278,13 @@ impl InboxDeadLetters for PostgresInboxStore {
         query: DeadLetterQuery,
     ) -> impl std::future::Future<Output = Result<Vec<DeadLetterRecord>, Self::Error>> + Send {
         async move {
-            let (after_dead_at, after_id) = query
-                .after
-                .map(|cursor| {
-                    (
-                        Some(DateTime::<Utc>::from(cursor.dead_at)),
-                        Some(cursor.id.into_uuid()),
-                    )
-                })
-                .unwrap_or((None, None));
+            let (after_dead_at, after_id) = match query.after {
+                Some(cursor) => (
+                    Some(metadata::system_time_to_utc(cursor.dead_at)?),
+                    Some(cursor.id.into_uuid()),
+                ),
+                None => (None, None),
+            };
             dead_letters::list(
                 &self.pool,
                 dead_letters::ListParams {

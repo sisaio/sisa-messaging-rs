@@ -75,7 +75,10 @@ where
                 payload: &serialized.payload,
                 metadata: &metadata,
                 ordering_key: serialized.ordering_key.as_ref().map(|key| key.as_str()),
-                expires_at: options.expires_at.map(system_time_to_utc),
+                expires_at: options
+                    .expires_at
+                    .map(crate::metadata::system_time_to_utc)
+                    .transpose()?,
             };
             let record = enqueue::enqueue(&mut **transaction, params).await?;
             Ok(sisa_messaging_outbox::OutboxId::from_uuid(record.id))
@@ -314,15 +317,13 @@ where
         query: DeadLetterQuery,
     ) -> impl std::future::Future<Output = Result<Vec<DeadLetterRecord>, Self::Error>> + Send {
         async move {
-            let (after_dead_at, after_id) = query
-                .after
-                .map(|cursor| {
-                    (
-                        Some(chrono::DateTime::<chrono::Utc>::from(cursor.dead_at)),
-                        Some(cursor.id.into_uuid()),
-                    )
-                })
-                .unwrap_or((None, None));
+            let (after_dead_at, after_id) = match query.after {
+                Some(cursor) => (
+                    Some(crate::metadata::system_time_to_utc(cursor.dead_at)?),
+                    Some(cursor.id.into_uuid()),
+                ),
+                None => (None, None),
+            };
             let records = dead_letters::list(
                 &self.pool,
                 dead_letters::ListParams {
@@ -408,10 +409,6 @@ fn dead_letter_record(
 
 fn duration_micros(duration: Duration) -> i64 {
     i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)
-}
-
-fn system_time_to_utc(value: std::time::SystemTime) -> DateTime<Utc> {
-    value.into()
 }
 
 fn utc_to_system_time(value: DateTime<Utc>) -> std::time::SystemTime {

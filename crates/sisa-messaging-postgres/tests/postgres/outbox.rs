@@ -1,4 +1,8 @@
-use std::{num::NonZeroU32, sync::Arc, time::Duration};
+use std::{
+    num::NonZeroU32,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use crate::support::{
     OutboxLookupParams, TestMessage, TestSerializer, insert_outbox_row,
@@ -349,6 +353,50 @@ async fn enqueue_rollback_leaves_no_durable_row() {
         .await
         .is_none()
     );
+}
+
+#[tokio::test]
+async fn outbox_rejects_out_of_range_system_times_before_running_sql() {
+    let pool = isolated_outbox_pool().await;
+    let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+    let out_of_range = out_of_chrono_range_system_time();
+    let mut transaction = pool
+        .begin()
+        .await
+        .unwrap_or_else(|_| panic!("out-of-range enqueue transaction start failed"));
+    let enqueue = store
+        .enqueue(
+            &mut transaction,
+            &test_envelope(MessageId::new(), Metadata::default()),
+            EnqueueOptions {
+                expires_at: Some(out_of_range),
+            },
+        )
+        .await;
+    assert!(matches!(enqueue, Err(PostgresError::InvalidData)));
+    transaction
+        .rollback()
+        .await
+        .unwrap_or_else(|_| panic!("out-of-range enqueue transaction rollback failed"));
+
+    let cursor = sisa_messaging_outbox::DeadLetterCursor {
+        dead_at: out_of_range,
+        id: sisa_messaging_outbox::OutboxId::from_uuid(Uuid::nil()),
+    };
+    let list = store
+        .list(DeadLetterQuery {
+            after: Some(cursor),
+            limit: NonZeroU32::MIN,
+        })
+        .await;
+    assert!(matches!(list, Err(PostgresError::InvalidData)));
+}
+
+fn out_of_chrono_range_system_time() -> SystemTime {
+    match SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(200_000_000_000_000)) {
+        Some(value) => value,
+        None => panic!("test platform cannot represent the intended out-of-range timestamp"),
+    }
 }
 
 #[tokio::test]
