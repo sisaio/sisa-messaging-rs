@@ -117,11 +117,13 @@ mistakes. They require no builder or doctest.
 
 ### PostgreSQL provider SQLx conventions
 
-- Every runtime SQLx statement uses a compile-time checked SQLx query macro, including a checked
-  typed form such as `query_as!` or `query_scalar!`. The selected form must validate SQL plus bind
-  and result shape at compile time, whether it reads a live development database or SQLx offline
-  metadata. Runtime-only `query`/`query_as` APIs, dynamically assembled SQL, and unchecked row
-  decoding do not meet this rule for provider operations.
+- Every runtime SQLx statement uses a compile-time checked SQLx query macro that validates SQL plus
+  bind and result shape at compile time, whether it reads a live development database or SQLx
+  offline metadata. Runtime-only `query`/`query_as` APIs, dynamically assembled SQL, and unchecked
+  row decoding do not meet this rule for provider operations.
+- A row-returning statement uses `query_as!` with an explicit `Record` output type. Do not use
+  `query!`'s anonymous generated row and then map that database row manually. Reserve `query!` for
+  non-row commands and `query_scalar!` for genuine scalar outputs where a `Record` adds no value.
 - Format SQL as readable multiline statements. Add a concise SQL comment only when the correctness
   reason is not apparent from the statement itself, such as fencing, locking, ordering, or index
   intent.
@@ -130,7 +132,7 @@ mistakes. They require no builder or doctest.
 - A statement helper neither accepts nor calls a store. Its first argument is the SQLx executor—a
   pool reference or the transaction's underlying mutable connection/executor form required by SQLx
   (for example, `&mut *transaction`)—followed by exactly one typed `Params` value; it returns typed
-  `Record` values.
+  `Record` values, or a genuine scalar or affected-row result.
 - The store/provider is the orchestration layer: it selects the pool or opens/uses a transaction,
   invokes statement helpers, maps `Record` values into portable contract types, and owns
   multi-statement transaction boundaries. Helpers do not call back into the store, preventing a
