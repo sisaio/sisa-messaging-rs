@@ -127,6 +127,14 @@ mistakes. They require no builder or doctest.
   intent.
 - Private models that supply SQL binds end in `Params`; private models decoded from SQL rows end in
   `Record`. These names make the input/output boundary visible at each query call site.
+- A statement helper neither accepts nor calls a store. Its first argument is the SQLx executor—a
+  pool reference or the transaction's underlying mutable connection/executor form required by SQLx
+  (for example, `&mut *transaction`)—followed by exactly one typed `Params` value; it returns typed
+  `Record` values.
+- The store/provider is the orchestration layer: it selects the pool or opens/uses a transaction,
+  invokes statement helpers, maps `Record` values into portable contract types, and owns
+  multi-statement transaction boundaries. Helpers do not call back into the store, preventing a
+  circular store-to-helper-to-store dependency.
 - Keep tests and test-only modules outside production `src/**`. Provider and database coverage
   belongs under `tests/**`, where it runs against the documented PostgreSQL baseline rather than
   relying on production-module test scaffolding.
