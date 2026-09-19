@@ -115,6 +115,25 @@ Request/report structs are data carriers with named public fields:
 Private SQL parameter structs remain useful because they name bindings and prevent positional
 mistakes. They require no builder or doctest.
 
+### PostgreSQL provider SQLx conventions
+
+- Every runtime SQLx statement uses a compile-time checked SQLx query macro, including a checked
+  typed form such as `query_as!` or `query_scalar!`. The selected form must validate SQL plus bind
+  and result shape at compile time, whether it reads a live development database or SQLx offline
+  metadata. Runtime-only `query`/`query_as` APIs, dynamically assembled SQL, and unchecked row
+  decoding do not meet this rule for provider operations.
+- Format SQL as readable multiline statements. Add a concise SQL comment only when the correctness
+  reason is not apparent from the statement itself, such as fencing, locking, ordering, or index
+  intent.
+- Private models that supply SQL binds end in `Params`; private models decoded from SQL rows end in
+  `Record`. These names make the input/output boundary visible at each query call site.
+- Keep tests and test-only modules outside production `src/**`. Provider and database coverage
+  belongs under `tests/**`, where it runs against the documented PostgreSQL baseline rather than
+  relying on production-module test scaffolding.
+- Regenerate SQLx offline metadata whenever a checked query or its schema contract changes. Review
+  verifies that the metadata is current, query typing remains checked, statements follow these
+  presentation rules, and provider tests are outside production source.
+
 ## 6. Errors
 
 Use one error per boundary, not a global `MessagingError`:
