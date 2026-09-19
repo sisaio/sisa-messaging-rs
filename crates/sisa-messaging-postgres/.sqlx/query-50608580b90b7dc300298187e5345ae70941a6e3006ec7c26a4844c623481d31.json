@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                count(*) FILTER (\n                    WHERE completed_at IS NULL\n                      AND dead_at IS NULL\n                      AND attempts = 0\n                ) AS \"pending!\",\n                count(*) FILTER (\n                    WHERE completed_at IS NULL\n                      AND dead_at IS NULL\n                      AND attempts > 0\n                ) AS \"retrying!\",\n                count(*) FILTER (\n                    WHERE completed_at IS NOT NULL\n                ) AS \"completed!\",\n                count(*) FILTER (\n                    WHERE dead_at IS NOT NULL\n                ) AS \"dead!\"\n            FROM inbox_receipts\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "retrying!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "completed!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "dead!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "50608580b90b7dc300298187e5345ae70941a6e3006ec7c26a4844c623481d31"
+}

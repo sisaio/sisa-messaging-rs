@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- The held row lock forces both workers to traverse the SKIP LOCKED branch.\n            SELECT id FROM outbox_messages WHERE id = $1 FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "54f84d7351f7bf41679f86a00ad0b6138c2a8805a66a9b0d40dfd97cdeabbe68"
+}

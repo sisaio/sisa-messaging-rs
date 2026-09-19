@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Delete is restricted to the caller-bounded terminal identity batch.\n            DELETE FROM inbox_receipts\n            -- A concurrently retried receipt cannot be removed from a stale batch.\n            WHERE id = ANY($1)\n              AND dead_at IS NOT NULL\n            RETURNING\n                id AS \"id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5a1686a4a585a70b0b42c074fe8146fd2a66147e04f9cb3529aca77fb86e0915"
+}

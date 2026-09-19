@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n            -- Retrying preserves identity while resetting only still-terminal receipts.\n            UPDATE inbox_receipts\n            SET\n                attempts = 0,\n                dead_at = NULL,\n                dead_reason = NULL,\n                last_error = NULL\n            WHERE id = ANY($1)\n              AND dead_at IS NOT NULL\n            RETURNING\n                id AS \"id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3ea2c7dedddc38687f3f5968e505bdd1bb9232030ea29cfe0c97eeeaf5b4b097"
+}

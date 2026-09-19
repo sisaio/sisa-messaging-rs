@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Delete is restricted to the caller-bounded terminal identity batch.\n            DELETE FROM outbox_messages\n            -- A row revived by another operator cannot be deleted from this stale batch.\n            WHERE id = ANY($1)\n              AND dead_at IS NOT NULL\n            RETURNING\n                id AS \"id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "28d1527f809ced92f289deadd4ea5cbcc212f1a1481d2f5c4970052fee88cdd9"
+}
