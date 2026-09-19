@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n            -- Retention locks one completed-only batch; nonterminal receipts cannot be selected.\n            DELETE FROM inbox_receipts\n            WHERE id IN (\n                SELECT id\n                FROM inbox_receipts\n                WHERE completed_at < now() - ($1::bigint * interval '1 microsecond')\n                  AND dead_at IS NULL\n                ORDER BY completed_at, id\n                FOR UPDATE SKIP LOCKED\n                LIMIT $2\n            )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "96b6a405eaf222b78c765f75f1446e8bd259657888ea38110e1dff977726479e"
+}

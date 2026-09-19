@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n            INSERT INTO inbox_receipts (\n                scope,\n                message_id,\n                message_type,\n                message_version,\n                metadata\n            )\n            VALUES ($1, $2, $3, $4, $5)\n            -- Preserve original receipt diagnostics while reading its durable state.\n            ON CONFLICT (scope, message_id) DO UPDATE\n            SET scope = inbox_receipts.scope\n            RETURNING\n                id AS \"id!\",\n                attempts AS \"attempts!\",\n                completed_at,\n                dead_at,\n                dead_reason\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "73e0ea406b08490e19d1e43b13b28d43cfa8abc35e875a7f567cf298c52bc5d4"
+}

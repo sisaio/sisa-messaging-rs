@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- A schema-valid maximum proves the failure transition saturates before incrementing.\n            INSERT INTO inbox_receipts (scope, message_id, message_type, message_version, metadata, attempts)\n            VALUES ($1, $2, 'postgres.inbox-test', 1, '{\"correlation\":{\"correlation_id\":42}}'::jsonb, 2147483647)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "60526052b9fb896977490ae21f290776b343acc33847c1f4be27637a86f69ac4"
+}

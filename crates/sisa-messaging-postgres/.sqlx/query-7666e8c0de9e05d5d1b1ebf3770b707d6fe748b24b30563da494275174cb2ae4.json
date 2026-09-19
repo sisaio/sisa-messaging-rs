@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Fixed death order makes the exclusive cursor boundary observable.\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type, payload, metadata,\n                created_at, claimable_at, attempts, dead_at, dead_reason, last_error\n            )\n            VALUES\n                ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000301', 'postgres.dead-first', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), 4, now() - interval '3 minutes', 'permanent', 'safe test error'),\n                ('00000000-0000-0000-0000-000000000202', '00000000-0000-0000-0000-000000000302', 'postgres.dead-second', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), 2, now() - interval '2 minutes', 'exhausted', 'safe test error'),\n                ('00000000-0000-0000-0000-000000000203', '00000000-0000-0000-0000-000000000303', 'postgres.live', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), 0, NULL, NULL, NULL)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7666e8c0de9e05d5d1b1ebf3770b707d6fe748b24b30563da494275174cb2ae4"
+}

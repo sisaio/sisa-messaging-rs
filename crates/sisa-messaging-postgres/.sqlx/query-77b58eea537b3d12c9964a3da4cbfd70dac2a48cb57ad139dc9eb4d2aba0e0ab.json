@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        -- Every pool connection resolves the provider's fixed table name to the fixture schema.\n                        SELECT set_config('search_path', $1, false) AS \"search_path!\"\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "search_path!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "77b58eea537b3d12c9964a3da4cbfd70dac2a48cb57ad139dc9eb4d2aba0e0ab"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Delete one locked retention batch through the published-time access path.\n            DELETE FROM outbox_messages\n            WHERE id IN (\n                SELECT id\n                FROM outbox_messages\n                WHERE published_at < now() - ($1::bigint * interval '1 microsecond')\n                ORDER BY published_at, id\n                -- Preserve concurrent retention and operator work on rows outside this batch.\n                FOR UPDATE SKIP LOCKED\n                LIMIT $2\n            )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "760176314be9400a1fa22e139f61aae5cb10b0483c88a3b64aa7bde622990018"
+}

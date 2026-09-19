@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Match id and token so a stale publisher cannot complete a newer lease.\n            UPDATE outbox_messages AS o\n            SET\n                attempts = o.attempts + 1,\n                published_at = now(),\n                claim_token = NULL,\n                locked_by = NULL\n            -- Pair each row identity with its original claim fence.\n            FROM unnest($1::uuid[], $2::uuid[]) AS requested(id, token)\n            -- A matching fence is required before a terminal publish transition.\n            WHERE o.id = requested.id\n              AND o.claim_token = requested.token\n              AND o.published_at IS NULL\n              AND o.dead_at IS NULL\n            RETURNING\n                o.id AS \"id!\",\n                requested.token AS \"claim_token!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "claim_token!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "943adbc27a47d99b04be5498428c2777dafe92ce092dfcfb6e8e4e570e425a78"
+}

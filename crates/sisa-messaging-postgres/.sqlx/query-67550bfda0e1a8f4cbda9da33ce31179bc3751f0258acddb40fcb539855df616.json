@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Database-time fixture control makes one unrenewed lease stale without a process sleep.\n            UPDATE outbox_messages\n            SET\n                expires_at = now() - interval '1 second',\n                claimable_at = CASE\n                    WHEN message_type = 'postgres.renew-stale' THEN now() - interval '1 second'\n                    ELSE claimable_at\n                END\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "67550bfda0e1a8f4cbda9da33ce31179bc3751f0258acddb40fcb539855df616"
+}

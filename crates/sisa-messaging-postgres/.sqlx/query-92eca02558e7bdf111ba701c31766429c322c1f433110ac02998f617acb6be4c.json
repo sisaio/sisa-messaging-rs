@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Plan assertions observe one provider-owned durable receipt by its opaque handle.\n            SELECT\n                id AS \"id!\",\n                scope AS \"scope!\",\n                message_id AS \"message_id!\",\n                message_type AS \"message_type!\",\n                message_version AS \"message_version!\",\n                metadata AS \"metadata!\",\n                attempts AS \"attempts!\",\n                received_at AS \"received_at!\",\n                completed_at,\n                dead_at,\n                dead_reason,\n                last_error\n            FROM inbox_receipts\n            WHERE (id = $1 AND $2::text IS NULL AND $3::uuid IS NULL)\n               OR (scope = $2 AND message_id = $3 AND $1::uuid IS NULL)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "message_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "message_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "message_version!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "attempts!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "received_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "dead_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "dead_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_error",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "92eca02558e7bdf111ba701c31766429c322c1f433110ac02998f617acb6be4c"
+}
