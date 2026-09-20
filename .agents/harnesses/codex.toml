@@ -1,0 +1,64 @@
+# Codex harness mapping for the roles in .agents/roles/*.md.
+# Read by .agents/sync.sh; do not edit the generated .codex/ files by hand.
+
+# Tier to Codex model and reasoning effort.
+[tiers.flagship]
+model = "gpt-5.6-sol"
+effort = "high"
+
+[tiers.balanced]
+model = "gpt-5.6-terra"
+effort = "medium"
+
+[tiers.fast]
+model = "gpt-5.6-luna"
+effort = "medium"
+
+# Everything under [config] is emitted verbatim as .codex/config.toml, with the
+# leading "config." stripped from each table header.
+[config]
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+model_verbosity = "low"
+plan_mode_reasoning_effort = "medium"
+tool_output_token_limit = 6000
+model_auto_compact_token_limit = 100000
+
+[config.mcp_servers.node_repl]
+enabled = false
+
+[config.agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+default_subagent_model = "gpt-5.6-terra"
+default_subagent_reasoning_effort = "medium"
+
+[config.plugins."visualize@openai-bundled"]
+enabled = false
+
+[config.plugins."documents@openai-primary-runtime"]
+enabled = false
+
+[config.plugins."pdf@openai-primary-runtime"]
+enabled = false
+
+[config.plugins."spreadsheets@openai-primary-runtime"]
+enabled = false
+
+[config.plugins."presentations@openai-primary-runtime"]
+enabled = false
+
+[config.plugins."template-creator@openai-primary-runtime"]
+enabled = false
+
+[config.plugins."sites@openai-bundled"]
+enabled = false
+
+[config.plugins."unified-computer-use@openai-bundled"]
+enabled = false
+
+[config.plugins."computer-use@openai-bundled"]
+enabled = false
+
+[config.plugins."chrome@openai-bundled"]
+enabled = false

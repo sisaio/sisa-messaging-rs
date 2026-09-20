@@ -1,0 +1,22 @@
+# Claude Code harness mapping for the roles in .agents/roles/*.md.
+# Read by .agents/sync.sh; do not edit the generated .claude/ files or CLAUDE.md by hand.
+
+# Tier to Claude Code model alias used in .claude/agents/<role>.md frontmatter.
+[tiers.flagship]
+model = "opus"
+
+[tiers.balanced]
+model = "sonnet"
+
+[tiers.fast]
+model = "haiku"
+
+# Every key here is added to the frontmatter of each role with `write: false`.
+[read_only]
+disallowedTools = "Edit, Write, NotebookEdit"
+
+# Emitted as .claude/settings.json.
+[settings.permissions]
+allow = [
+  "Bash(rtk *)",
+]
