@@ -19,9 +19,10 @@ checks affected by a change or finding. Read hunks and named sections, not whole
 generated folders, and narrow large output. Filter `gh`/`gh api` reads with `--json`/`--jq`; never
 use `--comments` or unfiltered API output, and do not use web search.
 
-Prefix shell commands with rtk. Pipe `prek run` and any authorized `git push` through `tail -n 40`.
-Await CI once with `gh pr checks --watch --fail-fast` or `gh run watch --exit-status`, pipe output
-through `tail`, and never poll status. Return only changed paths, checks/results, pending actions,
+Prefix shell commands with rtk. Pipe `prek run` and any authorized `git push` through `tail -n 40`
+under `set -o pipefail` so the exit status survives. Await CI once with
+`gh pr checks --watch --fail-fast` or `gh run watch --exit-status`, pipe output through `tail` under
+the same setting, and never poll status. Return only changed paths, checks/results, pending actions,
 rollback considerations, branch, planned commit message, path counts, risks, and next action.
 Preserve unrelated changes and never expose credentials or production URLs. Assigned delivery work
 never authorizes irreversible production changes: do not run any production command or production

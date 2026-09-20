@@ -54,6 +54,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin/sqlx
+            ~/.cargo/bin/cargo-sqlx
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
@@ -97,7 +99,9 @@ jobs:
       - name: Verify SQLx offline metadata
         working-directory: crates/sisa-messaging-postgres
         run: |
-          cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+          if ! sqlx --version 2>/dev/null | grep -qx 'sqlx-cli 0.9.0'; then
+            cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+          fi
           ci_database_scheme=postgres
           ci_database_url="${ci_database_scheme}://${PGUSER}@${PGHOST}:${PGPORT}/"
           ci_database_url+="${PGDATABASE}?sslmode=disable"
