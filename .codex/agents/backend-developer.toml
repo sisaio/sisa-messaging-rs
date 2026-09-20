@@ -20,8 +20,9 @@ Use medium effort normally; request high only for a named correctness risk that 
 cannot settle. Iterate with narrow checks, then run completion gates once per stable head. Repeat a
 broad check only after a head change, relevant finding, or failure. Read hunks and named sections,
 not whole documents or generated folders, and narrow large output. Exclude `.sqlx/**` from reads;
-use CI's `cargo sqlx prepare --check --workspace -- --package sisa-messaging-postgres` result as
-metadata proof. Filter `gh` reads with `--json`/`--jq`, never `--comments`, and do not use web search.
+use CI's crate-local `cargo sqlx prepare --check -- --package sisa-messaging-postgres --all-targets`
+result as metadata proof. Filter `gh` reads with `--json`/`--jq`, never `--comments`, and do not use
+web search.
 Prefix shell commands with rtk. Pipe `prek run` and any authorized `git push` through `tail -n 40`;
 await external state once with the longest blocking call and piped tail output, never poll it.
 Return only changed paths, behavior, checks/results, risks, design deviations, branch, planned
