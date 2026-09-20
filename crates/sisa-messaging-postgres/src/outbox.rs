@@ -106,7 +106,7 @@ where
                 claim::ClaimParams {
                     limit: i64::from(request.limit.get()),
                     worker_id: &request.worker_id,
-                    lease_micros: duration_micros(request.lease),
+                    lease_micros: duration_micros(request.lease)?,
                 },
             )
             .await?;
@@ -183,7 +183,7 @@ where
             for failure in requested {
                 let (dead, delay_micros, reason) = match failure.action {
                     sisa_messaging_outbox::FailureAction::Retry { delay } => {
-                        (false, duration_micros(delay), "")
+                        (false, duration_micros(delay)?, "")
                     }
                     sisa_messaging_outbox::FailureAction::Dead { reason } => {
                         (true, 0, reason.as_str())
@@ -226,7 +226,7 @@ where
                 outcomes::ExtendLeaseParams {
                     ids,
                     tokens,
-                    lease_micros: duration_micros(lease),
+                    lease_micros: duration_micros(lease)?,
                 },
             )
             .await?;
@@ -264,6 +264,8 @@ where
         request: OutboxPurgeRequest,
     ) -> impl std::future::Future<Output = Result<OutboxPurgeReport, Self::Error>> + Send {
         async move {
+            let published_retention = duration_micros(request.published_retention)?;
+            let dead_retention = duration_micros(request.dead_retention)?;
             let batch_size = i64::from(request.batch_size.get());
             let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
             let expired =
@@ -272,7 +274,7 @@ where
             let published_deleted = maintenance::purge_published(
                 &mut *transaction,
                 maintenance::PurgePublishedParams {
-                    retention_micros: duration_micros(request.published_retention),
+                    retention_micros: published_retention,
                     batch_size,
                 },
             )
@@ -280,7 +282,7 @@ where
             let dead_deleted = maintenance::purge_dead(
                 &mut *transaction,
                 maintenance::PurgeDeadParams {
-                    retention_micros: duration_micros(request.dead_retention),
+                    retention_micros: dead_retention,
                     batch_size,
                 },
             )
@@ -413,8 +415,13 @@ fn dead_letter_record(
     })
 }
 
-fn duration_micros(duration: Duration) -> i64 {
-    i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)
+fn duration_micros(duration: Duration) -> Result<i64, PostgresError> {
+    const MAX_MICROS: u128 = (i32::MAX as u128) * 1_000_000;
+    let micros = duration.as_micros();
+    if micros > MAX_MICROS {
+        return Err(PostgresError::InvalidData);
+    }
+    i64::try_from(micros).map_err(|_| PostgresError::InvalidData)
 }
 
 fn duration_seconds(value: f64) -> Result<Duration, PostgresError> {

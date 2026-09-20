@@ -156,7 +156,7 @@ surface that constructs the same value in two ways.
 
 ```rust,ignore
 let outbox_store = PostgresOutboxStore::new(pool.clone(), serializer);
-let inbox_store = PostgresInboxStore::new(pool.clone(), inbox_settings)?;
+let inbox_store = PostgresInboxStore::new(pool.clone(), inbox_settings);
 
 let publisher = NatsPublisher::new(jetstream, resolver, nats_publisher_settings)?;
 let dispatcher = OutboxDispatcher::new(outbox_store, publisher, dispatcher_settings)?;

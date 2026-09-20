@@ -212,6 +212,14 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
 }
 
 pub(super) async fn insert_outbox_row(pool: &PgPool, message_type: &str) -> Uuid {
+    insert_outbox_row_with_attempts(pool, message_type, 0).await
+}
+
+pub(super) async fn insert_outbox_row_with_attempts(
+    pool: &PgPool,
+    message_type: &str,
+    attempts: i32,
+) -> Uuid {
     sqlx::query_scalar!(
         r#"
             -- Fixture rows are complete envelopes unless a test deliberately supplies poison.
@@ -220,10 +228,11 @@ pub(super) async fn insert_outbox_row(pool: &PgPool, message_type: &str) -> Uuid
                 payload, metadata, created_at, claimable_at, attempts
             )
             VALUES (uuidv7(), uuidv7(), $1, 1, 'application/test',
-                    ''::bytea, '{}'::jsonb, now(), now(), 0)
+                    ''::bytea, '{}'::jsonb, now(), now(), $2)
             RETURNING id
         "#,
-        message_type
+        message_type,
+        attempts,
     )
     .fetch_one(pool)
     .await

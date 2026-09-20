@@ -226,14 +226,16 @@ impl InboxMaintenance for PostgresInboxStore {
         request: InboxPurgeRequest,
     ) -> impl std::future::Future<Output = Result<InboxPurgeReport, Self::Error>> + Send {
         async move {
+            let completed_retention = request.completed_retention.map(micros).transpose()?;
+            let dead_retention = request.dead_retention.map(micros).transpose()?;
             let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
             let batch_size = i64::from(request.batch_size.get());
-            let completed_deleted = match request.completed_retention {
-                Some(retention) => {
+            let completed_deleted = match completed_retention {
+                Some(retention_micros) => {
                     maintenance::purge_completed(
                         &mut *transaction,
                         maintenance::PurgeParams {
-                            retention_micros: micros(retention),
+                            retention_micros,
                             batch_size,
                         },
                     )
@@ -241,12 +243,12 @@ impl InboxMaintenance for PostgresInboxStore {
                 }
                 None => 0,
             };
-            let dead_deleted = match request.dead_retention {
-                Some(retention) => {
+            let dead_deleted = match dead_retention {
+                Some(retention_micros) => {
                     maintenance::purge_dead(
                         &mut *transaction,
                         maintenance::PurgeParams {
-                            retention_micros: micros(retention),
+                            retention_micros,
                             batch_size,
                         },
                     )
@@ -344,8 +346,13 @@ fn count(value: i64) -> Result<u64, PostgresError> {
     u64::try_from(value).map_err(|_| PostgresError::InvalidData)
 }
 
-fn micros(duration: Duration) -> i64 {
-    i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)
+fn micros(duration: Duration) -> Result<i64, PostgresError> {
+    const MAX_MICROS: u128 = (i32::MAX as u128) * 1_000_000;
+    let micros = duration.as_micros();
+    if micros > MAX_MICROS {
+        return Err(PostgresError::InvalidData);
+    }
+    i64::try_from(micros).map_err(|_| PostgresError::InvalidData)
 }
 
 fn dead_letter_record(

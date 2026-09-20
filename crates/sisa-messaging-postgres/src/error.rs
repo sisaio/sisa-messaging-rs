@@ -46,6 +46,12 @@ impl fmt::Debug for PostgresError {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SqlxDisposition {
+    Transient,
+    Permanent,
+}
+
 impl From<sqlx::Error> for PostgresError {
     fn from(error: sqlx::Error) -> Self {
         let (sqlstate, constraint) = {
@@ -75,22 +81,63 @@ impl From<sqlx::Error> for PostgresError {
 
 impl ErrorClassifier for PostgresError {
     fn classify(&self) -> FailureKind {
-        let Self::Database { sqlstate, .. } = self else {
+        let Self::Database { .. } = self else {
             return FailureKind::Permanent;
         };
-        let Some(code) = sqlstate else {
-            return FailureKind::Transient;
-        };
-        if code.starts_with("08")
-            || code.starts_with("53")
-            || matches!(
-                code.as_ref(),
-                "40001" | "40P01" | "55P03" | "57014" | "57P01" | "57P02" | "57P03"
-            )
+        if classify_sqlx_error(
+            match self {
+                Self::Database { source, .. } => source,
+                _ => unreachable!(),
+            },
+            match self {
+                Self::Database { sqlstate, .. } => sqlstate.as_deref(),
+                _ => unreachable!(),
+            },
+        ) == SqlxDisposition::Transient
         {
             FailureKind::Transient
         } else {
             FailureKind::Permanent
         }
     }
+}
+
+fn classify_sqlx_error(error: &sqlx::Error, sqlstate: Option<&str>) -> SqlxDisposition {
+    match error {
+        sqlx::Error::Database(_) => {
+            if sqlstate.is_some_and(is_transient_sqlstate) {
+                SqlxDisposition::Transient
+            } else {
+                SqlxDisposition::Permanent
+            }
+        }
+        sqlx::Error::PoolTimedOut
+        | sqlx::Error::Io(_)
+        | sqlx::Error::WorkerCrashed
+        | sqlx::Error::BeginFailed => SqlxDisposition::Transient,
+        sqlx::Error::Configuration(_)
+        | sqlx::Error::Tls(_)
+        | sqlx::Error::Protocol(_)
+        | sqlx::Error::PoolClosed
+        | sqlx::Error::InvalidArgument(_)
+        | sqlx::Error::RowNotFound
+        | sqlx::Error::TypeNotFound { .. }
+        | sqlx::Error::ColumnIndexOutOfBounds { .. }
+        | sqlx::Error::ColumnNotFound(_)
+        | sqlx::Error::ColumnDecode { .. }
+        | sqlx::Error::Encode(_)
+        | sqlx::Error::Decode(_)
+        | sqlx::Error::AnyDriverError(_)
+        | sqlx::Error::InvalidSavePointStatement => SqlxDisposition::Permanent,
+        _ => SqlxDisposition::Permanent,
+    }
+}
+
+fn is_transient_sqlstate(code: &str) -> bool {
+    code.starts_with("08")
+        || code.starts_with("53")
+        || matches!(
+            code,
+            "40001" | "40P01" | "55P03" | "57014" | "57P01" | "57P02" | "57P03"
+        )
 }

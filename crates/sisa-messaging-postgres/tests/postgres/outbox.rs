@@ -9,18 +9,21 @@ use std::{
 
 use crate::support::{
     OutboxLookupParams, TestMessage, TestSerializer, insert_outbox_row,
-    isolated_concurrent_outbox_pool, isolated_outbox_pool, outbox_record, test_envelope,
+    insert_outbox_row_with_attempts, isolated_concurrent_outbox_pool, isolated_outbox_pool,
+    outbox_record, test_envelope,
 };
 use sisa_messaging::{
     ErrorClassifier, ErrorSummary, FailureKind, HeaderName, HeaderValue, Headers, Message,
     MessageId, Metadata, MetadataValue, RoutingMetadata,
 };
+use sisa_messaging_inbox::{InboxMaintenance, InboxPurgeRequest, InboxSettings};
 use sisa_messaging_outbox::{
     Claim, ClaimRequest, ClaimToken, DeadLetterBatch, DeadLetterCursor, DeadLetterQuery,
     DeadReason, EnqueueOptions, FailureAction, FailureRecord, OutboxDeadLetters, OutboxEnqueue,
     OutboxMaintenance, OutboxPurgeRequest, OutboxStore,
 };
-use sisa_messaging_postgres::{PostgresError, PostgresOutboxStore};
+use sisa_messaging_postgres::{PostgresError, PostgresInboxStore, PostgresOutboxStore};
+use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
@@ -252,7 +255,7 @@ async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("maintenance fixture setup failed"));
-    let store = PostgresOutboxStore::new(pool, TestSerializer);
+    let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let report = store
         .purge(OutboxPurgeRequest {
             published_retention: Duration::from_secs(1),
@@ -387,7 +390,7 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
 }
 
 #[derive(Debug)]
-struct SentinelDatabaseError;
+struct SentinelDatabaseError(&'static str);
 
 impl fmt::Display for SentinelDatabaseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -403,7 +406,7 @@ impl sqlx::error::DatabaseError for SentinelDatabaseError {
     }
 
     fn code(&self) -> Option<Cow<'_, str>> {
-        Some(Cow::Borrowed("55P03"))
+        Some(Cow::Borrowed(self.0))
     }
 
     fn as_error(&self) -> &(dyn Error + Send + Sync + 'static) {
@@ -425,7 +428,9 @@ impl sqlx::error::DatabaseError for SentinelDatabaseError {
 
 #[test]
 fn postgres_error_redacts_database_diagnostics_but_retains_the_source() {
-    let error = PostgresError::from(sqlx::Error::Database(Box::new(SentinelDatabaseError)));
+    let error = PostgresError::from(sqlx::Error::Database(Box::new(SentinelDatabaseError(
+        "55P03",
+    ))));
     assert_eq!(error.to_string(), "database operation failed");
     assert_eq!(format!("{error:?}"), "Database");
     assert!(!error.to_string().contains("postgres-secret-sentinel"));
@@ -444,11 +449,86 @@ fn postgres_error_redacts_database_diagnostics_but_retains_the_source() {
 }
 
 #[test]
-fn postgres_error_redacts_non_database_driver_diagnostics() {
+fn postgres_error_redacts_permanent_driver_diagnostics() {
     let error = PostgresError::from(sqlx::Error::Protocol("postgres-secret-sentinel".into()));
     assert_eq!(error.to_string(), "database operation failed");
     assert_eq!(format!("{error:?}"), "Database");
-    assert!(std::error::Error::source(&error).is_some_and(|source| source.is::<sqlx::Error>()));
+    assert!(!error.to_string().contains("postgres-secret-sentinel"));
+    assert!(!format!("{error:?}").contains("postgres-secret-sentinel"));
+    let source = std::error::Error::source(&error);
+    assert!(source.is_some_and(|source| source.is::<sqlx::Error>()));
+    assert_eq!(error.classify(), FailureKind::Permanent);
+}
+
+#[test]
+fn postgres_error_classifies_sqlx_variants_without_message_parsing() {
+    let transient_states = [
+        "08006", "40001", "40P01", "53100", "55P03", "57014", "57P01",
+    ];
+    for state in transient_states {
+        let error = PostgresError::from(sqlx::Error::Database(Box::new(SentinelDatabaseError(
+            state,
+        ))));
+        assert!(matches!(error, PostgresError::Database { .. }));
+        assert_eq!(error.classify(), FailureKind::Transient, "state {state}");
+    }
+
+    for error in [
+        sqlx::Error::PoolTimedOut,
+        sqlx::Error::Io(std::io::Error::other("transient sentinel")),
+        sqlx::Error::WorkerCrashed,
+        sqlx::Error::BeginFailed,
+    ] {
+        let error = PostgresError::from(error);
+        assert!(matches!(error, PostgresError::Database { .. }));
+        assert_eq!(error.classify(), FailureKind::Transient);
+    }
+
+    let permanent_database: Vec<sqlx::Error> = vec![
+        sqlx::Error::Database(Box::new(SentinelDatabaseError("23503"))),
+        sqlx::Error::Database(Box::new(SentinelDatabaseError("40002"))),
+        sqlx::Error::Database(Box::new(SentinelDatabaseError("40003"))),
+        sqlx::Error::Configuration(Box::new(std::io::Error::other("configuration sentinel"))),
+        sqlx::Error::Tls(Box::new(std::io::Error::other("tls sentinel"))),
+        sqlx::Error::Protocol("protocol sentinel".into()),
+        sqlx::Error::PoolClosed,
+    ];
+    for error in permanent_database {
+        let error = PostgresError::from(error);
+        assert!(matches!(error, PostgresError::Database { .. }));
+        assert_eq!(error.classify(), FailureKind::Permanent);
+        assert_eq!(error.to_string(), "database operation failed");
+        assert_eq!(format!("{error:?}"), "Database");
+        let source = std::error::Error::source(&error);
+        assert!(source.is_some_and(|source| source.is::<sqlx::Error>()));
+    }
+
+    let permanent_structured: Vec<sqlx::Error> = vec![
+        sqlx::Error::InvalidArgument("invalid argument sentinel".into()),
+        sqlx::Error::RowNotFound,
+        sqlx::Error::TypeNotFound {
+            type_name: "missing_type".into(),
+        },
+        sqlx::Error::ColumnIndexOutOfBounds { index: 1, len: 0 },
+        sqlx::Error::ColumnNotFound("missing_column".into()),
+        sqlx::Error::ColumnDecode {
+            index: "decode_column".into(),
+            source: Box::new(std::io::Error::other("decode sentinel")),
+        },
+        sqlx::Error::Encode(Box::new(std::io::Error::other("encode sentinel"))),
+        sqlx::Error::Decode(Box::new(std::io::Error::other("decode sentinel"))),
+        sqlx::Error::AnyDriverError(Box::new(std::io::Error::other("any sentinel"))),
+        sqlx::Error::InvalidSavePointStatement,
+    ];
+    for error in permanent_structured {
+        let error = PostgresError::from(error);
+        assert!(matches!(error, PostgresError::Database { .. }));
+        assert_eq!(error.classify(), FailureKind::Permanent);
+        assert_eq!(error.to_string(), "database operation failed");
+        assert_eq!(format!("{error:?}"), "Database");
+        let source = std::error::Error::source(&error);
+        assert!(source.is_some_and(|source| source.is::<sqlx::Error>()));
+    }
 }
 
 #[test]
@@ -456,6 +536,93 @@ fn postgres_error_is_static_send_and_sync() {
     fn assert_error<T: std::error::Error + Send + Sync + 'static>() {}
 
     assert_error::<PostgresError>();
+}
+
+#[tokio::test]
+async fn outbox_duration_bounds_fail_before_closed_pool_io() {
+    let pool = PgPoolOptions::new().connect_lazy_with(crate::support::connect_options());
+    pool.close().await;
+    let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+    let inbox = PostgresInboxStore::new(
+        pool,
+        InboxSettings::new(NonZeroU32::MIN)
+            .unwrap_or_else(|_| panic!("inbox duration settings rejected")),
+    );
+    let claim = Claim {
+        id: sisa_messaging_outbox::OutboxId::from_uuid(Uuid::now_v7()),
+        token: ClaimToken::from_uuid(Uuid::now_v7()),
+    };
+    let too_large = Duration::from_secs(i32::MAX as u64 + 1);
+    for result in [
+        store
+            .claim(ClaimRequest {
+                worker_id: "closed-pool-duration".into(),
+                limit: NonZeroU32::MIN,
+                lease: too_large,
+            })
+            .await
+            .map(|_| ()),
+        store
+            .fail(&[FailureRecord {
+                claim,
+                failure_kind: FailureKind::Transient,
+                error: ErrorSummary::from_safe_text("too-large retry delay"),
+                action: FailureAction::Retry { delay: too_large },
+            }])
+            .await
+            .map(|_| ()),
+        store.extend_lease(&[claim], too_large).await.map(|_| ()),
+        store
+            .purge(OutboxPurgeRequest {
+                published_retention: too_large,
+                dead_retention: Duration::ZERO,
+                batch_size: NonZeroU32::MIN,
+            })
+            .await
+            .map(|_| ()),
+    ] {
+        assert!(matches!(result, Err(PostgresError::InvalidData)));
+    }
+    let exact_limit = Duration::from_secs(i32::MAX as u64);
+    let result = store
+        .claim(ClaimRequest {
+            worker_id: "closed-pool-exact-duration".into(),
+            limit: NonZeroU32::MIN,
+            lease: exact_limit,
+        })
+        .await;
+    assert!(matches!(result, Err(PostgresError::Database { .. })));
+    let duration_max = store.extend_lease(&[claim], Duration::MAX).await;
+    assert!(matches!(duration_max, Err(PostgresError::InvalidData)));
+
+    for request in [
+        InboxPurgeRequest {
+            completed_retention: Some(too_large),
+            dead_retention: None,
+            batch_size: NonZeroU32::MIN,
+        },
+        InboxPurgeRequest {
+            completed_retention: None,
+            dead_retention: Some(Duration::MAX),
+            batch_size: NonZeroU32::MIN,
+        },
+    ] {
+        assert!(matches!(
+            inbox.purge(request).await,
+            Err(PostgresError::InvalidData)
+        ));
+    }
+    let inbox_exact_limit = inbox
+        .purge(InboxPurgeRequest {
+            completed_retention: Some(exact_limit),
+            dead_retention: Some(Duration::ZERO),
+            batch_size: NonZeroU32::MIN,
+        })
+        .await;
+    assert!(matches!(
+        inbox_exact_limit,
+        Err(PostgresError::Database { .. })
+    ));
 }
 
 #[tokio::test]
@@ -943,13 +1110,13 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
 #[tokio::test]
 async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_selectively() {
     let pool = isolated_outbox_pool().await;
-    for message_type in [
-        "postgres.outcome-complete",
-        "postgres.outcome-fail",
-        "postgres.outcome-release",
-        "postgres.outcome-renew",
+    for (message_type, attempts) in [
+        ("postgres.outcome-complete", i32::MAX),
+        ("postgres.outcome-fail", i32::MAX),
+        ("postgres.outcome-release", 0),
+        ("postgres.outcome-renew", 0),
     ] {
-        insert_outbox_row(&pool, message_type).await;
+        insert_outbox_row_with_attempts(&pool, message_type, attempts).await;
     }
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let batch = store
@@ -984,10 +1151,10 @@ async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_sele
     let confirmed = store
         .fail(&[FailureRecord {
             claim: fail,
-            failure_kind: FailureKind::Transient,
-            error: ErrorSummary::from_safe_text("retry requested by test"),
-            action: FailureAction::Retry {
-                delay: Duration::from_secs(30),
+            failure_kind: FailureKind::Permanent,
+            error: ErrorSummary::from_safe_text("terminal failure requested by test"),
+            action: FailureAction::Dead {
+                reason: DeadReason::Permanent,
             },
         }])
         .await
@@ -1017,13 +1184,15 @@ async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_sele
         .unwrap_or_else(|| panic!("renew outcome lookup failed"));
     assert_eq!(
         (complete_row.message_type.as_str(), complete_row.attempts),
-        ("postgres.outcome-complete", 1)
+        ("postgres.outcome-complete", i32::MAX)
     );
     assert!(complete_row.published_at.is_some());
     assert_eq!(
         (fail_row.message_type.as_str(), fail_row.attempts),
-        ("postgres.outcome-fail", 1)
+        ("postgres.outcome-fail", i32::MAX)
     );
+    assert_eq!(fail_row.dead_reason.as_deref(), Some("permanent"));
+    assert!(fail_row.dead_at.is_some());
     assert_eq!(
         (release_row.message_type.as_str(), release_row.attempts),
         ("postgres.outcome-release", 0)

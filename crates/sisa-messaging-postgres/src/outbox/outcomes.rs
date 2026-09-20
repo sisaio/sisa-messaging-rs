@@ -67,7 +67,11 @@ where
             -- Match id and token so a stale publisher cannot complete a newer lease.
             UPDATE outbox_messages AS o
             SET
-                attempts = o.attempts + 1,
+                -- Saturate before adding so schema-valid i32::MAX cannot overflow.
+                attempts = CASE
+                    WHEN o.attempts < 2147483647 THEN o.attempts + 1
+                    ELSE o.attempts
+                END,
                 published_at = now(),
                 claim_token = NULL,
                 locked_by = NULL
@@ -106,7 +110,11 @@ where
             -- One bounded array update records each fenced retry or terminal failure.
             UPDATE outbox_messages AS o
             SET
-                attempts = o.attempts + 1,
+                -- Saturate before adding so schema-valid i32::MAX cannot overflow.
+                attempts = CASE
+                    WHEN o.attempts < 2147483647 THEN o.attempts + 1
+                    ELSE o.attempts
+                END,
                 -- Retried rows use database time; terminal rows retain their prior availability.
                 claimable_at = CASE
                     WHEN requested.dead THEN o.claimable_at
