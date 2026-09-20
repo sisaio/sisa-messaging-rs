@@ -22,8 +22,9 @@ not whole documents or generated folders, and narrow large output. Exclude `.sql
 use CI's crate-local `cargo sqlx prepare --check -- --package sisa-messaging-postgres --all-targets`
 result as metadata proof. Filter `gh` reads with `--json`/`--jq`, never `--comments`, and do not use
 web search.
-Prefix shell commands with rtk. Pipe `prek run` and any authorized `git push` through `tail -n 40`;
-await external state once with the longest blocking call and piped tail output, never poll it.
+Prefix shell commands with rtk. Pipe `prek run` and any authorized `git push` through `tail -n 40`
+under `set -o pipefail` so the exit status survives; await external state once with the longest
+blocking call and piped tail output, never poll it.
 Return only changed paths, behavior, checks/results, risks, design deviations, branch, planned
 commit message, path counts, and next action. Preserve unrelated changes; do not return raw logs,
 stage, or commit unless asked. Stop when implementation and required evidence are complete.

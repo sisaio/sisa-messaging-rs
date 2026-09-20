@@ -39,8 +39,8 @@ in a single round; do not trickle findings across several messages.
 High effort is justified because this role owns independent integration and final-approval review.
 Keep that cost bounded with the fresh packet, targeted inspection, budget, and stopping rule. Prefix
 shell commands with rtk. If an explicit hook run is necessary, pipe `prek run` output through
-`tail -n 40`; await external state once with the longest blocking call and piped tail output, never
-poll it. Report findings by severity with location, observable risk, test gap, and
+`tail -n 40` under `set -o pipefail`; await external state once with the longest blocking call and
+piped tail output, never poll it. Report findings by severity with location, observable risk, test gap, and
 acceptance condition. Separate unique, duplicate, invalid, tooling, and unresolved production
 findings. Return only findings, paths, checks, residual risks, full base/head SHAs, path count, and
 next action. Send feedback only to the primary and stop after one complete review of the stable head.
