@@ -21,7 +21,11 @@
 - Do not create standing BA, PO, DBA, frontend, designer, or QA agents. Follow the escalation and
   ownership rules in `docs/agent-team.md` when those concerns arise.
 - Give agents only the bounded packet defined in `docs/agent-team.md`, never transcripts or raw
-  logs. Reuse the owning writer for fixes and require a concrete dependency before scope grows.
+  logs. Require a concrete dependency before scope grows.
+- After spawning an agent, call `wait_agent` once with the longest allowed timeout and repeat only
+  when it times out. Never use `list_agents`, `wait`, or shell checks as status polls.
+- Send fixes to the existing owning writer with `followup_task`. A fresh `backend_developer` spawn
+  needs a stated reason, such as a lost thread or a new packet.
 - Do not give `architect` or `reviewer` write access; verify their handoffs changed no files.
 - Run broad validation once per stable head. Other roles consume that evidence and stop repeating
   checks when the required evidence is current and sufficient.
