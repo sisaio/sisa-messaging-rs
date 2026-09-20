@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Noise plus matching rows make every final query shape selective in this setup.\n            WITH noise AS (\n                INSERT INTO outbox_messages (\n                    id, message_id, message_type, message_version, content_type, payload,\n                    metadata, ordering_key, created_at, claimable_at, expires_at, claim_token,\n                    locked_by, published_at, dead_at, dead_reason\n                )\n                SELECT\n                    uuidv7(), uuidv7(), 'postgres.plan-noise', 1, 'application/test',\n                    ''::bytea, '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL,\n                    NULL, NULL, NULL, NULL, NULL\n                FROM generate_series(1, 2048)\n                RETURNING id\n            )\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type, payload, metadata,\n                ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by,\n                published_at, dead_at, dead_reason\n            )\n            VALUES\n                ($1, uuidv7(), 'postgres.plan-claim', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, 'plan-key', now(), now(), NULL, $2, 'plan-worker', NULL, NULL, NULL),\n                ($3, uuidv7(), 'postgres.plan-poison', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, $4,\n                 'plan-worker', NULL, NULL, NULL),\n                ($5, uuidv7(), 'postgres.plan-outcome', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, $6,\n                 'plan-worker', NULL, NULL, NULL),\n                ($7, uuidv7(), 'postgres.plan-expire', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, NULL, now(), now(), now() - interval '1 minute', NULL, NULL,\n                 NULL, NULL, NULL),\n                ($8, uuidv7(), 'postgres.plan-published', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, NULL, now(), now(), NULL, NULL, NULL,\n                 now() - interval '1 minute', NULL, NULL),\n                ($9, uuidv7(), 'postgres.plan-dead', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, NULL, now(), now(), NULL, NULL, NULL, NULL,\n                 now() - interval '1 minute', 'permanent')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf3269f94fe24e68f6f272343230ca540fab42c560ef093b2623150957ff19c3"
+}

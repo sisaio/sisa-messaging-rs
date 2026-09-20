@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Renewal retains the same fence token while moving the database-time lease.\n            UPDATE outbox_messages AS o\n            SET\n                claimable_at = now() + ($3::bigint * interval '1 microsecond')\n            -- Pair each renewal request with its currently held fence.\n            FROM unnest($1::uuid[], $2::uuid[]) AS requested(id, token)\n            -- A stale renewal must not extend the successor's lease.\n            WHERE o.id = requested.id\n              AND o.claim_token = requested.token\n              AND o.published_at IS NULL\n              AND o.dead_at IS NULL\n            RETURNING\n                o.id AS \"id!\",\n                o.claim_token AS \"claim_token!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "claim_token!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "4d4bd72dfb285b87e60a6b6fe12ccbd27d4d5ebe2e56e02da8214b7b6ca2121d"
+}

@@ -161,8 +161,10 @@ row ID.
 
 An unordered row (`ordering_key IS NULL`) competes normally under `SKIP LOCKED`. For rows whose
 resolved `ordering_key` values are equal, a row is claimable only when it has the lowest UUID row
-ID among the non-terminal, unexpired rows for that key. This prevents concurrent publication
-within one key and gives the stored rows a deterministic tiebreak order.
+ID among the non-terminal, unexpired rows for that key. An expired predecessor retains that place
+while its current claim lease remains active; it stops blocking only after that lease lapses or the
+claim is settled. This prevents concurrent publication within one key and gives the stored rows a
+deterministic tiebreak order.
 
 It does not guarantee transaction commit order or a business-domain sequence. PostgreSQL UUIDv7
 values contain a millisecond timestamp and are therefore time-correlated, but their remaining bits

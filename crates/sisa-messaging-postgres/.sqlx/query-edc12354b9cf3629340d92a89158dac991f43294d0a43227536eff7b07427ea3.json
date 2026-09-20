@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Delete one locked retention batch through the dead-letter access path.\n            DELETE FROM outbox_messages\n            WHERE id IN (\n                SELECT id\n                FROM outbox_messages\n                WHERE dead_at < now() - ($1::bigint * interval '1 microsecond')\n                ORDER BY dead_at, id\n                -- Preserve concurrent retention and operator work on rows outside this batch.\n                FOR UPDATE SKIP LOCKED\n                LIMIT $2\n            )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "edc12354b9cf3629340d92a89158dac991f43294d0a43227536eff7b07427ea3"
+}

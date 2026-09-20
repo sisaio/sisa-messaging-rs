@@ -156,7 +156,7 @@ surface that constructs the same value in two ways.
 
 ```rust,ignore
 let outbox_store = PostgresOutboxStore::new(pool.clone(), serializer);
-let inbox_store = PostgresInboxStore::new(pool.clone(), inbox_settings)?;
+let inbox_store = PostgresInboxStore::new(pool.clone(), inbox_settings);
 
 let publisher = NatsPublisher::new(jetstream, resolver, nats_publisher_settings)?;
 let dispatcher = OutboxDispatcher::new(outbox_store, publisher, dispatcher_settings)?;
@@ -266,15 +266,13 @@ crates/
 │       │   ├── claim.rs
 │       │   ├── outcomes.rs
 │       │   ├── maintenance.rs
-│       │   ├── dead_letters.rs
-│       │   └── rows.rs
+│       │   └── dead_letters.rs
 │       ├── inbox.rs            # PostgresInboxStore façade and trait implementations
 │       └── inbox/
 │           ├── claim.rs
 │           ├── outcomes.rs
 │           ├── maintenance.rs
-│           ├── dead_letters.rs
-│           └── rows.rs
+│           └── dead_letters.rs
 └── sisa-messaging-nats/
     └── src/
         ├── lib.rs

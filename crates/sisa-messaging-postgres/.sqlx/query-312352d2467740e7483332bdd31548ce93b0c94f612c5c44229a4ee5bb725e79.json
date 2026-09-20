@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- PostgreSQL rejects later work in the caller-owned transaction after the duplicate.\n            SELECT 1 AS \"value!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "312352d2467740e7483332bdd31548ce93b0c94f612c5c44229a4ee5bb725e79"
+}

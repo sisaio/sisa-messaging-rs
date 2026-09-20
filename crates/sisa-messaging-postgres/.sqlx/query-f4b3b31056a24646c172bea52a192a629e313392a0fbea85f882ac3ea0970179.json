@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n        -- Delete one locked retention batch through the published-time access path.\n        DELETE FROM outbox_messages\n        WHERE id IN (\n            SELECT id\n            FROM outbox_messages\n            WHERE published_at < now() - ($1::bigint * interval '1 microsecond')\n            ORDER BY published_at, id\n            -- Preserve concurrent retention and operator work on rows outside this batch.\n            FOR UPDATE SKIP LOCKED\n            LIMIT $2\n        )\n    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f4b3b31056a24646c172bea52a192a629e313392a0fbea85f882ac3ea0970179"
+}

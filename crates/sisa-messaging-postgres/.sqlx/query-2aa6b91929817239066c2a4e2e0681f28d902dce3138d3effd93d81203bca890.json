@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Retrying preserves identity while resetting only still-terminal receipts.\n            UPDATE inbox_receipts\n            SET\n                attempts = 0,\n                dead_at = NULL,\n                dead_reason = NULL,\n                last_error = NULL\n            WHERE id = ANY($1)\n              AND dead_at IS NOT NULL\n            RETURNING\n                id AS \"id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2aa6b91929817239066c2a4e2e0681f28d902dce3138d3effd93d81203bca890"
+}

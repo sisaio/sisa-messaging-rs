@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n        -- Stable keyset order matches the dead-letter cursor index.\n        SELECT\n            id AS \"id!\",\n            message_id AS \"message_id!\",\n            message_type AS \"message_type!\",\n            message_version AS \"message_version!\",\n            content_type AS \"content_type!\",\n            payload AS \"payload!\",\n            metadata AS \"metadata!\",\n            ordering_key,\n            attempts AS \"attempts!\",\n            dead_at AS \"dead_at!\",\n            dead_reason AS \"dead_reason!\",\n            last_error\n        FROM outbox_messages\n        WHERE dead_at IS NOT NULL\n          -- The cursor is exclusive, so adjacent pages cannot repeat their boundary row.\n          AND (\n              $1::timestamptz IS NULL\n              OR (dead_at, id) > ($1, $2)\n          )\n        ORDER BY dead_at, id\n        LIMIT $3\n    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d67c0684d0735d04ac208d7141b2d9ec16109fe7a2b2d03db5bad9f8c36b22eb"
+}

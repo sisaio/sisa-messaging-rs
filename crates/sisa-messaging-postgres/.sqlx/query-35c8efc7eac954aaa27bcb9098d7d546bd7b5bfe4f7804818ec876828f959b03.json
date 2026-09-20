@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Both fixtures begin with a future deadline before their expiry is forced.\n            INSERT INTO outbox_messages (\n                message_id, message_type, message_version, content_type, payload, metadata,\n                expires_at\n            )\n            VALUES\n                (uuidv7(), 'postgres.renew-current', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, now() + interval '1 hour'),\n                (uuidv7(), 'postgres.renew-stale', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, now() + interval '1 hour')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "35c8efc7eac954aaa27bcb9098d7d546bd7b5bfe4f7804818ec876828f959b03"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n        -- Expire only due rows that are unclaimed or whose stale lease has elapsed.\n        WITH candidates AS (\n            SELECT id\n            FROM outbox_messages\n            WHERE published_at IS NULL\n              AND dead_at IS NULL\n              AND expires_at <= now()\n              AND (claim_token IS NULL OR claimable_at <= now())\n            ORDER BY expires_at, id\n            -- Keep this bounded pass disjoint from concurrent maintenance workers.\n            FOR UPDATE SKIP LOCKED\n            LIMIT $1\n        )\n        UPDATE outbox_messages AS o\n        SET\n            dead_at = now(),\n            dead_reason = 'expired',\n            claim_token = NULL,\n            locked_by = NULL\n        FROM candidates AS c\n        WHERE o.id = c.id\n    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "db33681dd8aa4f6d8e03dfb098e2655e2a3e75b30fc6d404128295ca3ef74238"
+}

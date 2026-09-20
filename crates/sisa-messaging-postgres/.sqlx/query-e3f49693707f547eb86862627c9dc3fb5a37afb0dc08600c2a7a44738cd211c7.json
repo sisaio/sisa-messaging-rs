@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Operator retry resets only terminal rows in the caller-bounded identity batch.\n            UPDATE outbox_messages\n            SET\n                claimable_at = now(),\n                -- An expired prior deadline must not immediately re-terminalize this new attempt.\n                expires_at = NULL,\n                attempts = 0,\n                dead_at = NULL,\n                dead_reason = NULL,\n                last_error = NULL,\n                claim_token = NULL,\n                locked_by = NULL\n            -- An operator retry may revive only rows that are still terminal.\n            WHERE id = ANY($1)\n              AND dead_at IS NOT NULL\n            RETURNING\n                id AS \"id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e3f49693707f547eb86862627c9dc3fb5a37afb0dc08600c2a7a44738cd211c7"
+}

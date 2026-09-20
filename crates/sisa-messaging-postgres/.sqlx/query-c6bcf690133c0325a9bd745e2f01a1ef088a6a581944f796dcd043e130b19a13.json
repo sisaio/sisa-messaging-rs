@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "ANALYZE inbox_receipts",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "c6bcf690133c0325a9bd745e2f01a1ef088a6a581944f796dcd043e130b19a13"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- The separator prevents ambiguous scope/message lock-key concatenation.\n            SELECT pg_try_advisory_xact_lock(\n                hashtextextended($1 || chr(31) || ($2::uuid)::text, 0)\n            ) AS \"locked!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "locked!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "48afbd8269fa6bf55e8c491323692b41d23881bafe914cc12555b3db9c4b8e33"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "ANALYZE outbox_messages",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "9098fa3db5b4f334a986f3ed4b5061c998ede294e0f10e45c37e2629806c6660"
+}

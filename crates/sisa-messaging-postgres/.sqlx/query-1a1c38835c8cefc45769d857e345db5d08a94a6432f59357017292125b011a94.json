@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Failure serialization uses the same transaction-scoped identity lock as claiming.\n            SELECT pg_advisory_xact_lock(\n                hashtextextended($1 || chr(31) || ($2::uuid)::text, 0)\n            )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_advisory_xact_lock",
+        "type_info": "Void"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1a1c38835c8cefc45769d857e345db5d08a94a6432f59357017292125b011a94"
+}

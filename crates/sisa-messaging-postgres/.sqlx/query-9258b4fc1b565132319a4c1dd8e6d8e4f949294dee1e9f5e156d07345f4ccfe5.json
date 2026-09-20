@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Release only the worker's still-current claims without incrementing attempts.\n            UPDATE outbox_messages AS o\n            SET\n                claimable_at = now(),\n                claim_token = NULL,\n                locked_by = NULL\n            -- Pair each release request with the fence minted at claim time.\n            FROM unnest($1::uuid[], $2::uuid[]) AS requested(id, token)\n            -- Never release a claim that another worker has superseded.\n            WHERE o.id = requested.id\n              AND o.claim_token = requested.token\n              AND o.published_at IS NULL\n              AND o.dead_at IS NULL\n            RETURNING\n                o.id AS \"id!\",\n                requested.token AS \"claim_token!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "claim_token!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "9258b4fc1b565132319a4c1dd8e6d8e4f949294dee1e9f5e156d07345f4ccfe5"
+}

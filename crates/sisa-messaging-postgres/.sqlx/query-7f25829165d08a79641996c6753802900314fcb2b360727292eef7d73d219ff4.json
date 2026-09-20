@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Once the predecessor's lease is stale, its elapsed expiry no longer blocks the key.\n            UPDATE outbox_messages\n            SET claimable_at = now() - interval '1 second'\n            WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7f25829165d08a79641996c6753802900314fcb2b360727292eef7d73d219ff4"
+}

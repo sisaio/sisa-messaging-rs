@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Two old rows per phase prove batch one leaves one matching row for every phase.\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type, payload, metadata,\n                created_at, claimable_at, expires_at, published_at, dead_at, dead_reason\n            )\n            VALUES\n                (uuidv7(), uuidv7(), 'postgres.maintenance-expire', 1, 'application/test',\n                 ''::bytea, '{}'::jsonb, now(), now(), now() - interval '1 minute', NULL,\n                 NULL, NULL),\n                (uuidv7(), uuidv7(), 'postgres.maintenance-expire-remaining', 1,\n                 'application/test', ''::bytea, '{}'::jsonb, now(), now(),\n                 now() - interval '1 minute', NULL, NULL, NULL),\n                (uuidv7(), uuidv7(), 'postgres.maintenance-published', 1, 'application/test',\n                 ''::bytea, '{}'::jsonb, now(), now(), NULL, now() - interval '1 minute',\n                 NULL, NULL),\n                (uuidv7(), uuidv7(), 'postgres.maintenance-published-remaining', 1,\n                 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL,\n                 now() - interval '1 minute', NULL, NULL),\n                (uuidv7(), uuidv7(), 'postgres.maintenance-dead', 1, 'application/test',\n                 ''::bytea, '{}'::jsonb, now(), now(), NULL, NULL,\n                 now() - interval '1 minute', 'permanent'),\n                (uuidv7(), uuidv7(), 'postgres.maintenance-dead-remaining', 1,\n                 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, NULL,\n                 now() - interval '1 minute', 'permanent'),\n                (uuidv7(), uuidv7(), 'postgres.maintenance-pending', 1, 'application/test',\n                 ''::bytea, '{}'::jsonb, now() - interval '1 minute', now(), NULL, NULL,\n                 NULL, NULL)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "5df032667e97f69a083a9357761f2b6bf671e8056eabc4a57255ee5afb7f916b"
+}

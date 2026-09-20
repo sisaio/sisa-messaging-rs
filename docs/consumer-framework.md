@@ -201,7 +201,7 @@ that opt-in path may use dynamic dispatch. The default typed path does not pay f
 The intended NATS/PostgreSQL call site is:
 
 ```rust,ignore
-let inbox = PostgresInboxStore::new(pool.clone(), InboxSettings::default())?;
+let inbox = PostgresInboxStore::new(pool.clone(), InboxSettings::default());
 let source = NatsDeliverySource::new(pull_consumer);
 
 let consumer = Consumer::<OrderCreated, _>::new(

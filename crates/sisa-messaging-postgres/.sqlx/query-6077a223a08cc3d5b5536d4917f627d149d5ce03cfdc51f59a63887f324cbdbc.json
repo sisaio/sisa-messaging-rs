@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- PostgreSQL permits infinity timestamps, but their derived age is not a Duration.\n            INSERT INTO outbox_messages (\n                id,\n                message_id,\n                message_type,\n                message_version,\n                content_type,\n                payload,\n                metadata,\n                created_at,\n                claimable_at,\n                attempts\n            )\n            VALUES (\n                uuidv7(),\n                uuidv7(),\n                'postgres.infinite-age',\n                1,\n                'application/test',\n                ''::bytea,\n                '{}'::jsonb,\n                '-infinity',\n                now(),\n                0\n            )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6077a223a08cc3d5b5536d4917f627d149d5ce03cfdc51f59a63887f324cbdbc"
+}

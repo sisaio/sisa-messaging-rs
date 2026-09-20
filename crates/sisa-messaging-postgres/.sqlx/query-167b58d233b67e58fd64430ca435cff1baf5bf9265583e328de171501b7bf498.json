@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Copy production semantics and restore generated index names for isolated plans.\n            DO $$\n            BEGIN\n                CREATE TEMPORARY TABLE outbox_messages\n                (LIKE public.outbox_messages INCLUDING ALL);\n                ALTER INDEX outbox_messages_message_id_idx\n                    RENAME TO ix_outbox_messages_message_id;\n                ALTER INDEX outbox_messages_claimable_at_id_expires_at_idx\n                    RENAME TO ix_outbox_messages_claimable;\n                ALTER INDEX outbox_messages_ordering_key_id_idx\n                    RENAME TO ix_outbox_messages_ordering_key;\n                ALTER INDEX outbox_messages_expires_at_idx\n                    RENAME TO ix_outbox_messages_expires;\n                ALTER INDEX outbox_messages_published_at_idx\n                    RENAME TO ix_outbox_messages_published;\n                ALTER INDEX outbox_messages_dead_at_id_idx\n                    RENAME TO ix_outbox_messages_dead_cursor;\n            END\n            $$\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "167b58d233b67e58fd64430ca435cff1baf5bf9265583e328de171501b7bf498"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- A stale lease remains eligible for expiry even while its token remains persisted.\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type, payload, metadata,\n                created_at, claimable_at, expires_at, claim_token, locked_by, attempts\n            )\n            VALUES (\n                uuidv7(), uuidv7(), 'postgres.stale-lease', 1, 'application/test',\n                ''::bytea, '{}'::jsonb, now(), now() - interval '1 second',\n                now() - interval '1 second', uuidv7(), 'crashed-worker', 0\n            )\n            RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dd42148d9875fcce66152a00f5c9cfcbf6b72432a121d4d14907ed5bc7e1794a"
+}

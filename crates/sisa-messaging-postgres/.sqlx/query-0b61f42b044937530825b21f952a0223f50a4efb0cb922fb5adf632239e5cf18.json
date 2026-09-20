@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Fixed identities make the same-key predecessor relationship deterministic.\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type, payload, metadata,\n                ordering_key\n            )\n            VALUES\n                ('00000000-0000-0000-0000-000000000011', uuidv7(), 'postgres.ordering-head',\n                 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-ordering-key'),\n                ('00000000-0000-0000-0000-000000000012', uuidv7(),\n                 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb,\n                 'postgres-ordering-key'),\n                ('00000000-0000-0000-0000-000000000013', uuidv7(),\n                 'postgres.ordering-independent', 1, 'application/test', ''::bytea,\n                 '{}'::jsonb, 'postgres-other-key')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "0b61f42b044937530825b21f952a0223f50a4efb0cb922fb5adf632239e5cf18"
+}

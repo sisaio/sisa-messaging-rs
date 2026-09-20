@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Retention locks one dead-only batch; nonterminal receipts cannot be selected.\n            DELETE FROM inbox_receipts\n            WHERE id IN (\n                SELECT id\n                FROM inbox_receipts\n                WHERE dead_at < now() - ($1::bigint * interval '1 microsecond')\n                  AND completed_at IS NULL\n                ORDER BY dead_at, id\n                FOR UPDATE SKIP LOCKED\n                LIMIT $2\n            )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f9761a630a3f2ead646e1ff0a0e9866145aa9270e48eb831fc4983b43bb5900"
+}

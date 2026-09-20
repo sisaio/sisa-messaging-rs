@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Fixture rows are complete envelopes unless a test deliberately supplies poison.\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type,\n                payload, metadata, created_at, claimable_at, attempts\n            )\n            VALUES (uuidv7(), uuidv7(), $1, 1, 'application/test',\n                    ''::bytea, '{}'::jsonb, now(), now(), $2)\n            RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9837ba1ad6fd912734029251426fe63ebcb0d52adf749dfc2a118266535ed55f"
+}

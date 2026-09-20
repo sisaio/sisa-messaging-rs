@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n        -- Fenced set update isolates poison rows without reprocessing healthy records.\n        UPDATE outbox_messages AS o\n        SET\n            dead_at = now(),\n            dead_reason = 'undecodable',\n            last_error = 'persisted provider data is invalid',\n            claim_token = NULL,\n            locked_by = NULL\n        -- Pair each undecodable row with the claim fence that permits this transition.\n        FROM unnest($1::uuid[], $2::uuid[]) AS poisoned(id, token)\n        -- A successor's claim remains intact when poison handling is stale.\n        WHERE o.id = poisoned.id\n          AND o.claim_token = poisoned.token\n          AND o.published_at IS NULL\n          AND o.dead_at IS NULL\n    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9de7d4106f8d9e9baae116d62277caad15c9511c2e83e60108134d20ff989d41"
+}

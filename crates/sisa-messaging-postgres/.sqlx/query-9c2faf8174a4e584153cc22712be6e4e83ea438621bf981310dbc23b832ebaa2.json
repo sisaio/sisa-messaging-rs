@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- The advisory lock serializes provider writers for this durable receipt identity.\n            WITH existing AS (\n                SELECT\n                    id,\n                    attempts,\n                    completed_at,\n                    dead_at,\n                    dead_reason\n                FROM inbox_receipts\n                WHERE scope = $1\n                  AND message_id = $2\n                FOR UPDATE\n            ),\n            next_state AS (\n                SELECT\n                    id,\n                    completed_at,\n                    dead_at,\n                    dead_reason,\n                    -- Saturate before adding so schema-valid i32::MAX cannot overflow.\n                    CASE\n                        WHEN attempts < 2147483647 THEN attempts + 1\n                        ELSE attempts\n                    END AS next_attempt\n                FROM existing\n            ),\n            updated AS (\n                -- Completed and terminal receipts are immutable; active receipts advance once.\n                UPDATE inbox_receipts AS receipt\n                SET\n                    attempts = state.next_attempt,\n                    dead_at = CASE\n                        WHEN $6 OR state.next_attempt >= $7 THEN now()\n                    END,\n                    dead_reason = CASE\n                        WHEN $6 THEN 'permanent'\n                        WHEN state.next_attempt >= $7 THEN 'exhausted'\n                    END,\n                    last_error = $8\n                FROM next_state AS state\n                WHERE receipt.id = state.id\n                  AND state.completed_at IS NULL\n                  AND state.dead_at IS NULL\n                RETURNING\n                    receipt.attempts,\n                    receipt.completed_at,\n                    receipt.dead_at,\n                    receipt.dead_reason\n            ),\n            terminal AS (\n                SELECT\n                    attempts,\n                    completed_at,\n                    dead_at,\n                    dead_reason\n                FROM existing\n                WHERE completed_at IS NOT NULL\n                   OR dead_at IS NOT NULL\n            ),\n            inserted AS (\n                INSERT INTO inbox_receipts (\n                    scope,\n                    message_id,\n                    message_type,\n                    message_version,\n                    metadata,\n                    attempts,\n                    dead_at,\n                    dead_reason,\n                    last_error\n                )\n                SELECT\n                    $1,\n                    $2,\n                    $3,\n                    $4,\n                    $5,\n                    1,\n                    CASE WHEN $6 OR 1 >= $7 THEN now() END,\n                    CASE\n                        WHEN $6 THEN 'permanent'\n                        WHEN 1 >= $7 THEN 'exhausted'\n                    END,\n                    $8\n                -- Existing rows are already returned by the update or terminal CTE.\n                WHERE NOT EXISTS (SELECT 1 FROM existing)\n                RETURNING\n                    attempts,\n                    completed_at,\n                    dead_at,\n                    dead_reason\n            )\n            SELECT\n                attempts AS \"attempts!\",\n                completed_at,\n                dead_at,\n                dead_reason\n            FROM updated\n            UNION ALL\n            SELECT\n                attempts AS \"attempts!\",\n                completed_at,\n                dead_at,\n                dead_reason\n            FROM terminal\n            UNION ALL\n            SELECT\n                attempts AS \"attempts!\",\n                completed_at,\n                dead_at,\n                dead_reason\n            FROM inserted\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempts!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "dead_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "dead_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Jsonb",
+        "Bool",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9c2faf8174a4e584153cc22712be6e4e83ea438621bf981310dbc23b832ebaa2"
+}

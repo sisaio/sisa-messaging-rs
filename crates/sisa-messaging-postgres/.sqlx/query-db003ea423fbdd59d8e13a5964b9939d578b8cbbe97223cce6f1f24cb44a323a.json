@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Stable keyset order matches the dead-letter cursor index.\n            SELECT\n                id AS \"id!\",\n                message_id AS \"message_id!\",\n                message_type AS \"message_type!\",\n                message_version AS \"message_version!\",\n                content_type AS \"content_type!\",\n                payload AS \"payload!\",\n                metadata AS \"metadata!\",\n                ordering_key,\n                attempts AS \"attempts!\",\n                dead_at AS \"dead_at!\",\n                dead_reason AS \"dead_reason!\",\n                last_error\n            FROM outbox_messages\n            WHERE dead_at IS NOT NULL\n              -- The cursor is exclusive, so adjacent pages cannot repeat their boundary row.\n              AND (\n                  $1::timestamptz IS NULL\n                  OR (dead_at, id) > ($1, $2)\n              )\n            ORDER BY dead_at, id\n            LIMIT $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "message_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "message_version!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "content_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "payload!",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 6,
+        "name": "metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "ordering_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "attempts!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "dead_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "dead_reason!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_error",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "db003ea423fbdd59d8e13a5964b9939d578b8cbbe97223cce6f1f24cb44a323a"
+}
