@@ -35,3 +35,8 @@ updates:
         update-types:
           - minor
           - patch
+      cargo-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
