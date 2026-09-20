@@ -75,10 +75,17 @@ in parallel when it is genuinely independent, but architecture must settle befor
 and review must inspect the completed diff.
 
 New agents inherit the smallest useful history. Architecture and final review start from a bounded
-packet without the parent conversation; an implementation follow-up returns to the existing owning
-writer when doing so avoids reloading the same requirements and code. Long-running work compacts
-into a continuation packet containing only completed actions, decisions, issue/branch/SHA
-identifiers, evidence, blockers, and the next goal.
+packet without the parent conversation. An implementation fix returns to the existing owning writer
+through `followup_task`, which avoids reloading the same requirements and code; a fresh
+`backend_developer` spawn needs a stated reason such as a lost thread or a new packet. Long-running
+work compacts into a continuation packet containing only completed actions, decisions,
+issue/branch/SHA identifiers, evidence, blockers, and the next goal. The project config sets
+`model_auto_compact_token_limit` to 100000 so that packet is written before the context grows large.
+
+Waiting is not polling. After spawning or following up an agent, the primary calls `wait_agent`
+once with the longest allowed timeout and repeats it only when that call times out. `list_agents`,
+`wait`, and shell checks are never used as status polls: every poll resends the whole primary
+context, and in the measured baseline polls were a third of the largest thread's requests.
 
 ## 4. Task packet
 
@@ -118,9 +125,10 @@ GitHub issue, or one bounded sub-issue under a complex parent
   -> architect: design packet, when the architecture gate applies
   -> backend_developer: implementation and tests
   -> release_engineer: delivery preparation, only when applicable
-  -> reviewer: fresh isolated review of the committed complete diff
-  -> owning writer: accepted fixes
-  -> reviewer: focused finding review, then fresh final review of the complete diff
+  -> reviewer: fresh isolated review of the committed complete diff, all findings in one batch
+  -> owning writer via followup_task: every accepted finding in one fix round
+  -> reviewer: focused finding review, skipped for a small fix
+  -> reviewer: fresh final review of the complete diff
   -> primary: verify evidence and report to user
 ```
 
@@ -136,7 +144,23 @@ normative-document, `.codex/config.toml`, and `.codex/agents/*.toml` change.
 Only generated output with a separately reviewed source, or a change explicitly
 classified as low-risk and non-behavioral by the primary agent, may skip review.
 Release preparation never occurs after the final review: changes from a review
-finding receive another focused reviewer pass.
+finding receive another focused reviewer pass, except for a small fix as defined below.
+
+Each review has an investigation budget of about 30 shell commands. The reviewer consumes the
+packet's summarized broad-check evidence, never reruns workspace tests, Clippy, `cargo deny`, or a
+full diff dump that this evidence already covers, and runs only targeted read-only checks. The
+budget is a stopping rule, not a license to skip risk: if it runs out or the reviewer's context
+nears compaction, the reviewer stops and reports what was inspected, what was not, and the open
+risk, and the primary decides whether a second bounded pass is needed. Concurrency, security, and
+migration risks keep their mandatory extra evidence regardless of the budget.
+
+The reviewer returns all findings in one batch. The primary dispositions them and sends every
+accepted finding to the owning writer in a single `followup_task` fix round; findings are never
+trickled to the writer one at a time, and no re-review starts before that round is complete. A
+small fix, meaning at most 5 changed paths, no new files, and no behavior change, skips the
+focused finding review and goes directly to the single fresh final review of the complete diff.
+Any larger fix receives the focused finding review first, and database fixes keep the focused
+re-review required by section 6.
 
 Final review always uses a fresh read-only reviewer with only the approved issue packet, relevant
 normative sections, and repository evidence. It resolves the exact base SHA with `merge-base`,
@@ -263,7 +287,8 @@ reviewer compare predicted and actual path counts and report both.
 
 ## 8. Configuration files
 
-- `.codex/config.toml` enables the team and limits concurrency.
+- `.codex/config.toml` enables the team, limits concurrency, and caps context growth with
+  `model_auto_compact_token_limit`.
 - `.codex/agents/architect.toml` defines the read-only architecture role.
 - `.codex/agents/backend-developer.toml` defines the implementation role.
 - `.codex/agents/reviewer.toml` defines the isolated read-only review role.
@@ -301,23 +326,43 @@ of valid labels; task packets use only those names. Priority and the normal `Tod
 
 ### Token-efficiency evidence
 
-When the product exposes per-agent counters, record representative primary and subagent input,
-cached-input, output, and reasoning tokens. Always record agent turns and repeated tool/check
-invocations. If token counters are unavailable, say so and compare measurable proxies: bounded
-packet size, inherited-history size, role-instruction words or bytes, agent turns, repeated reads,
-repeated broad validation, elapsed time, and valid post-push findings.
+Token cost is context size multiplied by request count. The primary metrics are therefore the
+number of requests per thread and the context sent per request, taken from the Codex rollout logs
+for the task. Record per role: thread and spawn counts, requests per thread, median and peak
+context per request, `wait_agent` polls, shell commands, and compactions. Instruction-file size and
+reasoning-output share are recorded only as secondary checks: measured, they are not levers.
 
-For issue #18, this repository's pre-change configuration baseline was 5,244 words and 37,402 bytes
-across `AGENTS.md`, this document, `.codex/config.toml`, and the four role files. The task product did
-not expose per-agent input, cached-input, output, or reasoning-token counters. The representative
-before state used three possible concurrent agent threads, high default effort for architecture,
-implementation, and review, reusable reviewer context, and no explicit once-per-head validation or
-stopping rule. After the change, the same set is 5,329 words and 37,908 bytes: words rise 1.6% and
-bytes rise 1.4%. The four role files fall from 1,573 to 907 words (42.3%); possible concurrency
-falls from three to two; and high effort is concentrated in the gated architect
-and final reviewer rather than the routine implementation path. Acceptance
-still requires no unresolved valid high or medium finding and no skipped
-validation.
+The 2026-09-19/20 baseline, from the rollout logs for this repository, is about 388M tokens over
+175 threads:
+
+| Role | Share of tokens | Measured detail |
+|---|---:|---|
+| Primary orchestrator | 33% | Ran on `gpt-5.6-sol`; largest thread had 628 requests, of which 206 were `wait_agent` polls with 30–180 s timeouts at a median gap of about one minute, each resending a 150–217k context |
+| `backend_developer` | 30% | 22 spawns |
+| `reviewer` | 22% | 43 spawns; worst run had 137 requests, 108 shell commands, 2 compactions, and a 216k context |
+| Guardian auto-review | 8% | Desktop Auto approval mode |
+| `architect` | 1.3% | Gated spawns only |
+| `release_engineer` | 0.5% | On demand only |
+
+Reasoning output was 0.17% of tokens and instruction files were under 2k tokens per thread, so
+reasoning effort and instruction trimming are not levers. Issue #39 targets the measured drivers
+instead: earlier compaction through `model_auto_compact_token_limit`, one `wait_agent` call per
+spawn instead of polling, `followup_task` on the owning writer instead of fresh spawns, the
+reviewer's investigation budget, and one batched fix round with a small-fix path to a single final
+review. The owner records request count and median context on the next full issue flow and
+compares them against this table.
+
+Two owner actions sit outside the repository and are tracked here, not in configuration: set the
+primary default model to `gpt-5.6-terra` or `gpt-5.6-luna` at medium effort in
+`~/.codex/config.toml` or the desktop model picker, and reconsider the desktop Auto review approval
+mode or widen its sandbox allowlist so the guardian review stops consuming its 8% share.
+
+For issue #18, the earlier proxy was configuration size: 5,244 words and 37,402 bytes across
+`AGENTS.md`, this document, `.codex/config.toml`, and the four role files before the change and
+5,329 words and 37,908 bytes after it, with the four role files falling from 1,573 to 907 words,
+possible concurrency falling from three to two threads, and high effort concentrated in the gated
+architect and final reviewer. That proxy is retained for history only. Acceptance still requires no
+unresolved valid high or medium finding and no skipped validation.
 
 This repository does not maintain Markdown task cards, separate story files, another backlog, or a
 routine ADR stream. The issue records intent and acceptance, the PR records review and validation,
