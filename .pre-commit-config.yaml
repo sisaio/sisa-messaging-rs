@@ -44,9 +44,17 @@ repos:
               echo "Detached HEAD is allowed only while an active rebase is recorded by Git." >&2;
               exit 1;
             fi;
-            if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[1-9][0-9]*-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            upstream="$(git rev-parse --abbrev-ref --symbolic-full-name "${branch}@{upstream}" 2>/dev/null || true)";
+            dependabot_segment="[a-z0-9]+([._-][a-z0-9]+)*";
+            dependabot_branch_pattern="^dependabot/(cargo|github-actions)/${dependabot_segment}(/${dependabot_segment})*$";
+            issue_branch_pattern="^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/[1-9][0-9]*-[a-z0-9]+(-[a-z0-9]+)*$";
+            dependabot_valid=false;
+            if [[ "${branch}" =~ ${dependabot_branch_pattern} && "${upstream}" == "origin/${branch}" ]]; then
+              dependabot_valid=true;
+            fi;
+            if ! [[ "${branch}" =~ ${issue_branch_pattern} || "${dependabot_valid}" == true ]]; then
               echo "Invalid branch: ${branch}" >&2;
-              echo "Expected <type>/<issue-number>-<short-kebab-description>; commits on main/master are forbidden." >&2;
+              echo "Expected <type>/<issue-number>-<short-kebab-description> or a tracked dependabot/{cargo|github-actions}/<dependency> branch; commits on main/master are forbidden." >&2;
               exit 1;
             fi'
 
@@ -102,6 +110,16 @@ repos:
                   break;
                 fi;
               done;
+            fi;
+            upstream="$(git rev-parse --abbrev-ref --symbolic-full-name "${branch}@{upstream}" 2>/dev/null || true)";
+            dependabot_segment="[a-z0-9]+([._-][a-z0-9]+)*";
+            dependabot_branch_pattern="^dependabot/(cargo|github-actions)/${dependabot_segment}(/${dependabot_segment})*$";
+            dependabot_valid=false;
+            if [[ "${branch}" =~ ${dependabot_branch_pattern} && "${upstream}" == "origin/${branch}" ]]; then
+              dependabot_valid=true;
+            fi;
+            if [[ "${dependabot_valid}" == true ]]; then
+              exit 0;
             fi;
             if ! [[ "${branch}" =~ ^(feat|fix|docs|refactor|test|perf|ci|build|chore|release|hotfix)/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
               echo "Cannot validate commit issue reference: branch must include a positive issue number." >&2;
