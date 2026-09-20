@@ -44,10 +44,13 @@ applies those harness principles with its own approved GPT-5.x model constraint 
 ## 3. Scope and token policy
 
 Codex custom-agent files can request read-only or workspace-write defaults, but parent-session live
-permission overrides take precedence and there are no per-folder read ACLs. The scopes below are
-therefore instruction-level controls for ownership and context, not security boundaries. The
-primary agent supplies the exact paths in every task packet, does not spawn design/review roles
-under a write-enabling override, and verifies that their handoffs introduced no worktree changes.
+permission overrides take precedence and there are no per-folder read ACLs. In Claude Code, a
+`write: false` role only loses the `Edit`, `Write`, and `NotebookEdit` tools; `Bash` stays available
+for read-only inspection and is governed by the session permission rules, so a shell command could
+still change files. The scopes below are therefore instruction-level controls for ownership and
+context, not security boundaries, in either harness. The primary agent supplies the exact paths in
+every task packet, does not spawn design/review roles under a write-enabling override, and verifies
+that their handoffs introduced no worktree changes.
 
 | Agent | Default read scope | Default write scope |
 |---|---|---|
@@ -140,9 +143,10 @@ limited to 800 words and does not repeat source documents.
 
 Independent review is required after every material Rust, runtime SQL,
 versioned migration, test, manifest or dependency, CI or release,
-normative-document, `.codex/config.toml`, and `.codex/agents/*.toml` change.
-Only generated output with a separately reviewed source, or a change explicitly
-classified as low-risk and non-behavioral by the primary agent, may skip review.
+normative-document, and `.agents/` agent-configuration source change, together with
+the `.codex/` and `.claude/` files regenerated from it. Only generated output with a
+separately reviewed source, or a change explicitly classified as low-risk and
+non-behavioral by the primary agent, may skip review.
 Release preparation never occurs after the final review: changes from a review
 finding receive another focused reviewer pass, except for a small fix as defined below.
 
@@ -287,20 +291,39 @@ reviewer compare predicted and actual path counts and report both.
 
 ## 8. Configuration files
 
-- `.codex/config.toml` enables the team, limits concurrency, and caps context growth with
-  `model_auto_compact_token_limit`.
-- `.codex/agents/architect.toml` defines the read-only architecture role.
-- `.codex/agents/backend-developer.toml` defines the implementation role.
-- `.codex/agents/reviewer.toml` defines the isolated read-only review role.
-- `.codex/agents/release-engineer.toml` defines the on-demand delivery role.
+`.agents/` is the harness-neutral source of truth for the agent team, and the `.codex/` and
+`.claude/` files plus `CLAUDE.md` are generated outputs. A role or rule change edits the source and
+re-runs `.agents/sync.sh all`; never edit a generated file by hand.
+
+- `.agents/roles/<role>.md` defines one role: frontmatter `name`, `description`, `tier`
+  (`flagship`, `balanced`, or `fast`), and `write` (`true` or `false`), followed by the shared
+  instruction body.
+- `.agents/harnesses/codex.toml` maps each tier to a Codex model and reasoning effort and holds
+  the Codex-only `[config]` keys: the primary model, `model_auto_compact_token_limit`, the
+  `[agents]` block that enables the team and limits concurrency, and the disabled plugins.
+- `.agents/harnesses/claude.toml` maps each tier to a Claude Code model alias, lists the
+  frontmatter added to `write: false` roles (`disallowedTools: Edit, Write, NotebookEdit`, a
+  tool-level default rather than a sandbox; see section 3), and holds the `.claude/settings.json`
+  permission allowlist, including `Bash(rtk *)`.
+- `.agents/skills/<name>/SKILL.md` holds the project skills shared by both harnesses.
+- `.agents/sync.sh <codex|claude|all> [--check]` is POSIX `sh` plus `awk`. For Codex it writes
+  `.codex/config.toml` and `.codex/agents/<role>.toml`, where `write: false` becomes
+  `sandbox_mode = "read-only"`. For Claude Code it writes `.claude/agents/<role>.md`,
+  `.claude/settings.json`, `CLAUDE.md` (which imports `AGENTS.md`), and the
+  `.claude/skills/<name>` symlink to `../../.agents/skills/<name>`, copying the skill when a
+  symlink cannot be created. `--check` regenerates into a temporary directory and fails on any
+  difference; the `prek` pre-commit hook runs `.agents/sync.sh all --check` so generated files
+  cannot drift from the source.
 - `.coderabbit.yaml` configures the repository-aware CodeRabbit review layer; GitHub CI owns hard
   file-count and executable quality gates.
-- `AGENTS.md` contains the small routing policy loaded for every task.
+- `AGENTS.md` contains the small routing policy loaded for every task; Claude Code loads it
+  through the generated `CLAUDE.md`.
 
-Start a new Codex task after changing these files so the project instructions and custom-agent
-definitions are loaded afresh. The loading check confirms the selected models and normal efforts,
-the two-thread cap, bounded task history, and read-only architecture/reviewer defaults; it does not
-reuse the implementation conversation as final-review context.
+Start a new Codex or Claude Code task after changing these files so the project instructions,
+custom-agent definitions, and skills are loaded afresh. The loading check confirms the selected
+models and normal efforts, the two-thread cap, bounded task history, and read-only
+architecture/reviewer defaults; it does not reuse the implementation conversation as final-review
+context.
 
 ## 9. Lean flow and durable records
 
@@ -359,10 +382,12 @@ with explicit user approval, and only when a rare irreversible cross-cutting dec
 that cannot be expressed clearly in the normative document. A multi-PR effort may use one
 `docs/work/<slug>.md` plan after user approval; do not create per-slice cards.
 
-Do not copy Claude-specific slash commands, settings, or skills into Codex. Add a project skill only
-when a repeated workflow needs procedural detail that cannot stay concise in `AGENTS.md` and is not
-already covered by the normative docs. The completion gates and Definition of Done remain in
-`docs/implementation-plan.md`; they are not duplicated into another checklist.
+Do not copy Claude-specific slash commands or settings into Codex; harness-only keys stay in the
+harness file under `.agents/harnesses/`, and shared roles and skills live once under `.agents/`.
+Add a project skill under `.agents/skills/` only when a repeated workflow needs procedural detail
+that cannot stay concise in `AGENTS.md` and is not already covered by the normative docs. The
+completion gates and Definition of Done remain in `docs/implementation-plan.md`; they are not
+duplicated into another checklist.
 
 Cross-cutting review remains concise and risk-based:
 
