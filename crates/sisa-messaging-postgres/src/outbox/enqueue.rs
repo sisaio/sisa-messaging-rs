@@ -9,12 +9,19 @@ use crate::PostgresError;
 /// Bound values for one transactional outbox insert.
 pub(super) struct EnqueueParams<'a> {
     pub(super) message_id: Uuid,
+
     pub(super) message_type: &'a str,
+
     pub(super) message_version: i32,
+
     pub(super) content_type: &'a str,
+
     pub(super) payload: &'a [u8],
+
     pub(super) metadata: &'a serde_json::Value,
+
     pub(super) ordering_key: Option<&'a str>,
+
     pub(super) expires_at: Option<DateTime<Utc>>,
 }
 

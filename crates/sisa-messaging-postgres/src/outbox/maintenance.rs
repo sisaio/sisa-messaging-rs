@@ -12,12 +12,14 @@ pub(super) struct ExpireParams {
 /// Bound input for one published-retention deletion pass.
 pub(super) struct PurgePublishedParams {
     pub(super) retention_micros: i64,
+
     pub(super) batch_size: i64,
 }
 
 /// Bound input for one dead-letter-retention deletion pass.
 pub(super) struct PurgeDeadParams {
     pub(super) retention_micros: i64,
+
     pub(super) batch_size: i64,
 }
 
@@ -27,8 +29,11 @@ pub(super) struct StatsParams;
 /// Aggregate outbox counts and the oldest claimable head age in seconds.
 pub(super) struct StatsRecord {
     pub(super) pending: i64,
+
     pub(super) expired: i64,
+
     pub(super) dead: i64,
+
     pub(super) oldest_pending_age_seconds: f64,
 }
 

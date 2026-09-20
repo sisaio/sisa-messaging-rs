@@ -6,6 +6,7 @@ use crate::PostgresError;
 
 pub(super) struct PurgeParams {
     pub(super) retention_micros: i64,
+
     pub(super) batch_size: i64,
 }
 
@@ -13,8 +14,11 @@ pub(super) struct StatsParams;
 
 pub(super) struct StatsRecord {
     pub(super) pending: i64,
+
     pub(super) retrying: i64,
+
     pub(super) completed: i64,
+
     pub(super) dead: i64,
 }
 

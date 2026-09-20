@@ -31,6 +31,7 @@ pub type PostgresInboxTransaction = Transaction<'static, Postgres>;
 #[derive(Debug)]
 pub struct PostgresInboxReceipt {
     id: InboxId,
+
     attempts: u32,
 }
 
@@ -48,6 +49,7 @@ impl InboxReceipt for PostgresInboxReceipt {
 #[derive(Clone, Debug)]
 pub struct PostgresInboxStore {
     pool: PgPool,
+
     settings: InboxSettings,
 }
 

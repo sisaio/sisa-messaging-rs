@@ -4,10 +4,19 @@ use sisa_messaging::{ErrorClassifier, FailureKind};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PostgresError {
+    /// Database failure classified from an optional, safe SQLSTATE code only.
     #[error("database operation failed")]
-    Database { sqlstate: Option<String> },
+    Database {
+        /// Optional SQLSTATE retained solely for retry classification; it excludes SQL and values.
+        sqlstate: Option<String>,
+    },
+
+    /// A message identity already exists and the outbox cannot insert it again.
     #[error("duplicate outbox message identity")]
     DuplicateMessageId,
+
+    /// Caller input, serialized or persisted provider data, or numeric, time, and contract
+    /// conversions are invalid or unrepresentable for the provider contract.
     #[error("persisted provider data is invalid")]
     InvalidData,
 }

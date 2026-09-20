@@ -8,7 +8,9 @@ use crate::PostgresError;
 
 pub(super) struct ListParams {
     pub(super) after_dead_at: Option<DateTime<Utc>>,
+
     pub(super) after_id: Option<Uuid>,
+
     pub(super) limit: i64,
 }
 
@@ -22,15 +24,25 @@ pub(super) struct DeleteParams<'a> {
 
 pub(super) struct DeadLetterRecord {
     pub(super) id: Uuid,
+
     pub(super) scope: String,
+
     pub(super) message_id: Uuid,
+
     pub(super) message_type: String,
+
     pub(super) message_version: i32,
+
     pub(super) metadata: serde_json::Value,
+
     pub(super) attempts: i32,
+
     pub(super) received_at: DateTime<Utc>,
+
     pub(super) dead_at: DateTime<Utc>,
+
     pub(super) dead_reason: String,
+
     pub(super) last_error: Option<String>,
 }
 

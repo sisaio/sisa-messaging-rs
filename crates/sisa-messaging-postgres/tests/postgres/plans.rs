@@ -4,9 +4,13 @@ use uuid::Uuid;
 #[derive(Debug)]
 struct PlanNode {
     node_type: String,
+
     index_name: Option<String>,
+
     actual_rows: Option<f64>,
+
     actual_loops: Option<f64>,
+
     rows_removed_by_filter: Option<f64>,
 }
 

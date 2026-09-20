@@ -14,19 +14,29 @@ pub(super) struct CompleteParams {
 
 pub(super) struct FailParams<'a> {
     pub(super) scope: &'a str,
+
     pub(super) message_id: Uuid,
+
     pub(super) message_type: &'a str,
+
     pub(super) message_version: i32,
+
     pub(super) metadata: &'a serde_json::Value,
+
     pub(super) permanent: bool,
+
     pub(super) max_attempts: i32,
+
     pub(super) error: &'a str,
 }
 
 pub(super) struct FailRecord {
     pub(super) attempts: i32,
+
     pub(super) completed_at: Option<DateTime<Utc>>,
+
     pub(super) dead_at: Option<DateTime<Utc>>,
+
     pub(super) dead_reason: Option<String>,
 }
 

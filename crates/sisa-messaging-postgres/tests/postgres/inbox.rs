@@ -63,7 +63,9 @@ fn store(pool: sqlx::PgPool, attempts: u32) -> PostgresInboxStore {
 
 struct InboxLookupParams {
     id: Option<Uuid>,
+
     scope: Option<String>,
+
     message_id: Option<Uuid>,
 }
 
@@ -88,16 +90,27 @@ impl InboxLookupParams {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct InboxReceiptRecord {
     id: Uuid,
+
     scope: String,
+
     message_id: Uuid,
+
     message_type: String,
+
     message_version: i32,
+
     metadata: serde_json::Value,
+
     attempts: i32,
+
     received_at: chrono::DateTime<chrono::Utc>,
+
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
+
     dead_at: Option<chrono::DateTime<chrono::Utc>>,
+
     dead_reason: Option<String>,
+
     last_error: Option<String>,
 }
 
@@ -134,6 +147,7 @@ async fn inbox_record(pool: &PgPool, params: InboxLookupParams) -> Option<InboxR
 
 struct InboxFixture {
     pool: PgPool,
+
     schema: String,
 }
 
@@ -636,10 +650,15 @@ async fn saturated_attempts_become_dead_without_overflow_and_poisoned_metadata_i
 #[derive(Debug)]
 struct InboxPlanNode {
     node_type: String,
+
     index_name: Option<String>,
+
     actual_rows: Option<f64>,
+
     actual_loops: Option<f64>,
+
     rows_removed_by_filter: Option<f64>,
+
     conflict_arbiter_indexes: Vec<String>,
 }
 

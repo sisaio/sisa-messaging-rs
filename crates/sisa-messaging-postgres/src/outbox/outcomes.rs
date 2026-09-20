@@ -12,35 +12,45 @@ use crate::PostgresError;
 /// Bound claims for an acknowledged publication batch.
 pub(super) struct CompleteParams {
     pub(super) ids: Vec<Uuid>,
+
     pub(super) tokens: Vec<Uuid>,
 }
 
 /// Bound outcomes for one retry or terminal-failure batch.
 pub(super) struct FailParams<'a> {
     pub(super) ids: Vec<Uuid>,
+
     pub(super) tokens: Vec<Uuid>,
+
     pub(super) dead: Vec<bool>,
+
     pub(super) delays_micros: Vec<i64>,
+
     pub(super) reasons: Vec<&'a str>,
+
     pub(super) errors: Vec<&'a str>,
 }
 
 /// Bound claims for a voluntary release batch.
 pub(super) struct ReleaseParams {
     pub(super) ids: Vec<Uuid>,
+
     pub(super) tokens: Vec<Uuid>,
 }
 
 /// Bound claims and duration for a lease-renewal batch.
 pub(super) struct ExtendLeaseParams {
     pub(super) ids: Vec<Uuid>,
+
     pub(super) tokens: Vec<Uuid>,
+
     pub(super) lease_micros: i64,
 }
 
 /// One claim whose fence matched an outcome statement.
 pub(super) struct FencedClaimRecord {
     pub(super) id: Uuid,
+
     pub(super) claim_token: Uuid,
 }
 

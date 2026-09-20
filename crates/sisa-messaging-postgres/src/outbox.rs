@@ -32,6 +32,7 @@ use crate::PostgresError;
 #[derive(Clone, Debug)]
 pub struct PostgresOutboxStore<Ser> {
     pub(super) pool: PgPool,
+
     pub(super) serializer: Ser,
 }
 

@@ -9,7 +9,9 @@ use crate::PostgresError;
 /// Bound keyset cursor and page size for one dead-letter listing.
 pub(super) struct ListParams {
     pub(super) after_dead_at: Option<DateTime<Utc>>,
+
     pub(super) after_id: Option<Uuid>,
+
     pub(super) limit: i64,
 }
 
@@ -26,16 +28,27 @@ pub(super) struct DeleteParams {
 /// Persisted dead-letter row used to build the portable API record.
 pub(super) struct DeadLetterListRecord {
     pub(super) id: Uuid,
+
     pub(super) message_id: Uuid,
+
     pub(super) message_type: String,
+
     pub(super) message_version: i32,
+
     pub(super) content_type: String,
+
     pub(super) payload: Vec<u8>,
+
     pub(super) metadata: serde_json::Value,
+
     pub(super) ordering_key: Option<String>,
+
     pub(super) attempts: i32,
+
     pub(super) dead_at: DateTime<Utc>,
+
     pub(super) dead_reason: String,
+
     pub(super) last_error: Option<String>,
 }
 

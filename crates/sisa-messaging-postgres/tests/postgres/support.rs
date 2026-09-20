@@ -137,6 +137,7 @@ pub(super) async fn isolated_outbox_pool() -> PgPool {
 
 pub(super) struct ConcurrentOutboxFixture {
     pub(super) pool: PgPool,
+
     schema: String,
 }
 
@@ -217,6 +218,7 @@ pub(super) async fn insert_outbox_row(pool: &PgPool, message_type: &str) -> Uuid
 
 pub(super) struct OutboxLookupParams {
     id: Option<Uuid>,
+
     message_id: Option<Uuid>,
 }
 
@@ -238,16 +240,27 @@ impl OutboxLookupParams {
 
 pub(super) struct OutboxRecord {
     pub(super) id: Uuid,
+
     pub(super) message_id: Uuid,
+
     pub(super) message_type: String,
+
     pub(super) attempts: i32,
+
     pub(super) claimable_at: chrono::DateTime<chrono::Utc>,
+
     pub(super) published_at: Option<chrono::DateTime<chrono::Utc>>,
+
     pub(super) dead_at: Option<chrono::DateTime<chrono::Utc>>,
+
     pub(super) dead_reason: Option<String>,
+
     pub(super) last_error: Option<String>,
+
     pub(super) claim_token: Option<Uuid>,
+
     pub(super) locked_by: Option<String>,
+
     pub(super) observed_at: chrono::DateTime<chrono::Utc>,
 }
 

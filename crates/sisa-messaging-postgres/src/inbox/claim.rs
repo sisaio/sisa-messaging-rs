@@ -8,22 +8,31 @@ use crate::PostgresError;
 
 pub(super) struct LockParams<'a> {
     pub(super) scope: &'a str,
+
     pub(super) message_id: Uuid,
 }
 
 pub(super) struct ClaimParams<'a> {
     pub(super) scope: &'a str,
+
     pub(super) message_id: Uuid,
+
     pub(super) message_type: &'a str,
+
     pub(super) message_version: i32,
+
     pub(super) metadata: &'a serde_json::Value,
 }
 
 pub(super) struct ClaimRecord {
     pub(super) id: Uuid,
+
     pub(super) attempts: i32,
+
     pub(super) completed_at: Option<DateTime<Utc>>,
+
     pub(super) dead_at: Option<DateTime<Utc>>,
+
     pub(super) dead_reason: Option<String>,
 }
 

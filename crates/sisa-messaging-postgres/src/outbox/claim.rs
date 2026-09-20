@@ -7,25 +7,37 @@ use crate::PostgresError;
 
 pub(super) struct ClaimParams<'a> {
     pub(super) limit: i64,
+
     pub(super) worker_id: &'a str,
+
     pub(super) lease_micros: i64,
 }
 
 pub(super) struct PoisonParams<'a> {
     pub(super) ids: &'a [Uuid],
+
     pub(super) tokens: &'a [Uuid],
 }
 
 pub(super) struct ClaimRecord {
     pub(super) id: Uuid,
+
     pub(super) claim_token: Uuid,
+
     pub(super) message_id: Uuid,
+
     pub(super) message_type: String,
+
     pub(super) message_version: i32,
+
     pub(super) content_type: String,
+
     pub(super) payload: Vec<u8>,
+
     pub(super) metadata: serde_json::Value,
+
     pub(super) ordering_key: Option<String>,
+
     pub(super) attempts: i32,
 }
 
