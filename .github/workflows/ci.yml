@@ -95,6 +95,7 @@ jobs:
             and (.Error // "") == ""
           ' "${status_file}" >/dev/null
       - name: Verify SQLx offline metadata
+        working-directory: crates/sisa-messaging-postgres
         run: |
           cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
           ci_database_scheme=postgres
