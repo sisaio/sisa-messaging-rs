@@ -1,10 +1,12 @@
 ## Summary
 
-<!-- Explain the bounded outcome and link the implementation issue. -->
+<!-- Explain the bounded outcome this pull request delivers. -->
 
 ## Issue linkage
 
-Closes #<!-- Replace with the issue number. This must match the issue number in the branch name. -->
+<!-- Add the issue number from the branch name after the #. CI checks that they match. -->
+
+Closes #
 
 ## Validation
 
@@ -12,6 +14,7 @@ Closes #<!-- Replace with the issue number. This must match the issue number in 
 
 - [ ] Tests/checks: `...`
 - [ ] Documentation checks (if applicable): `...`
+- Changed paths: `...` (target 25 per pull request, 10 per commit)
 
 ## Risk and compatibility
 

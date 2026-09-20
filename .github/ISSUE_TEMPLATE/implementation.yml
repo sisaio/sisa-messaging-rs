@@ -1,58 +1,57 @@
 name: Implementation task
-description: Track one bounded implementation outcome
-title: "task: "
+description: Maintainer form for one bounded, reviewable implementation outcome
 labels:
   - type:task
 body:
   - type: markdown
     attributes:
       value: |
-        **Triage and approval:** Submitting this issue records a Todo item for triage. Do not create or start a Codex implementation task or linked branch until the repository owner explicitly approves it. After approval, the owner provisions one Codex task and moves this issue to In Progress.
-
-        **Complex work:** Use a native GitHub parent issue with bounded sub-issues when work has multiple outcomes or dependencies. The parent coordinates the outcome and dependencies; it must not become one oversized implementation task. Each sub-issue independently requires owner approval and then gets one Codex task, numbered branch, and normally one pull request. Approved dependency-ready sub-issues with non-overlapping ownership may run in parallel.
+        Maintainers triage new issues in the project's `Todo` column. Implementation, a linked
+        branch, or a pull request starts only after the repository owner approves the issue and
+        moves it to `In Progress`. Split work with several outcomes or dependencies into a parent
+        issue with bounded sub-issues; each sub-issue is approved separately.
   - type: textarea
-    id: objective
+    id: outcome
     attributes:
-      label: Objective
-      description: State the concrete outcome this issue should deliver.
-      placeholder: As a ..., I need ... so that ...
+      label: Outcome and motivation
+      description: The concrete outcome this issue delivers and why it matters.
     validations:
       required: true
   - type: textarea
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: List observable, testable conditions for completion.
+      description: Observable, testable conditions for completion.
       placeholder: |
-        - [ ] ...
-        - [ ] ...
+        - ...
+        - ...
     validations:
       required: true
   - type: textarea
     id: scope
     attributes:
-      label: Scope and constraints
-      description: Identify intended paths, dependencies, non-goals, and compatibility constraints.
+      label: Scope
+      description: Intended paths, crates, dependencies, and compatibility constraints.
     validations:
       required: true
   - type: textarea
     id: non_goals
     attributes:
-      label: Explicit non-goals
-      description: State what this issue intentionally will not change.
+      label: Non-goals
+      description: What this issue intentionally does not change.
     validations:
       required: true
   - type: textarea
     id: risks
     attributes:
-      label: Risk assessment
-      description: Describe operational, compatibility, security, data, and rollback risks.
+      label: Risks and controls
+      description: Compatibility, schema, concurrency, security, performance, or release risks and how each is controlled.
     validations:
       required: true
   - type: textarea
     id: validation
     attributes:
-      label: Validation plan
-      description: Describe the checks that must pass before the pull request is ready.
+      label: Validation
+      description: The checks and evidence that must exist before the pull request is ready.
     validations:
       required: true
