@@ -326,43 +326,27 @@ of valid labels; task packets use only those names. Priority and the normal `Tod
 
 ### Token-efficiency evidence
 
-Token cost is context size multiplied by request count. The primary metrics are therefore the
-number of requests per thread and the context sent per request, taken from the Codex rollout logs
-for the task. Record per role: thread and spawn counts, requests per thread, median and peak
-context per request, `wait_agent` polls, shell commands, and compactions. Instruction-file size and
-reasoning-output share are recorded only as secondary checks: measured, they are not levers.
+Token cost is context size multiplied by request count, so the primary metrics are requests per
+thread and context per request, read from the Codex rollout logs. Record per role: spawns,
+requests per thread, median and peak context per request, `wait_agent` polls, shell commands, and
+compactions. Instruction-file size and reasoning-output share are secondary checks only.
 
-The 2026-09-19/20 baseline, from the rollout logs for this repository, is about 388M tokens over
-175 threads:
+Baseline from the 2026-09-19/20 rollout logs, about 388M tokens over 175 threads; reasoning output
+was 0.17% and instruction files under 2k tokens per thread:
 
-| Role | Share of tokens | Measured detail |
+| Role | Share | Measured detail |
 |---|---:|---|
-| Primary orchestrator | 33% | Ran on `gpt-5.6-sol`; largest thread had 628 requests, of which 206 were `wait_agent` polls with 30–180 s timeouts at a median gap of about one minute, each resending a 150–217k context |
+| Primary orchestrator | 33% | On `gpt-5.6-sol`; largest thread 628 requests, 206 of them `wait_agent` polls at a median one-minute gap, each resending 150–217k context |
 | `backend_developer` | 30% | 22 spawns |
-| `reviewer` | 22% | 43 spawns; worst run had 137 requests, 108 shell commands, 2 compactions, and a 216k context |
+| `reviewer` | 22% | 43 spawns; worst run 137 requests, 108 shell commands, 2 compactions, 216k context |
 | Guardian auto-review | 8% | Desktop Auto approval mode |
 | `architect` | 1.3% | Gated spawns only |
 | `release_engineer` | 0.5% | On demand only |
 
-Reasoning output was 0.17% of tokens and instruction files were under 2k tokens per thread, so
-reasoning effort and instruction trimming are not levers. Issue #39 targets the measured drivers
-instead: earlier compaction through `model_auto_compact_token_limit`, one `wait_agent` call per
-spawn instead of polling, `followup_task` on the owning writer instead of fresh spawns, the
-reviewer's investigation budget, and one batched fix round with a small-fix path to a single final
-review. The owner records request count and median context on the next full issue flow and
-compares them against this table.
-
-Two owner actions sit outside the repository and are tracked here, not in configuration: set the
-primary default model to `gpt-5.6-terra` or `gpt-5.6-luna` at medium effort in
-`~/.codex/config.toml` or the desktop model picker, and reconsider the desktop Auto review approval
-mode or widen its sandbox allowlist so the guardian review stops consuming its 8% share.
-
-For issue #18, the earlier proxy was configuration size: 5,244 words and 37,402 bytes across
-`AGENTS.md`, this document, `.codex/config.toml`, and the four role files before the change and
-5,329 words and 37,908 bytes after it, with the four role files falling from 1,573 to 907 words,
-possible concurrency falling from three to two threads, and high effort concentrated in the gated
-architect and final reviewer. That proxy is retained for history only. Acceptance still requires no
-unresolved valid high or medium finding and no skipped validation.
+The owner records the same metrics on the next full issue flow and compares them here. Two owner
+actions live outside the repository: set the primary default to `gpt-5.6-terra` or `gpt-5.6-luna`
+at medium effort in `~/.codex/config.toml` or the desktop picker, and reconsider the desktop Auto
+review approval mode or widen its sandbox allowlist.
 
 This repository does not maintain Markdown task cards, separate story files, another backlog, or a
 routine ADR stream. The issue records intent and acceptance, the PR records review and validation,
