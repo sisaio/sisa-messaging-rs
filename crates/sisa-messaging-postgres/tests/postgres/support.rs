@@ -5,7 +5,7 @@ use sisa_messaging::{
     SerializedEnvelope, Serializer,
 };
 use sqlx::{
-    PgPool,
+    AssertSqlSafe, PgPool,
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 use uuid::Uuid;
@@ -159,7 +159,7 @@ impl ConcurrentOutboxFixture {
         let control = pool().await;
         // The generated identifier contains only a fixed prefix and UUID hex digits.
         let statement = format!("DROP SCHEMA {} CASCADE", self.schema);
-        sqlx::query(&statement)
+        sqlx::query(AssertSqlSafe(statement))
             .execute(&control)
             .await
             .unwrap_or_else(|_| panic!("concurrent outbox schema cleanup failed"));
@@ -172,7 +172,7 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
     // PostgreSQL identifiers cannot be query parameters. The name is generated locally from UUID
     // hex, so this fixture's only dynamic DDL is injection-safe and cannot reuse stale shape.
     let create_schema = format!("CREATE SCHEMA {schema}");
-    sqlx::query(&create_schema)
+    sqlx::query(AssertSqlSafe(create_schema))
         .execute(&control)
         .await
         .unwrap_or_else(|_| panic!("concurrent outbox schema setup failed"));
@@ -180,7 +180,7 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
     let create_table = format!(
         "CREATE TABLE {schema}.outbox_messages (LIKE public.outbox_messages INCLUDING ALL)"
     );
-    sqlx::query(&create_table)
+    sqlx::query(AssertSqlSafe(create_table))
         .execute(&control)
         .await
         .unwrap_or_else(|_| panic!("concurrent outbox table setup failed"));

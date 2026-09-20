@@ -12,7 +12,7 @@ use sisa_messaging_inbox::{
     InboxStore, InboxUnitOfWork,
 };
 use sisa_messaging_postgres::{PostgresError, PostgresInboxStore};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{AssertSqlSafe, PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
 use crate::support::pool;
@@ -156,10 +156,13 @@ impl InboxFixture {
         self.pool.close().await;
         let control = pool().await;
         // The generated identifier contains only a fixed prefix and UUID hex digits.
-        sqlx::query(&format!("DROP SCHEMA {} CASCADE", self.schema))
-            .execute(&control)
-            .await
-            .unwrap_or_else(|_| panic!("inbox schema cleanup failed"));
+        sqlx::query(AssertSqlSafe(format!(
+            "DROP SCHEMA {} CASCADE",
+            self.schema
+        )))
+        .execute(&control)
+        .await
+        .unwrap_or_else(|_| panic!("inbox schema cleanup failed"));
     }
 }
 
@@ -167,13 +170,13 @@ async fn isolated_inbox_fixture() -> InboxFixture {
     let control = pool().await;
     let schema = format!("inbox_test_{}", Uuid::now_v7().simple());
     // PostgreSQL identifiers cannot be parameters; this UUID-derived schema name is safe.
-    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+    sqlx::query(AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
         .execute(&control)
         .await
         .unwrap_or_else(|_| panic!("inbox schema setup failed"));
-    sqlx::query(&format!(
+    sqlx::query(AssertSqlSafe(format!(
         "CREATE TABLE {schema}.inbox_receipts (LIKE public.inbox_receipts INCLUDING ALL)"
-    ))
+    )))
     .execute(&control)
     .await
     .unwrap_or_else(|_| panic!("inbox table setup failed"));
@@ -189,10 +192,12 @@ async fn isolated_inbox_fixture() -> InboxFixture {
         ),
         ("inbox_receipts_dead_at_id_idx", "ix_inbox_receipts_dead"),
     ] {
-        sqlx::query(&format!("ALTER INDEX {schema}.{source} RENAME TO {target}"))
-            .execute(&control)
-            .await
-            .unwrap_or_else(|_| panic!("inbox index setup failed"));
+        sqlx::query(AssertSqlSafe(format!(
+            "ALTER INDEX {schema}.{source} RENAME TO {target}"
+        )))
+        .execute(&control)
+        .await
+        .unwrap_or_else(|_| panic!("inbox index setup failed"));
     }
     let search_path = format!("{schema}, public");
     let pool = PgPoolOptions::new()
@@ -242,9 +247,9 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
     let store = store(pool.clone(), 2);
     let effect_table = format!("inbox_effect_{}", Uuid::now_v7().simple());
     // Identifiers cannot be bound; this name is constrained to a fixed prefix and UUID hex.
-    sqlx::query(&format!(
+    sqlx::query(AssertSqlSafe(format!(
         "CREATE TABLE {effect_table} (message_id uuid PRIMARY KEY)"
-    ))
+    )))
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("effect table setup failed"));
@@ -261,11 +266,13 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         InboxClaimOutcome::Claimed(receipt) => receipt,
         outcome => panic!("unexpected claim outcome: {outcome:?}"),
     };
-    sqlx::query(&format!("INSERT INTO {effect_table} VALUES ($1)"))
-        .bind(completed.message_id.into_uuid())
-        .execute(&mut *transaction)
-        .await
-        .unwrap_or_else(|_| panic!("effect insert failed"));
+    sqlx::query(AssertSqlSafe(format!(
+        "INSERT INTO {effect_table} VALUES ($1)"
+    )))
+    .bind(completed.message_id.into_uuid())
+    .execute(&mut *transaction)
+    .await
+    .unwrap_or_else(|_| panic!("effect insert failed"));
     store
         .complete(&mut transaction, receipt)
         .await
@@ -275,10 +282,12 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         .await
         .unwrap_or_else(|_| panic!("commit failed"));
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {effect_table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|_| panic!("effect read failed")),
+        sqlx::query_scalar::<_, i64>(AssertSqlSafe(format!(
+            "SELECT count(*) FROM {effect_table}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|_| panic!("effect read failed")),
         1
     );
     let mut transaction = store
@@ -305,20 +314,24 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         .claim(&mut transaction, &rolled)
         .await
         .unwrap_or_else(|_| panic!("claim failed"));
-    sqlx::query(&format!("INSERT INTO {effect_table} VALUES ($1)"))
-        .bind(rolled.message_id.into_uuid())
-        .execute(&mut *transaction)
-        .await
-        .unwrap_or_else(|_| panic!("rollback effect insert failed"));
+    sqlx::query(AssertSqlSafe(format!(
+        "INSERT INTO {effect_table} VALUES ($1)"
+    )))
+    .bind(rolled.message_id.into_uuid())
+    .execute(&mut *transaction)
+    .await
+    .unwrap_or_else(|_| panic!("rollback effect insert failed"));
     store
         .rollback(transaction)
         .await
         .unwrap_or_else(|_| panic!("rollback failed"));
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {effect_table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|_| panic!("effect read failed")),
+        sqlx::query_scalar::<_, i64>(AssertSqlSafe(format!(
+            "SELECT count(*) FROM {effect_table}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|_| panic!("effect read failed")),
         1
     );
     let mut transaction = store
@@ -377,7 +390,7 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         .rollback(holder)
         .await
         .unwrap_or_else(|_| panic!("rollback failed"));
-    sqlx::query(&format!("DROP TABLE {effect_table}"))
+    sqlx::query(AssertSqlSafe(format!("DROP TABLE {effect_table}")))
         .execute(&pool)
         .await
         .unwrap_or_else(|_| panic!("effect table cleanup failed"));
