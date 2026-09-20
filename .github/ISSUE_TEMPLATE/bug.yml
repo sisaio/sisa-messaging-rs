@@ -1,25 +1,60 @@
 name: Bug report
 description: Report a reproducible defect
-title: "bug: "
 labels:
   - type:bug
+  - needs:triage
 body:
   - type: markdown
     attributes:
       value: |
-        **Triage and approval:** Submitting this issue records a Todo item for triage. Do not create or start a Codex implementation task or linked branch until the repository owner explicitly approves it. After approval, the owner provisions one Codex task and moves this issue to In Progress.
-  - type: textarea
-    id: objective
+        Thanks for the report. Do not include credentials, connection URLs, message payloads, raw
+        headers, or other sensitive data. Report a security vulnerability through a
+        [private security advisory](https://github.com/sisaio/sisa-messaging-rs/security/advisories/new)
+        instead of a public issue.
+  - type: checkboxes
+    id: checks
     attributes:
-      label: Outcome and impact
-      description: Describe the defect, who it affects, and the outcome expected from fixing it.
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Core messaging model (sisa-messaging)
+        - Outbox
+        - Inbox
+        - Consumer runtime
+        - PostgreSQL provider
+        - NATS provider
+        - CI or repository automation
+        - Release or packaging
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Crate version or commit SHA, plus the Rust toolchain and PostgreSQL or NATS version when relevant.
+      placeholder: "sisa-messaging 0.1.0, rustc 1.94, PostgreSQL 18.1"
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Describe the defect and its impact.
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: Reproduction
-      description: Provide the smallest reliable reproduction, including relevant commands or inputs.
+      description: The smallest reliable reproduction, including commands, code, or configuration.
     validations:
       required: true
   - type: textarea
@@ -29,53 +64,12 @@ body:
     validations:
       required: true
   - type: textarea
-    id: actual
-    attributes:
-      label: Actual behavior
-    validations:
-      required: true
-  - type: textarea
-    id: acceptance
-    attributes:
-      label: Acceptance criteria
-      description: List observable conditions that prove the defect is fixed.
-      placeholder: |
-        - [ ] ...
-        - [ ] ...
-    validations:
-      required: true
-  - type: textarea
-    id: scope
-    attributes:
-      label: Scope and constraints
-      description: Identify intended paths, dependencies, and compatibility constraints.
-    validations:
-      required: true
-  - type: textarea
-    id: non_goals
-    attributes:
-      label: Explicit non-goals
-      description: State what this issue intentionally will not change.
-    validations:
-      required: true
-  - type: textarea
-    id: risks
-    attributes:
-      label: Risk assessment
-      description: Describe operational, compatibility, security, data, and rollback risks.
-    validations:
-      required: true
-  - type: textarea
     id: environment
     attributes:
       label: Environment and logs
-      description: Include versions and sanitized logs. Never include credentials, tokens, or private payloads.
-    validations:
-      required: true
+      description: Operating system, deployment shape, and sanitized logs.
+      render: text
   - type: textarea
-    id: validation
+    id: context
     attributes:
-      label: Validation plan
-      description: Describe the checks that must pass before the pull request is ready.
-    validations:
-      required: true
+      label: Additional context

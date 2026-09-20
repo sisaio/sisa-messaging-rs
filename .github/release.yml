@@ -1,0 +1,26 @@
+# Categories for GitHub's auto-generated release notes, keyed on pull-request labels.
+# This file only shapes the notes text when a maintainer drafts a release by hand.
+# It does not create tags or releases and does not publish anything.
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+  categories:
+    - title: Features
+      labels:
+        - type:feature
+    - title: Bug fixes
+      labels:
+        - type:bug
+    - title: Documentation
+      labels:
+        - type:docs
+    - title: Dependencies
+      labels:
+        - dependencies
+    - title: Maintenance
+      labels:
+        - type:task
+        - "*"

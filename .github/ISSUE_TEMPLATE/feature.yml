@@ -1,15 +1,38 @@
 name: Feature request
 description: Propose a focused, user-visible capability
-title: "feat: "
 labels:
   - type:feature
+  - needs:triage
 body:
   - type: markdown
     attributes:
       value: |
-        **Triage and approval:** Submitting this issue records a Todo item for triage. Do not create or start a Codex implementation task or linked branch until the repository owner explicitly approves it. After approval, the owner provisions one Codex task and moves this issue to In Progress.
-
-        **Complex work:** Use a native GitHub parent issue with bounded sub-issues when work has multiple outcomes or dependencies. The parent coordinates the outcome and dependencies; it must not become one oversized implementation task. Each sub-issue independently requires owner approval and then gets one Codex task, numbered branch, and normally one pull request. Approved dependency-ready sub-issues with non-overlapping ownership may run in parallel.
+        Thanks for the proposal. Check the [documentation index](https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/README.md)
+        first: the architecture documents define the project's scope and non-goals.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Core messaging model (sisa-messaging)
+        - Outbox
+        - Inbox
+        - Consumer runtime
+        - PostgreSQL provider
+        - NATS provider
+        - CI or repository automation
+        - Release or packaging
+        - Documentation
+        - Not sure
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
@@ -25,40 +48,16 @@ body:
     validations:
       required: true
   - type: textarea
-    id: acceptance
+    id: alternatives
     attributes:
-      label: Acceptance criteria
-      description: List observable, testable conditions for completion.
-      placeholder: |
-        - [ ] ...
-        - [ ] ...
-    validations:
-      required: true
+      label: Alternatives considered
+      description: Other approaches you considered and why they fall short.
   - type: textarea
-    id: non_goals
+    id: compatibility
     attributes:
-      label: Non-goals and compatibility concerns
-      description: Identify intentionally excluded behavior and compatibility or migration impact.
-    validations:
-      required: true
+      label: Compatibility concerns
+      description: Public API, schema, migration, or wire-format impact you are aware of.
   - type: textarea
-    id: scope
+    id: context
     attributes:
-      label: Scope and constraints
-      description: Identify intended paths, dependencies, and compatibility constraints.
-    validations:
-      required: true
-  - type: textarea
-    id: risks
-    attributes:
-      label: Risk assessment
-      description: Describe operational, compatibility, security, data, and rollback risks.
-    validations:
-      required: true
-  - type: textarea
-    id: validation
-    attributes:
-      label: Validation plan
-      description: Describe the checks that must pass before the pull request is ready.
-    validations:
-      required: true
+      label: Additional context

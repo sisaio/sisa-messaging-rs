@@ -3,3 +3,6 @@ contact_links:
   - name: Report a security vulnerability privately
     url: https://github.com/sisaio/sisa-messaging-rs/security/advisories/new
     about: Do not disclose security vulnerabilities in a public issue.
+  - name: Usage question or documentation
+    url: https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/README.md
+    about: Start with the documentation index; open a feature request if the docs leave a gap.
