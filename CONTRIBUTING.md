@@ -104,6 +104,10 @@ Automation and Codex agents must never enable auto-merge or merge the PR. After 
 and reviews pass, report that the PR is ready and wait for the repository owner to review and merge
 it manually.
 
+Dependency update pull requests opened by Dependabot are the one exception to the issue-linked
+branch, `Refs`, and `Closes` rules, because a bot cannot open an approved issue. The changed-path
+check skips them; every other CI job still runs, and a maintainer reviews and merges them manually.
+
 Update normative docs in the same PR only when the change affects a lasting guarantee, public
 capability, schema invariant, ownership boundary, compatibility statement, or non-goal. Otherwise,
 do not change docs merely to record that a ticket existed.
