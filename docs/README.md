@@ -33,6 +33,10 @@ broker connections, telemetry exporters, or process shutdown.
    dependency policy, and completion gates.
 10. [`0001_messaging.sql`](../migrations/0001_messaging.sql) — the executable PostgreSQL 18+
    baseline.
+11. [Agent workflow](agent-workflow.md) — bounded task packets, review rounds, Git delivery, and
+    review-size policy.
+12. [Agent team](agent-team.md) — role boundaries, configuration, escalation, and measured
+    orchestration rationale.
 
 ## Fixed decisions
 
