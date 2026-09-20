@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Completion is valid only while the receipt remains active in this business\n            -- transaction.\n            UPDATE inbox_receipts\n            SET completed_at = now()\n            WHERE id = $1\n              AND completed_at IS NULL\n              AND dead_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "345e6fd7e0b9e39b1a72d9f6e8a2320a6b89a0d867433ff311531ef867e5a0ac"
+}
