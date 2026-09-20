@@ -94,6 +94,13 @@ jobs:
             and ((.Pending // []) | length == 0)
             and (.Error // "") == ""
           ' "${status_file}" >/dev/null
+      - name: Verify SQLx offline metadata
+        run: |
+          cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+          ci_database_scheme=postgres
+          ci_database_url="${ci_database_scheme}://${PGUSER}@${PGHOST}:${PGPORT}/"
+          ci_database_url+="${PGDATABASE}?sslmode=disable"
+          DATABASE_URL="${ci_database_url}" cargo sqlx prepare --check --workspace -- --package sisa-messaging-postgres
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets --all-features --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
