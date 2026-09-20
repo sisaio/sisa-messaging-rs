@@ -143,7 +143,7 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
 }
 
 #[tokio::test]
-async fn stats_excludes_a_due_successor_behind_an_expired_currently_leased_ordering_head() {
+async fn stats_excludes_a_due_successor_and_clamps_a_future_created_age() {
     let pool = isolated_outbox_pool().await;
     sqlx::query!(
         r#"
@@ -165,6 +165,12 @@ async fn stats_excludes_a_due_successor_behind_an_expired_currently_leased_order
                     'postgres.ordering-successor', 1, 'application/test', ''::bytea,
                     '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours',
                     now() - interval '1 hour', NULL, NULL, NULL, 0
+                ),
+                -- Clock skew is schema-valid; the derived finite negative age clamps to zero.
+                (
+                    '00000000-0000-0000-0000-000000000003', uuidv7(),
+                    'postgres.future-created-at', 1, 'application/test', ''::bytea,
+                    '{}'::jsonb, NULL, now() + interval '1 hour', now(), NULL, NULL, NULL, 0
                 )
         "#
     )
@@ -175,7 +181,8 @@ async fn stats_excludes_a_due_successor_behind_an_expired_currently_leased_order
         .stats()
         .await
         .unwrap_or_else(|_| panic!("stats failed"));
-    assert_eq!((stats.pending, stats.expired), (1, 1));
+    assert_eq!((stats.pending, stats.expired), (2, 1));
+    // A schema-valid clock-skewed row must not make maintenance fail.
     assert_eq!(stats.oldest_pending_age, Duration::ZERO);
 }
 

@@ -425,8 +425,11 @@ fn duration_micros(duration: Duration) -> Result<i64, PostgresError> {
 }
 
 fn duration_seconds(value: f64) -> Result<Duration, PostgresError> {
-    if !value.is_finite() || value.is_sign_negative() {
+    if !value.is_finite() {
         return Err(PostgresError::InvalidData);
+    }
+    if value.is_sign_negative() {
+        return Ok(Duration::ZERO);
     }
     Duration::try_from_secs_f64(value).map_err(|_| PostgresError::InvalidData)
 }

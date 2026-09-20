@@ -17,6 +17,9 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
+  # Explicit Atlas Community release; do not change to a floating/latest URL.
+  ATLAS_VERSION: v1.3.0
+  ATLAS_SHA256: 10d7913e3dce43ab99b8d71534a4cbadaf11a16dc293adf3b91d10e83a0ac70b
 
 jobs:
   quality:
@@ -54,8 +57,43 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      - name: Apply PostgreSQL baseline schema
-        run: psql -v ON_ERROR_STOP=1 -f migrations/0001_messaging.sql
+      - name: Install pinned Atlas Community CLI
+        run: |
+          curl --fail --location --retry 3 --output atlas \
+            "https://release.ariga.io/atlas/atlas-community-linux-amd64-${ATLAS_VERSION}"
+          printf '%s  %s\n' "${ATLAS_SHA256}" atlas | sha256sum --check --status
+          chmod +x atlas
+          sudo install -m 0755 atlas /usr/local/bin/atlas
+          atlas version
+      - name: Verify migration checksum without mutating checkout
+        run: |
+          workdir="$(mktemp -d)"
+          cp -R migrations "${workdir}/migrations"
+          atlas migrate hash --dir "file://${workdir}/migrations"
+          cmp --silent migrations/atlas.sum "${workdir}/migrations/atlas.sum"
+      - name: Apply complete migration directory to PostgreSQL 18
+        run: |
+          ci_database_scheme=postgres
+          ci_database_url="${ci_database_scheme}://${PGUSER}@${PGHOST}:${PGPORT}/"
+          ci_database_url+="${PGDATABASE}?sslmode=disable"
+          atlas migrate apply \
+            --dir file://migrations \
+            --url "${ci_database_url}"
+      - name: Require latest version and zero pending migrations
+        run: |
+          ci_database_scheme=postgres
+          ci_database_url="${ci_database_scheme}://${PGUSER}@${PGHOST}:${PGPORT}/"
+          ci_database_url+="${PGDATABASE}?sslmode=disable"
+          status_file="$(mktemp)"
+          atlas migrate status \
+            --dir file://migrations \
+            --url "${ci_database_url}" \
+            --format '{{ json . }}' >"${status_file}"
+          jq -e '
+            .Status == "OK"
+            and ((.Pending // []) | length == 0)
+            and (.Error // "") == ""
+          ' "${status_file}" >/dev/null
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets --all-features --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

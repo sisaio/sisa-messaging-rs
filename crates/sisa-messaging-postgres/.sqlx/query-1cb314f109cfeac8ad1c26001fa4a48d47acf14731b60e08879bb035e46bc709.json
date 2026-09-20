@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- An expired predecessor blocks its successor while the predecessor lease is current.\n            INSERT INTO outbox_messages (\n                id, message_id, message_type, message_version, content_type, payload, metadata,\n                ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by,\n                attempts\n            )\n            VALUES\n                (\n                    '00000000-0000-0000-0000-000000000001', uuidv7(),\n                    'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb,\n                    'postgres-test-key', now() - interval '2 hours', now() + interval '1 hour',\n                    now() - interval '1 hour', uuidv7(), 'postgres-test-worker', 0\n                ),\n                (\n                    '00000000-0000-0000-0000-000000000002', uuidv7(),\n                    'postgres.ordering-successor', 1, 'application/test', ''::bytea,\n                    '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours',\n                    now() - interval '1 hour', NULL, NULL, NULL, 0\n                ),\n                -- Clock skew is schema-valid; the derived finite negative age clamps to zero.\n                (\n                    '00000000-0000-0000-0000-000000000003', uuidv7(),\n                    'postgres.future-created-at', 1, 'application/test', ''::bytea,\n                    '{}'::jsonb, NULL, now() + interval '1 hour', now(), NULL, NULL, NULL, 0\n                )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1cb314f109cfeac8ad1c26001fa4a48d47acf14731b60e08879bb035e46bc709"
+}
