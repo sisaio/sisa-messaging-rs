@@ -1,9 +1,8 @@
 # Agent task and review workflow
 
-This document is the compact workflow source agents read for task packets, review, Git delivery,
-and size policy. Team rationale, role boundaries, configuration, and measured baselines remain in
-[`agent-team.md`](agent-team.md). Portable rules G1–G9 keep their labels so they can be copied to
-another project or harness unchanged.
+The compact workflow source agents read for task packets, review, Git delivery, and size policy.
+Rationale, role boundaries, configuration, and baselines stay in [`agent-team.md`](agent-team.md).
+Portable rules G1–G9 keep their labels so they can be copied to another project unchanged.
 
 ## 4. Task packet
 
@@ -36,9 +35,11 @@ and publication files. One writer owns the PR unless another exclusive domain is
 The bounded sequence is one initial review and at most one batched fix round with the existing
 writer (G1). If no edit is required and that fresh full-diff review has final evidence, it satisfies
 the final gate; do not spawn another reviewer. After an edit, run one fresh final review. Only a
-blocker/high final finding opens another fix-and-review round. Defer medium/low final findings;
-never change the reviewed HEAD without another fresh complete-diff final review.
-Database/migration fixes keep section 6 focused re-review (P2).
+blocker/high final finding opens another fix-and-review round. A medium/low final finding whose fix
+meets G3 is fixed by the owning writer without a reviewer; the primary verifies the fix hunks and
+records the reviewed HEAD, final HEAD, and changed paths in the handoff and PR. Other medium/low
+final findings are deferred to a linked follow-up issue. Database/migration fixes keep section 6
+focused re-review (P2).
 
 Comments, docstrings, typos, formatting, and non-normative Markdown need no agent review. Normative
 docs, the agent instruction file, `.agents/**`, and their generated agent configurations receive
@@ -69,7 +70,8 @@ invalid, tooling, and unresolved production findings.
 
 Wait for subagents once with maximum-timeout `wait_agent`. Await CI with one
 `gh pr checks <n> --watch --fail-fast` or `gh run watch <id> --exit-status`, piping output through
-`tail`; repeated status inspection is prohibited (G8). Reading `gh`/`gh api` calls select fields
+`tail` under `set -o pipefail` so the awaited command's exit status survives; repeated status
+inspection is prohibited (G8). Reading `gh`/`gh api` calls select fields
 with `--json`/`--jq`; never use `--comments` or unfiltered `gh api`. Drop bot authors unless
 dispositioning their findings, when only finding bodies are selected. Web search stays disabled;
 unanswered design questions go to the architect gate or user (G9).
@@ -92,8 +94,8 @@ keyword. Allowed commit types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`,
 `revert`, `style`, and `test`; `hotfix/*` uses `fix`, and release mechanics normally use
 `chore(release)`. Before each round state the exact message, intended paths and predicted count,
 validation, current PR path count, and next slice. Install and run `prek`; never use `--no-verify`.
-Pipe `prek run` and `git push` output through `tail -n 40`; explicit checks, not hook output, are the
-evidence (G5). Do not stage, commit, push, tag, publish, release, or create/edit a PR unless the user
+Pipe `prek run` and `git push` output through `tail -n 40` under `set -o pipefail`; explicit checks,
+not hook output, are the evidence (G5). Do not stage, commit, push, tag, publish, release, or create/edit a PR unless the user
 explicitly authorizes that action.
 
 A commit targets 10 paths and has a 20-path hard limit. A task/PR targets 25 paths
@@ -113,6 +115,5 @@ or merge. Before push or final acceptance, scan secrets over the exact final-rev
 is independent evidence. Report issue, branch, each planned round and message, changed and PR path
 counts, checks, risks, and next safe slice at handoff.
 
-G6 keeps this file at most 8 KB and routes agents to named sections. Independent fresh review,
-complete committed-range final review, flagship high-effort architecture/review, named-risk
-adversarial analysis, owner merge, and P2/P3 protections remain unchanged.
+G6 keeps this file at most 8 KB. Independent fresh review, committed-range final review, flagship
+high-effort architecture/review, named-risk depth, owner merge, and P2/P3 remain unchanged.

@@ -48,8 +48,10 @@ These harness-neutral, project-neutral rules are portable to other repositories 
 - **G1 — Review-round cap (General).** Use one initial review and at most one batched fix round. If
   the review requires no edit and meets final-review evidence, it satisfies the final gate; do not
   spawn another reviewer. After an edit, use one fresh final review. Only a blocker/high final
-  finding opens one more fix-and-review round. Defer medium/low final findings; never change the
-  reviewed HEAD without another fresh complete-diff final review. Never run consecutive reviewers
+  finding opens one more fix-and-review round. A medium/low final finding whose fix meets G3 may be
+  fixed by the owning writer without a reviewer: the primary verifies the fix hunks itself and
+  records the reviewed HEAD, the final HEAD, and the changed paths in the handoff and PR. Any other
+  medium/low final finding is deferred to a linked follow-up issue. Never run consecutive reviewers
   without an intervening writer/primary edit.
 - **G2 — Editorial class (General).** Comments, docstrings, typos, formatting, and non-normative
   Markdown need no agent review. Normative docs, agent instructions, agent sources, and generated
@@ -61,14 +63,16 @@ These harness-neutral, project-neutral rules are portable to other repositories 
   documents, or generated folders. Narrow commands before they can exceed tool output limits.
   Named concurrency, security, or migration risk may justify broader reading and must be reported.
 - **G5 — Bounded hook output (General).** Pipe `git push` and `prek run` output through
-  `tail -n 40`. Hook output is not evidence; use the explicit check run before it.
+  `tail -n 40` under `set -o pipefail` so the producer's exit status survives. Hook output is not
+  evidence; use the explicit check run before it.
 - **G6 — Small workflow source (General).** Keep task-packet, workflow, and Git/review-size policy
   in `docs/agent-workflow.md` (at most 8 KB) and point agents directly to named sections there.
 - **G7 — One writer (General).** One writer owns a PR unless it touches another writer's exclusive
   domain.
 - **G8 — No polling (General).** Await external state once with a blocking call: maximum-timeout
   `wait_agent` for subagents, or `gh pr checks <n> --watch --fail-fast` / `gh run watch <id>
-  --exit-status` for CI, with output piped through `tail`. Do not repeatedly inspect status.
+  --exit-status` for CI, with output piped through `tail` under `set -o pipefail`. Do not
+  repeatedly inspect status.
 - **G9 — Filtered external reads (General).** Select fields from `gh`/`gh api` with `--json` and
   `--jq`. Do not use `--comments` or unfiltered `gh api`; filter out bots unless dispositioning bot
   findings, when only finding bodies are selected. Keep web search disabled; send unanswered

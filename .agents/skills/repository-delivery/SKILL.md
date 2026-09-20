@@ -39,8 +39,9 @@ before exceeding a target and split before a hard limit.
 - Never enable auto-merge or merge the PR; the owner merges manually.
 - Use one initial review and at most one batched fix round. A no-edit review with final evidence
   satisfies the final gate; after an edit, use one fresh final review. Only a blocker/high final
-  finding reopens review. Normative docs/agent configuration receive final review only; editorial
-  changes receive none.
+  finding reopens review; a medium/low final finding is fixed without a reviewer when the fix meets
+  the small-fix definition and the primary verifies the hunks, otherwise deferred to a linked issue.
+  Normative docs/agent configuration receive final review only; editorial changes receive none.
 - A fresh read-only final reviewer examines the committed `merge-base...HEAD` range and records
   exact base/head SHAs, path count, checks, and a range-aligned secret scan. Any base or head change
   invalidates approval. Review diff hunks and named sections; use CI `cargo sqlx prepare --check`
@@ -49,7 +50,9 @@ before exceeding a target and split before a hard limit.
   finding remains unresolved.
 - At every handoff report issue, branch, current commit round and exact message, changed-path and PR
   totals, checks, and next safe slice.
-- Pipe `prek run` and `git push` output through `tail -n 40`; explicit checks are the evidence.
+- Pipe `prek run` and `git push` output through `tail -n 40` under `set -o pipefail`; explicit
+  checks are the evidence.
 - Await external state once: maximum-timeout `wait_agent`, `gh pr checks --watch --fail-fast`, or
-  `gh run watch --exit-status`, with output piped through `tail`. Do not poll status.
+  `gh run watch --exit-status`, with output piped through `tail` under `set -o pipefail`. Do not
+  poll status.
 - Filter `gh`/`gh api` reads with `--json`/`--jq`; do not use `--comments` or unfiltered API output.

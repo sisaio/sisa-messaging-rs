@@ -91,8 +91,8 @@ Refs #123
 ```
 
 Never bypass hooks with `--no-verify`. Keep commits and PRs within the path limits documented in
-[`docs/agent-team.md`](docs/agent-team.md), and include the relevant formatting, lint, test,
-benchmark, query-plan, or migration evidence for the affected risk.
+[`docs/agent-workflow.md`](docs/agent-workflow.md#7-git-and-review-size-policy), and include the
+relevant formatting, lint, test, benchmark, query-plan, or migration evidence for the affected risk.
 
 ## Open the pull request
 
