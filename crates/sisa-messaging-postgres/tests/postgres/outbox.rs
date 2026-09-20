@@ -1,4 +1,7 @@
 use std::{
+    borrow::Cow,
+    error::Error,
+    fmt,
     num::NonZeroU32,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -24,12 +27,24 @@ use uuid::Uuid;
 #[tokio::test]
 async fn purge_expires_a_stale_crash_lease_and_clears_its_fence() {
     let pool = isolated_outbox_pool().await;
-    let id = sqlx::query_scalar!(r#"
-        -- A lease whose deadline elapsed may be expired despite retaining its old token.
-        INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, created_at, claimable_at, expires_at, claim_token, locked_by, attempts)
-        VALUES (uuidv7(), uuidv7(), 'postgres.stale-lease', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now() - interval '1 second', now() - interval '1 second', uuidv7(), 'crashed-worker', 0)
-        RETURNING id
-    "#).fetch_one(&pool).await.unwrap_or_else(|_| panic!("stale lease setup failed"));
+    let id = sqlx::query_scalar!(
+        r#"
+            -- A stale lease remains eligible for expiry even while its token remains persisted.
+            INSERT INTO outbox_messages (
+                id, message_id, message_type, message_version, content_type, payload, metadata,
+                created_at, claimable_at, expires_at, claim_token, locked_by, attempts
+            )
+            VALUES (
+                uuidv7(), uuidv7(), 'postgres.stale-lease', 1, 'application/test',
+                ''::bytea, '{}'::jsonb, now(), now() - interval '1 second',
+                now() - interval '1 second', uuidv7(), 'crashed-worker', 0
+            )
+            RETURNING id
+        "#
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("stale lease setup failed"));
     let store = PostgresOutboxStore::new(pool.clone(), ());
     let report = store
         .purge(OutboxPurgeRequest {
@@ -87,7 +102,8 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
             -- One temporary trigger makes only post-claim poison cleanup fail in this fixture.
             DO $$
             BEGIN
-                CREATE FUNCTION pg_temp.fail_poison_transition() RETURNS trigger LANGUAGE plpgsql AS $fn$
+                CREATE FUNCTION pg_temp.fail_poison_transition()
+                RETURNS trigger LANGUAGE plpgsql AS $fn$
                 BEGIN
                     IF NEW.dead_at IS NOT NULL THEN
                         RAISE EXCEPTION 'poison transition rejected' USING ERRCODE = '57014';
@@ -126,18 +142,77 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
 #[tokio::test]
 async fn stats_excludes_a_due_successor_behind_an_expired_currently_leased_ordering_head() {
     let pool = isolated_outbox_pool().await;
-    sqlx::query!(r#"
-        -- An expired predecessor still blocks its same-key successor while its lease is current.
-        INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by, attempts)
-        VALUES ('00000000-0000-0000-0000-000000000001', uuidv7(), 'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() + interval '1 hour', now() - interval '1 hour', uuidv7(), 'postgres-test-worker', 0),
-               ('00000000-0000-0000-0000-000000000002', uuidv7(), 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours', now() - interval '1 hour', NULL, NULL, NULL, 0)
-    "#).execute(&pool).await.unwrap_or_else(|_| panic!("ordering stats setup failed"));
+    sqlx::query!(
+        r#"
+            -- An expired predecessor blocks its successor while the predecessor lease is current.
+            INSERT INTO outbox_messages (
+                id, message_id, message_type, message_version, content_type, payload, metadata,
+                ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by,
+                attempts
+            )
+            VALUES
+                (
+                    '00000000-0000-0000-0000-000000000001', uuidv7(),
+                    'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb,
+                    'postgres-test-key', now() - interval '2 hours', now() + interval '1 hour',
+                    now() - interval '1 hour', uuidv7(), 'postgres-test-worker', 0
+                ),
+                (
+                    '00000000-0000-0000-0000-000000000002', uuidv7(),
+                    'postgres.ordering-successor', 1, 'application/test', ''::bytea,
+                    '{}'::jsonb, 'postgres-test-key', now() - interval '2 hours',
+                    now() - interval '1 hour', NULL, NULL, NULL, 0
+                )
+        "#
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("ordering stats setup failed"));
     let stats = PostgresOutboxStore::new(pool, ())
         .stats()
         .await
         .unwrap_or_else(|_| panic!("stats failed"));
     assert_eq!((stats.pending, stats.expired), (1, 1));
     assert_eq!(stats.oldest_pending_age, Duration::ZERO);
+}
+
+#[tokio::test]
+async fn stats_rejects_a_non_finite_database_derived_age() {
+    let pool = isolated_outbox_pool().await;
+    sqlx::query!(
+        r#"
+            -- PostgreSQL permits infinity timestamps, but their derived age is not a Duration.
+            INSERT INTO outbox_messages (
+                id,
+                message_id,
+                message_type,
+                message_version,
+                content_type,
+                payload,
+                metadata,
+                created_at,
+                claimable_at,
+                attempts
+            )
+            VALUES (
+                uuidv7(),
+                uuidv7(),
+                'postgres.infinite-age',
+                1,
+                'application/test',
+                ''::bytea,
+                '{}'::jsonb,
+                '-infinity',
+                now(),
+                0
+            )
+        "#
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("infinite age fixture setup failed"));
+    let result = PostgresOutboxStore::new(pool, ()).stats().await;
+    assert!(matches!(result, Err(PostgresError::InvalidData)));
 }
 
 #[tokio::test]
@@ -151,13 +226,27 @@ async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states
                 created_at, claimable_at, expires_at, published_at, dead_at, dead_reason
             )
             VALUES
-                (uuidv7(), uuidv7(), 'postgres.maintenance-expire', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), now() - interval '1 minute', NULL, NULL, NULL),
-                (uuidv7(), uuidv7(), 'postgres.maintenance-expire-remaining', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), now() - interval '1 minute', NULL, NULL, NULL),
-                (uuidv7(), uuidv7(), 'postgres.maintenance-published', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, now() - interval '1 minute', NULL, NULL),
-                (uuidv7(), uuidv7(), 'postgres.maintenance-published-remaining', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, now() - interval '1 minute', NULL, NULL),
-                (uuidv7(), uuidv7(), 'postgres.maintenance-dead', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, NULL, now() - interval '1 minute', 'permanent'),
-                (uuidv7(), uuidv7(), 'postgres.maintenance-dead-remaining', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, NULL, now() - interval '1 minute', 'permanent'),
-                (uuidv7(), uuidv7(), 'postgres.maintenance-pending', 1, 'application/test', ''::bytea, '{}'::jsonb, now() - interval '1 minute', now(), NULL, NULL, NULL, NULL)
+                (uuidv7(), uuidv7(), 'postgres.maintenance-expire', 1, 'application/test',
+                 ''::bytea, '{}'::jsonb, now(), now(), now() - interval '1 minute', NULL,
+                 NULL, NULL),
+                (uuidv7(), uuidv7(), 'postgres.maintenance-expire-remaining', 1,
+                 'application/test', ''::bytea, '{}'::jsonb, now(), now(),
+                 now() - interval '1 minute', NULL, NULL, NULL),
+                (uuidv7(), uuidv7(), 'postgres.maintenance-published', 1, 'application/test',
+                 ''::bytea, '{}'::jsonb, now(), now(), NULL, now() - interval '1 minute',
+                 NULL, NULL),
+                (uuidv7(), uuidv7(), 'postgres.maintenance-published-remaining', 1,
+                 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL,
+                 now() - interval '1 minute', NULL, NULL),
+                (uuidv7(), uuidv7(), 'postgres.maintenance-dead', 1, 'application/test',
+                 ''::bytea, '{}'::jsonb, now(), now(), NULL, NULL,
+                 now() - interval '1 minute', 'permanent'),
+                (uuidv7(), uuidv7(), 'postgres.maintenance-dead-remaining', 1,
+                 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, NULL,
+                 now() - interval '1 minute', 'permanent'),
+                (uuidv7(), uuidv7(), 'postgres.maintenance-pending', 1, 'application/test',
+                 ''::bytea, '{}'::jsonb, now() - interval '1 minute', now(), NULL, NULL,
+                 NULL, NULL)
         "#
     )
     .execute(&pool)
@@ -199,9 +288,19 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
                 created_at, claimable_at, expires_at, attempts, dead_at, dead_reason, last_error
             )
             VALUES
-                ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000301', 'postgres.dead-first', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), now() - interval '1 hour', 4, now() - interval '3 minutes', 'permanent', 'safe test error'),
-                ('00000000-0000-0000-0000-000000000202', '00000000-0000-0000-0000-000000000302', 'postgres.dead-second', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, 2, now() - interval '2 minutes', 'exhausted', 'safe test error'),
-                ('00000000-0000-0000-0000-000000000203', '00000000-0000-0000-0000-000000000303', 'postgres.live', 1, 'application/test', ''::bytea, '{}'::jsonb, now(), now() + interval '1 hour', NULL, 0, NULL, NULL, NULL)
+                ('00000000-0000-0000-0000-000000000201',
+                 '00000000-0000-0000-0000-000000000301', 'postgres.dead-first', 1,
+                 'application/test', ''::bytea, '{}'::jsonb, now(), now(),
+                 now() - interval '1 hour', 4, now() - interval '3 minutes', 'permanent',
+                 'safe test error'),
+                ('00000000-0000-0000-0000-000000000202',
+                 '00000000-0000-0000-0000-000000000302', 'postgres.dead-second', 1,
+                 'application/test', ''::bytea, '{}'::jsonb, now(), now(), NULL, 2,
+                 now() - interval '2 minutes', 'exhausted', 'safe test error'),
+                ('00000000-0000-0000-0000-000000000203',
+                 '00000000-0000-0000-0000-000000000303', 'postgres.live', 1,
+                 'application/test', ''::bytea, '{}'::jsonb, now(),
+                 now() + interval '1 hour', NULL, 0, NULL, NULL, NULL)
         "#
     )
     .execute(&pool)
@@ -287,13 +386,76 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
     );
 }
 
+#[derive(Debug)]
+struct SentinelDatabaseError;
+
+impl fmt::Display for SentinelDatabaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("postgres-secret-sentinel")
+    }
+}
+
+impl Error for SentinelDatabaseError {}
+
+impl sqlx::error::DatabaseError for SentinelDatabaseError {
+    fn message(&self) -> &str {
+        "postgres-secret-sentinel"
+    }
+
+    fn code(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Borrowed("55P03"))
+    }
+
+    fn as_error(&self) -> &(dyn Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_error_mut(&mut self) -> &mut (dyn Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn into_error(self: Box<Self>) -> Box<dyn Error + Send + Sync + 'static> {
+        self
+    }
+
+    fn kind(&self) -> sqlx::error::ErrorKind {
+        sqlx::error::ErrorKind::Other
+    }
+}
+
 #[test]
-fn postgres_error_sqlstate_mapping_is_safe_and_classified() {
-    let error = PostgresError::Database {
-        sqlstate: Some("55P03".into()),
-    };
-    assert_eq!(error.classify(), FailureKind::Transient);
+fn postgres_error_redacts_database_diagnostics_but_retains_the_source() {
+    let error = PostgresError::from(sqlx::Error::Database(Box::new(SentinelDatabaseError)));
     assert_eq!(error.to_string(), "database operation failed");
+    assert_eq!(format!("{error:?}"), "Database");
+    assert!(!error.to_string().contains("postgres-secret-sentinel"));
+    assert!(!format!("{error:?}").contains("postgres-secret-sentinel"));
+    let source = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<sqlx::Error>())
+        .unwrap_or_else(|| panic!("database error must retain the SQLx source"));
+    assert_eq!(
+        source
+            .as_database_error()
+            .and_then(|database| database.code())
+            .as_deref(),
+        Some("55P03")
+    );
+    assert_eq!(error.classify(), FailureKind::Transient);
+}
+
+#[test]
+fn postgres_error_redacts_non_database_driver_diagnostics() {
+    let error = PostgresError::from(sqlx::Error::Protocol("postgres-secret-sentinel".into()));
+    assert_eq!(error.to_string(), "database operation failed");
+    assert_eq!(format!("{error:?}"), "Database");
+    assert!(std::error::Error::source(&error).is_some_and(|source| source.is::<sqlx::Error>()));
+}
+
+#[test]
+fn postgres_error_is_static_send_and_sync() {
+    fn assert_error<T: std::error::Error + Send + Sync + 'static>() {}
+
+    assert_error::<PostgresError>();
 }
 
 #[tokio::test]
@@ -425,8 +587,20 @@ async fn enqueue_duplicate_message_identity_aborts_and_maps_the_postgres_error()
         .enqueue(&mut duplicate, &envelope, EnqueueOptions::default())
         .await
         .expect_err("duplicate message identity must fail");
-    assert!(matches!(error, PostgresError::DuplicateMessageId));
+    assert!(matches!(error, PostgresError::DuplicateMessageId { .. }));
     assert_eq!(error.classify(), FailureKind::Permanent);
+    assert_eq!(error.to_string(), "duplicate outbox message identity");
+    assert_eq!(format!("{error:?}"), "DuplicateMessageId");
+    let source = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<sqlx::Error>())
+        .unwrap_or_else(|| panic!("duplicate error must retain the SQLx source"));
+    assert_eq!(
+        source
+            .as_database_error()
+            .and_then(|database| database.code())
+            .as_deref(),
+        Some("23505")
+    );
     let aborted = sqlx::query_scalar!(
         r#"
             -- PostgreSQL rejects later work in the caller-owned transaction after the duplicate.
@@ -508,7 +682,7 @@ async fn claim_marks_malformed_persisted_metadata_as_poison() {
     let pool = isolated_outbox_pool().await;
     let malformed_id = sqlx::query_scalar!(
         r#"
-            -- This JSON object passes the table check but headers must be a metadata map, not an array.
+            -- This JSON object passes the table check, but headers must be a metadata map.
             INSERT INTO outbox_messages (
                 message_id, message_type, message_version, content_type, payload, metadata
             )
@@ -544,8 +718,10 @@ async fn concurrent_disjoint_unordered_claims_do_not_overlap() {
     let marker = format!("postgres.concurrent-disjoint-{}", Uuid::now_v7());
     let ids = sqlx::query_scalar!(
         r#"
-            -- Schema-isolated rows let separate pool connections exercise SKIP LOCKED concurrently.
-            INSERT INTO outbox_messages (message_id, message_type, message_version, content_type, payload, metadata)
+            -- Schema-isolated rows let separate connections exercise SKIP LOCKED concurrently.
+            INSERT INTO outbox_messages (
+                message_id, message_type, message_version, content_type, payload, metadata
+            )
             VALUES (uuidv7(), $1, 1, 'application/test', ''::bytea, '{}'::jsonb),
                    (uuidv7(), $1, 1, 'application/test', ''::bytea, '{}'::jsonb),
                    (uuidv7(), $1, 1, 'application/test', ''::bytea, '{}'::jsonb)
@@ -634,11 +810,18 @@ async fn claim_serializes_an_ordering_key_head_while_progressing_a_distinct_key(
         r#"
             -- Fixed identities make the same-key predecessor relationship deterministic.
             INSERT INTO outbox_messages (
-                id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key
+                id, message_id, message_type, message_version, content_type, payload, metadata,
+                ordering_key
             )
-            VALUES ('00000000-0000-0000-0000-000000000011', uuidv7(), 'postgres.ordering-head', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-ordering-key'),
-                   ('00000000-0000-0000-0000-000000000012', uuidv7(), 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-ordering-key'),
-                   ('00000000-0000-0000-0000-000000000013', uuidv7(), 'postgres.ordering-independent', 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-other-key')
+            VALUES
+                ('00000000-0000-0000-0000-000000000011', uuidv7(), 'postgres.ordering-head',
+                 1, 'application/test', ''::bytea, '{}'::jsonb, 'postgres-ordering-key'),
+                ('00000000-0000-0000-0000-000000000012', uuidv7(),
+                 'postgres.ordering-successor', 1, 'application/test', ''::bytea, '{}'::jsonb,
+                 'postgres-ordering-key'),
+                ('00000000-0000-0000-0000-000000000013', uuidv7(),
+                 'postgres.ordering-independent', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, 'postgres-other-key')
         "#
     )
     .execute(&pool)
@@ -967,12 +1150,16 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
     let pool = isolated_outbox_pool().await;
     sqlx::query!(
         r#"
-            -- Both fixtures start with a future deadline so they can be claimed before expiry is forced.
+            -- Both fixtures begin with a future deadline before their expiry is forced.
             INSERT INTO outbox_messages (
-                message_id, message_type, message_version, content_type, payload, metadata, expires_at
+                message_id, message_type, message_version, content_type, payload, metadata,
+                expires_at
             )
-            VALUES (uuidv7(), 'postgres.renew-current', 1, 'application/test', ''::bytea, '{}'::jsonb, now() + interval '1 hour'),
-                   (uuidv7(), 'postgres.renew-stale', 1, 'application/test', ''::bytea, '{}'::jsonb, now() + interval '1 hour')
+            VALUES
+                (uuidv7(), 'postgres.renew-current', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, now() + interval '1 hour'),
+                (uuidv7(), 'postgres.renew-stale', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, now() + interval '1 hour')
         "#
     )
     .execute(&pool)
@@ -1010,7 +1197,7 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
     assert!(renewed_deadline > pre_renewal_deadline);
     sqlx::query!(
         r#"
-            -- Database-time fixture control makes one unrenewed lease stale without a process sleep.
+            -- Database-time control makes one unrenewed lease stale without a process sleep.
             UPDATE outbox_messages
             SET
                 expires_at = now() - interval '1 second',

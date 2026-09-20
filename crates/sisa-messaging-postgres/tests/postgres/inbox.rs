@@ -166,7 +166,7 @@ impl InboxFixture {
 async fn isolated_inbox_fixture() -> InboxFixture {
     let control = pool().await;
     let schema = format!("inbox_test_{}", Uuid::now_v7().simple());
-    // PostgreSQL identifiers cannot be parameters; this UUID-derived schema name is injection-safe.
+    // PostgreSQL identifiers cannot be parameters; this UUID-derived schema name is safe.
     sqlx::query(&format!("CREATE SCHEMA {schema}"))
         .execute(&control)
         .await
@@ -202,7 +202,7 @@ async fn isolated_inbox_fixture() -> InboxFixture {
             Box::pin(async move {
                 sqlx::query!(
                     r#"
-                        -- Every pool connection resolves the provider's fixed table name to the fixture schema.
+                        -- Every pool connection resolves the provider table name to this schema.
                         SELECT set_config('search_path', $1, false) AS "search_path!"
                     "#,
                     search_path
@@ -514,14 +514,17 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
     );
     assert_eq!(
         store
-            .retry(DeadLetterBatch::new(&[first.id]).unwrap_or_else(|_| panic!("batch rejected")))
+            .retry(DeadLetterBatch::new(&[first.id]).unwrap_or_else(|_| panic!("batch rejected")),)
             .await
             .unwrap_or_else(|_| panic!("retry failed")),
         vec![first.id]
     );
     assert_eq!(
         store
-            .delete(DeadLetterBatch::new(&[second.id]).unwrap_or_else(|_| panic!("batch rejected")))
+            .delete(
+                DeadLetterBatch::new(&[second.id])
+                    .unwrap_or_else(|_| panic!("batch rejected")),
+            )
             .await
             .unwrap_or_else(|_| panic!("delete failed")),
         vec![second.id]
@@ -618,11 +621,24 @@ async fn saturated_attempts_become_dead_without_overflow_and_poisoned_metadata_i
     sqlx::query!(
         r#"
             -- A schema-valid maximum proves the failure transition saturates before incrementing.
-            INSERT INTO inbox_receipts (scope, message_id, message_type, message_version, metadata, attempts)
-            VALUES ($1, $2, 'postgres.inbox-test', 1, '{"correlation":{"correlation_id":42}}'::jsonb, 2147483647)
+            INSERT INTO inbox_receipts (
+                scope, message_id, message_type, message_version, metadata, attempts
+            )
+            VALUES (
+                $1,
+                $2,
+                'postgres.inbox-test',
+                1,
+                '{"correlation":{"correlation_id":42}}'::jsonb,
+                2147483647
+            )
         "#,
-        row.scope.as_str(), row.message_id.into_uuid()
-    ).execute(&pool).await.unwrap_or_else(|_| panic!("boundary fixture setup failed"));
+        row.scope.as_str(),
+        row.message_id.into_uuid()
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("boundary fixture setup failed"));
     assert_eq!(
         store
             .fail(&row, failure(FailureKind::Transient))

@@ -51,12 +51,15 @@ where
     type Error = PostgresError;
     type Serializer = Ser;
 
+    #[rustfmt::skip]
     fn enqueue<M>(
         &self,
         transaction: &mut Transaction<'_, Postgres>,
         source: &Envelope<M>,
         options: EnqueueOptions,
-    ) -> impl std::future::Future<Output = Result<sisa_messaging_outbox::OutboxId, Self::Error>> + Send
+    ) -> impl std::future::Future<
+        Output = Result<sisa_messaging_outbox::OutboxId, Self::Error>,
+    > + Send
     where
         M: Message,
         Ser: Serializer<M>,
@@ -299,9 +302,7 @@ where
                 pending: count(record.pending)?,
                 expired: count(record.expired)?,
                 dead: count(record.dead)?,
-                oldest_pending_age: Duration::from_secs_f64(
-                    record.oldest_pending_age_seconds.max(0.0),
-                ),
+                oldest_pending_age: duration_seconds(record.oldest_pending_age_seconds)?,
             })
         }
     }
@@ -338,11 +339,13 @@ where
         }
     }
 
+    #[rustfmt::skip]
     fn retry(
         &self,
         batch: DeadLetterBatch<'_>,
-    ) -> impl std::future::Future<Output = Result<Vec<sisa_messaging_outbox::OutboxId>, Self::Error>>
-    + Send {
+    ) -> impl std::future::Future<
+        Output = Result<Vec<sisa_messaging_outbox::OutboxId>, Self::Error>,
+    > + Send {
         async move {
             let records = dead_letters::retry(
                 &self.pool,
@@ -358,11 +361,13 @@ where
         }
     }
 
+    #[rustfmt::skip]
     fn delete(
         &self,
         batch: DeadLetterBatch<'_>,
-    ) -> impl std::future::Future<Output = Result<Vec<sisa_messaging_outbox::OutboxId>, Self::Error>>
-    + Send {
+    ) -> impl std::future::Future<
+        Output = Result<Vec<sisa_messaging_outbox::OutboxId>, Self::Error>,
+    > + Send {
         async move {
             let records = dead_letters::delete(
                 &self.pool,
@@ -410,6 +415,13 @@ fn dead_letter_record(
 
 fn duration_micros(duration: Duration) -> i64 {
     i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)
+}
+
+fn duration_seconds(value: f64) -> Result<Duration, PostgresError> {
+    if !value.is_finite() || value.is_sign_negative() {
+        return Err(PostgresError::InvalidData);
+    }
+    Duration::try_from_secs_f64(value).map_err(|_| PostgresError::InvalidData)
 }
 
 fn utc_to_system_time(value: DateTime<Utc>) -> std::time::SystemTime {

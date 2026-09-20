@@ -125,21 +125,43 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     let dead_id = Uuid::from_u128(0x406);
     sqlx::query!(
         r#"
-            -- Noise plus matching rows make every final query shape selective in one checked setup.
+            -- Noise plus matching rows make every final query shape selective in this setup.
             WITH noise AS (
-                INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by, published_at, dead_at, dead_reason)
-                SELECT uuidv7(), uuidv7(), 'postgres.plan-noise', 1, 'application/test', ''::bytea, '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, NULL, NULL, NULL, NULL, NULL
+                INSERT INTO outbox_messages (
+                    id, message_id, message_type, message_version, content_type, payload,
+                    metadata, ordering_key, created_at, claimable_at, expires_at, claim_token,
+                    locked_by, published_at, dead_at, dead_reason
+                )
+                SELECT
+                    uuidv7(), uuidv7(), 'postgres.plan-noise', 1, 'application/test',
+                    ''::bytea, '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL,
+                    NULL, NULL, NULL, NULL, NULL
                 FROM generate_series(1, 2048)
                 RETURNING id
             )
-            INSERT INTO outbox_messages (id, message_id, message_type, message_version, content_type, payload, metadata, ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by, published_at, dead_at, dead_reason)
+            INSERT INTO outbox_messages (
+                id, message_id, message_type, message_version, content_type, payload, metadata,
+                ordering_key, created_at, claimable_at, expires_at, claim_token, locked_by,
+                published_at, dead_at, dead_reason
+            )
             VALUES
-                ($1, uuidv7(), 'postgres.plan-claim', 1, 'application/test', ''::bytea, '{}'::jsonb, 'plan-key', now(), now(), NULL, $2, 'plan-worker', NULL, NULL, NULL),
-                ($3, uuidv7(), 'postgres.plan-poison', 1, 'application/test', ''::bytea, '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, $4, 'plan-worker', NULL, NULL, NULL),
-                ($5, uuidv7(), 'postgres.plan-outcome', 1, 'application/test', ''::bytea, '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, $6, 'plan-worker', NULL, NULL, NULL),
-                ($7, uuidv7(), 'postgres.plan-expire', 1, 'application/test', ''::bytea, '{}'::jsonb, NULL, now(), now(), now() - interval '1 minute', NULL, NULL, NULL, NULL, NULL),
-                ($8, uuidv7(), 'postgres.plan-published', 1, 'application/test', ''::bytea, '{}'::jsonb, NULL, now(), now(), NULL, NULL, NULL, now() - interval '1 minute', NULL, NULL),
-                ($9, uuidv7(), 'postgres.plan-dead', 1, 'application/test', ''::bytea, '{}'::jsonb, NULL, now(), now(), NULL, NULL, NULL, NULL, now() - interval '1 minute', 'permanent')
+                ($1, uuidv7(), 'postgres.plan-claim', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, 'plan-key', now(), now(), NULL, $2, 'plan-worker', NULL, NULL, NULL),
+                ($3, uuidv7(), 'postgres.plan-poison', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, $4,
+                 'plan-worker', NULL, NULL, NULL),
+                ($5, uuidv7(), 'postgres.plan-outcome', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, NULL, now(), now() + interval '1 hour', NULL, $6,
+                 'plan-worker', NULL, NULL, NULL),
+                ($7, uuidv7(), 'postgres.plan-expire', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, NULL, now(), now(), now() - interval '1 minute', NULL, NULL,
+                 NULL, NULL, NULL),
+                ($8, uuidv7(), 'postgres.plan-published', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, NULL, now(), now(), NULL, NULL, NULL,
+                 now() - interval '1 minute', NULL, NULL),
+                ($9, uuidv7(), 'postgres.plan-dead', 1, 'application/test', ''::bytea,
+                 '{}'::jsonb, NULL, now(), now(), NULL, NULL, NULL, NULL,
+                 now() - interval '1 minute', 'permanent')
         "#,
         claim_id,
         claim_token,
@@ -150,11 +172,70 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
         expiry_id,
         published_id,
         dead_id,
-    ).execute(&pool).await.unwrap_or_else(|_| panic!("plan fixture setup failed"));
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("plan fixture setup failed"));
     sqlx::query!("ANALYZE outbox_messages")
         .execute(&pool)
         .await
         .unwrap_or_else(|_| panic!("plan fixture analyze failed"));
+
+    let stats = sqlx::query_scalar!(
+        r#"
+            EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)
+            -- Aggregate state and the age of the claimable ordering-key head.
+            SELECT
+                count(*) FILTER (
+                    WHERE published_at IS NULL
+                      AND dead_at IS NULL
+                      AND (expires_at IS NULL OR expires_at > now())
+                ) AS pending,
+                count(*) FILTER (
+                    WHERE published_at IS NULL
+                      AND dead_at IS NULL
+                      AND expires_at <= now()
+                ) AS expired,
+                count(*) FILTER (
+                    WHERE dead_at IS NOT NULL
+                ) AS dead,
+                COALESCE(
+                    EXTRACT(
+                        EPOCH FROM now() - min(created_at) FILTER (
+                            WHERE published_at IS NULL
+                              AND dead_at IS NULL
+                              AND (expires_at IS NULL OR expires_at > now())
+                              AND claimable_at <= now()
+                              -- Only an ordering-key head can contribute to the oldest age.
+                              AND NOT EXISTS (
+                                  SELECT 1
+                                  FROM outbox_messages AS p
+                                  WHERE p.ordering_key = outbox_messages.ordering_key
+                                    AND p.ordering_key IS NOT NULL
+                                    AND p.published_at IS NULL
+                                    AND p.dead_at IS NULL
+                                    -- A leased expired predecessor remains its active key head.
+                                    AND (
+                                        p.expires_at IS NULL
+                                        OR p.expires_at > now()
+                                        OR (
+                                            p.claim_token IS NOT NULL
+                                            AND p.claimable_at > now()
+                                        )
+                                    )
+                                    AND p.id < outbox_messages.id
+                              )
+                        )
+                    ),
+                    0
+                )::float8 AS oldest_pending_age_seconds
+            FROM outbox_messages
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|_| panic!("stats plan failed"));
+    assert_bounded_index_plan(stats, &["ix_outbox_messages_ordering_key"], false, false);
 
     let claim = sqlx::query_scalar!(
         r#"

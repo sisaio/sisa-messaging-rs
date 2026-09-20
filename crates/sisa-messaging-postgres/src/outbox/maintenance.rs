@@ -172,7 +172,8 @@ where
                                     AND p.ordering_key IS NOT NULL
                                     AND p.published_at IS NULL
                                     AND p.dead_at IS NULL
-                                    -- An expired predecessor still owns its key until its current lease ends.
+                                    -- An expired predecessor owns its key until its current
+                                    -- lease ends.
                                     AND (
                                         p.expires_at IS NULL
                                         OR p.expires_at > now()

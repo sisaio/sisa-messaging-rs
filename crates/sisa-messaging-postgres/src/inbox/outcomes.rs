@@ -49,7 +49,8 @@ where
 {
     sqlx::query!(
         r#"
-            -- Completion is valid only while the receipt remains active in this business transaction.
+            -- Completion is valid only while the receipt remains active in this business
+            -- transaction.
             UPDATE inbox_receipts
             SET completed_at = now()
             WHERE id = $1

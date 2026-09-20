@@ -100,7 +100,10 @@ fn required_postgres_component(name: &str) -> String {
 
 pub(super) async fn pool() -> PgPool {
     PgPoolOptions::new()
+        .min_connections(1)
         .max_connections(4)
+        .idle_timeout(None)
+        .max_lifetime(None)
         .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("PostgreSQL integration connection failed"))
@@ -108,23 +111,32 @@ pub(super) async fn pool() -> PgPool {
 
 pub(super) async fn isolated_outbox_pool() -> PgPool {
     let pool = PgPoolOptions::new()
+        .min_connections(1)
         .max_connections(1)
+        .idle_timeout(None)
+        .max_lifetime(None)
         .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("PostgreSQL integration connection failed"));
     sqlx::query!(
         r#"
-            -- Copy production semantics and restore generated index names for isolated plan assertions.
+            -- Copy production semantics and restore generated index names for isolated plans.
             DO $$
             BEGIN
                 CREATE TEMPORARY TABLE outbox_messages
                 (LIKE public.outbox_messages INCLUDING ALL);
-                ALTER INDEX outbox_messages_message_id_idx RENAME TO ix_outbox_messages_message_id;
-                ALTER INDEX outbox_messages_claimable_at_id_expires_at_idx RENAME TO ix_outbox_messages_claimable;
-                ALTER INDEX outbox_messages_ordering_key_id_idx RENAME TO ix_outbox_messages_ordering_key;
-                ALTER INDEX outbox_messages_expires_at_idx RENAME TO ix_outbox_messages_expires;
-                ALTER INDEX outbox_messages_published_at_idx RENAME TO ix_outbox_messages_published;
-                ALTER INDEX outbox_messages_dead_at_id_idx RENAME TO ix_outbox_messages_dead_cursor;
+                ALTER INDEX outbox_messages_message_id_idx
+                    RENAME TO ix_outbox_messages_message_id;
+                ALTER INDEX outbox_messages_claimable_at_id_expires_at_idx
+                    RENAME TO ix_outbox_messages_claimable;
+                ALTER INDEX outbox_messages_ordering_key_id_idx
+                    RENAME TO ix_outbox_messages_ordering_key;
+                ALTER INDEX outbox_messages_expires_at_idx
+                    RENAME TO ix_outbox_messages_expires;
+                ALTER INDEX outbox_messages_published_at_idx
+                    RENAME TO ix_outbox_messages_published;
+                ALTER INDEX outbox_messages_dead_at_id_idx
+                    RENAME TO ix_outbox_messages_dead_cursor;
             END
             $$
         "#
@@ -174,16 +186,18 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
         .unwrap_or_else(|_| panic!("concurrent outbox table setup failed"));
     let search_path = format!("{schema}, public");
     let pool = PgPoolOptions::new()
+        .min_connections(1)
         .max_connections(3)
+        .idle_timeout(None)
+        .max_lifetime(None)
         .after_connect(move |connection, _| {
             let search_path = search_path.clone();
             Box::pin(async move {
                 sqlx::query!(
                     r#"
-                        -- Every pool connection resolves the provider's fixed table name to the fixture schema.
+                        -- Every pool connection resolves the provider table name to this schema.
                         SELECT set_config('search_path', $1, false) AS "search_path!"
-                    "#
-                    ,
+                    "#,
                     search_path
                 )
                 .fetch_one(connection)

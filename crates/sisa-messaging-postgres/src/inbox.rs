@@ -69,12 +69,14 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
         self.settings.max_attempts()
     }
 
+    #[rustfmt::skip]
     fn claim(
         &self,
         transaction: &mut PostgresInboxTransaction,
         record: &InboxRecord,
-    ) -> impl std::future::Future<Output = Result<InboxClaimOutcome<Self::Receipt>, Self::Error>> + Send
-    {
+    ) -> impl std::future::Future<
+        Output = Result<InboxClaimOutcome<Self::Receipt>, Self::Error>,
+    > + Send {
         async move {
             if !claim::try_lock(
                 &mut **transaction,
@@ -165,7 +167,8 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
                     message_version: i32::try_from(record.version)
                         .map_err(|_| PostgresError::InvalidData)?,
                     metadata: &encoded_metadata,
-                    // Any future non-retryable classification remains terminal like the portable reducer.
+                    // Any future non-retryable classification remains terminal like the
+                    // portable reducer.
                     permanent: !failure.kind.is_retryable(),
                     max_attempts: i32::try_from(self.settings.max_attempts().get())
                         .map_err(|_| PostgresError::InvalidData)?,
