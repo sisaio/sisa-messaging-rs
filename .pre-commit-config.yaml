@@ -125,6 +125,14 @@ repos:
         pass_filenames: false
         entry: git diff --cached --check
 
+      - id: agent-harness-sync
+        name: Generated agent config matches .agents source
+        language: system
+        stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
+        entry: .agents/sync.sh all --check
+
       - id: cargo-fmt
         name: cargo fmt
         language: system
