@@ -10,7 +10,7 @@ repository = "https://github.com/sisaio/sisa-messaging-rs"
 
 [workspace.dependencies]
 # Criterion is the benchmark harness used across workspace crates.
-criterion = { version = "0.7.0", default-features = false }
+criterion = { version = "0.8.2", default-features = false }
 
 # Tokio and Tokio-util provide asynchronous runtime and cancellation primitives.
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt", "sync", "time"] }
@@ -45,7 +45,7 @@ uuid = { version = "1.18.1", default-features = false, features = ["std", "v7"] 
 
 # Time and database support for PostgreSQL providers.
 chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["chrono", "json", "macros", "postgres", "runtime-tokio", "uuid"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["chrono", "json", "macros", "postgres", "runtime-tokio", "uuid"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
