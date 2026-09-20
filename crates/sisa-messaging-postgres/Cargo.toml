@@ -9,16 +9,24 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# Provider contracts.
 sisa-messaging = { workspace = true, features = ["serde"] }
 sisa-messaging-inbox = { workspace = true }
 sisa-messaging-outbox = { workspace = true }
+
+# Time and database support.
 chrono = { workspace = true }
-serde_json = { workspace = true }
 sqlx = { workspace = true }
-thiserror = { workspace = true }
+
+# Identifier primitives.
 uuid = { workspace = true }
 
+# Error and serialization support.
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
 [dev-dependencies]
+# Test runtime.
 tokio = { workspace = true }
 
 [lints]

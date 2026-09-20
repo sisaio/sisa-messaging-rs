@@ -9,14 +9,14 @@ license = "MIT"
 repository = "https://github.com/sisaio/sisa-messaging-rs"
 
 [workspace.dependencies]
-# Benchmark harnesses and formatting helpers used across workspace crates.
+# Criterion is the benchmark harness used across workspace crates.
 criterion = { version = "0.7.0", default-features = false }
 
-# Portable asynchronous runtime and cancellation primitives.
+# Tokio and Tokio-util provide asynchronous runtime and cancellation primitives.
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7.19", default-features = false, features = ["rt"] }
 
-# Library-owned diagnostics APIs without subscriber, SDK, or exporter policy.
+# Error and diagnostics support without subscriber, SDK, or exporter policy.
 opentelemetry = { version = "0.32.0", default-features = false, features = ["metrics"] }
 thiserror = { version = "2.0.20", default-features = false }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
@@ -24,7 +24,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 # Test-only subscriber used to assert safe structured instrumentation.
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "registry"] }
 
-# Syntax analysis helpers.
+# Architecture-test syntax analysis.
 proc-macro2 = { version = "1.0.107", default-features = false }
 syn = { version = "3.0.5", default-features = false, features = ["full", "parsing", "visit"] }
 
@@ -32,7 +32,7 @@ syn = { version = "3.0.5", default-features = false, features = ["full", "parsin
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.145", default-features = false, features = ["std"] }
 
-# Workspace crate pins.
+# Workspace-local messaging crates include contracts and concrete providers.
 sisa-messaging = { version = "=0.1.0", path = "crates/sisa-messaging" }
 sisa-messaging-consumer = { version = "=0.1.0", path = "crates/sisa-messaging-consumer" }
 sisa-messaging-inbox = { version = "=0.1.0", path = "crates/sisa-messaging-inbox" }
@@ -42,6 +42,8 @@ sisa-messaging-postgres = { version = "=0.1.0", path = "crates/sisa-messaging-po
 
 # Identifier primitives.
 uuid = { version = "1.18.1", default-features = false, features = ["std", "v7"] }
+
+# Time and database support for PostgreSQL providers.
 chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["chrono", "json", "macros", "postgres", "runtime-tokio", "uuid"] }
 
