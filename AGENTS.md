@@ -48,8 +48,9 @@ These harness-neutral, project-neutral rules are portable to other repositories 
 - **G1 — Review-round cap (General).** Use one initial review and at most one batched fix round. If
   the review requires no edit and meets final-review evidence, it satisfies the final gate; do not
   spawn another reviewer. After an edit, use one fresh final review. Only a blocker/high final
-  finding opens one more round. Fix qualifying G3 medium/low final findings without re-review;
-  otherwise defer them. Never run consecutive reviewers without an intervening writer/primary edit.
+  finding opens one more fix-and-review round. Defer medium/low final findings; never change the
+  reviewed HEAD without another fresh complete-diff final review. Never run consecutive reviewers
+  without an intervening writer/primary edit.
 - **G2 — Editorial class (General).** Comments, docstrings, typos, formatting, and non-normative
   Markdown need no agent review. Normative docs, agent instructions, agent sources, and generated
   agent configuration receive one fresh final review and no initial review.

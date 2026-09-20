@@ -36,8 +36,9 @@ and publication files. One writer owns the PR unless another exclusive domain is
 The bounded sequence is one initial review and at most one batched fix round with the existing
 writer (G1). If no edit is required and that fresh full-diff review has final evidence, it satisfies
 the final gate; do not spawn another reviewer. After an edit, run one fresh final review. Only a
-blocker/high final finding opens another round. Fix a qualifying G3 medium/low final finding without
-re-review; otherwise defer it. Database/migration fixes keep section 6 focused re-review (P2).
+blocker/high final finding opens another fix-and-review round. Defer medium/low final findings;
+never change the reviewed HEAD without another fresh complete-diff final review.
+Database/migration fixes keep section 6 focused re-review (P2).
 
 Comments, docstrings, typos, formatting, and non-normative Markdown need no agent review. Normative
 docs, the agent instruction file, `.agents/**`, and their generated agent configurations receive
