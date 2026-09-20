@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)\n            -- Aggregate state and the age of the claimable ordering-key head.\n            SELECT\n                count(*) FILTER (\n                    WHERE published_at IS NULL\n                      AND dead_at IS NULL\n                      AND (expires_at IS NULL OR expires_at > now())\n                ) AS pending,\n                count(*) FILTER (\n                    WHERE published_at IS NULL\n                      AND dead_at IS NULL\n                      AND expires_at <= now()\n                ) AS expired,\n                count(*) FILTER (\n                    WHERE dead_at IS NOT NULL\n                ) AS dead,\n                COALESCE(\n                    EXTRACT(\n                        EPOCH FROM now() - min(created_at) FILTER (\n                            WHERE published_at IS NULL\n                              AND dead_at IS NULL\n                              AND (expires_at IS NULL OR expires_at > now())\n                              AND claimable_at <= now()\n                              -- Only an ordering-key head can contribute to the oldest age.\n                              AND NOT EXISTS (\n                                  SELECT 1\n                                  FROM outbox_messages AS p\n                                  WHERE p.ordering_key = outbox_messages.ordering_key\n                                    AND p.ordering_key IS NOT NULL\n                                    AND p.published_at IS NULL\n                                    AND p.dead_at IS NULL\n                                    -- A leased expired predecessor remains its active key head.\n                                    AND (\n                                        p.expires_at IS NULL\n                                        OR p.expires_at > now()\n                                        OR (\n                                            p.claim_token IS NOT NULL\n                                            AND p.claimable_at > now()\n                                        )\n                                    )\n                                    AND p.id < outbox_messages.id\n                              )\n                        )\n                    ),\n                    0\n                )::float8 AS oldest_pending_age_seconds\n            FROM outbox_messages\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b146a57ad28a1e47616729940026a70efb2c51f2795b721f1d33f4b9e71a28b1"
+}

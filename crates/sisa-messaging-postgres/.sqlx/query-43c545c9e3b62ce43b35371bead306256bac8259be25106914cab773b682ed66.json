@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- One temporary trigger makes only post-claim poison cleanup fail in this fixture.\n            DO $$\n            BEGIN\n                CREATE FUNCTION pg_temp.fail_poison_transition()\n                RETURNS trigger LANGUAGE plpgsql AS $fn$\n                BEGIN\n                    IF NEW.dead_at IS NOT NULL THEN\n                        RAISE EXCEPTION 'poison transition rejected' USING ERRCODE = '57014';\n                    END IF;\n                    RETURN NEW;\n                END\n                $fn$;\n                CREATE TRIGGER fail_poison_transition BEFORE UPDATE ON outbox_messages\n                FOR EACH ROW EXECUTE FUNCTION pg_temp.fail_poison_transition();\n            END\n            $$\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "43c545c9e3b62ce43b35371bead306256bac8259be25106914cab773b682ed66"
+}
