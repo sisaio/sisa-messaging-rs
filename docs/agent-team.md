@@ -44,10 +44,13 @@ applies those harness principles with its own approved GPT-5.x model constraint 
 ## 3. Scope and token policy
 
 Codex custom-agent files can request read-only or workspace-write defaults, but parent-session live
-permission overrides take precedence and there are no per-folder read ACLs. The scopes below are
-therefore instruction-level controls for ownership and context, not security boundaries. The
-primary agent supplies the exact paths in every task packet, does not spawn design/review roles
-under a write-enabling override, and verifies that their handoffs introduced no worktree changes.
+permission overrides take precedence and there are no per-folder read ACLs. In Claude Code, a
+`write: false` role only loses the `Edit`, `Write`, and `NotebookEdit` tools; `Bash` stays available
+for read-only inspection and is governed by the session permission rules, so a shell command could
+still change files. The scopes below are therefore instruction-level controls for ownership and
+context, not security boundaries, in either harness. The primary agent supplies the exact paths in
+every task packet, does not spawn design/review roles under a write-enabling override, and verifies
+that their handoffs introduced no worktree changes.
 
 | Agent | Default read scope | Default write scope |
 |---|---|---|
@@ -140,9 +143,10 @@ limited to 800 words and does not repeat source documents.
 
 Independent review is required after every material Rust, runtime SQL,
 versioned migration, test, manifest or dependency, CI or release,
-normative-document, `.codex/config.toml`, and `.codex/agents/*.toml` change.
-Only generated output with a separately reviewed source, or a change explicitly
-classified as low-risk and non-behavioral by the primary agent, may skip review.
+normative-document, and `.agents/` agent-configuration source change, together with
+the `.codex/` and `.claude/` files regenerated from it. Only generated output with a
+separately reviewed source, or a change explicitly classified as low-risk and
+non-behavioral by the primary agent, may skip review.
 Release preparation never occurs after the final review: changes from a review
 finding receive another focused reviewer pass, except for a small fix as defined below.
 
@@ -298,8 +302,9 @@ re-runs `.agents/sync.sh all`; never edit a generated file by hand.
   the Codex-only `[config]` keys: the primary model, `model_auto_compact_token_limit`, the
   `[agents]` block that enables the team and limits concurrency, and the disabled plugins.
 - `.agents/harnesses/claude.toml` maps each tier to a Claude Code model alias, lists the
-  frontmatter added to `write: false` roles (`disallowedTools: Edit, Write, NotebookEdit`), and
-  holds the `.claude/settings.json` permission allowlist, including `Bash(rtk *)`.
+  frontmatter added to `write: false` roles (`disallowedTools: Edit, Write, NotebookEdit`, a
+  tool-level default rather than a sandbox; see section 3), and holds the `.claude/settings.json`
+  permission allowlist, including `Bash(rtk *)`.
 - `.agents/skills/<name>/SKILL.md` holds the project skills shared by both harnesses.
 - `.agents/sync.sh <codex|claude|all> [--check]` is POSIX `sh` plus `awk`. For Codex it writes
   `.codex/config.toml` and `.codex/agents/<role>.toml`, where `write: false` becomes

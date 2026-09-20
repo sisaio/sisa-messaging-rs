@@ -130,6 +130,7 @@ gen_codex() {
     tier=$(role_field "$role" tier)
     write=$(role_field "$role" write)
     require name "$name" "$role"
+    require description "$description" "$role"
     require tier "$tier" "$role"
     model=$(toml_value "$harness" "tiers.$tier" model)
     effort=$(toml_value "$harness" "tiers.$tier" effort)
@@ -170,6 +171,7 @@ gen_claude() {
     tier=$(role_field "$role" tier)
     write=$(role_field "$role" write)
     require name "$name" "$role"
+    require description "$description" "$role"
     require tier "$tier" "$role"
     model=$(toml_value "$harness" "tiers.$tier" model)
     require "tiers.$tier.model" "$model" "$harness"
@@ -205,9 +207,21 @@ gen_claude() {
   } >"$out/CLAUDE.md"
 }
 
-# Link (or copy) each .agents/skills/<name> into .claude/skills/<name>.
+# stale_skills: .claude/skills entries with no matching .agents/skills/<name>.
+stale_skills() {
+  [ -d "$repo_root/.claude/skills" ] || return 0
+  for dest in "$repo_root/.claude/skills"/* "$repo_root/.claude/skills"/.[!.]*; do
+    [ -e "$dest" ] || [ -L "$dest" ] || continue
+    name=$(basename "$dest")
+    [ -d "$skills_dir/$name" ] || echo "$name"
+  done
+}
+
+# Link (or copy) each .agents/skills/<name> into .claude/skills/<name> and
+# remove destination entries whose source skill no longer exists.
 link_skills() {
   mkdir -p "$repo_root/.claude/skills"
+  stale_skills | while read -r name; do rm -rf "$repo_root/.claude/skills/$name"; done
   for skill in "$skills_dir"/*/; do
     [ -d "$skill" ] || continue
     name=$(basename "$skill")
@@ -225,8 +239,9 @@ link_skills() {
 }
 
 # check_skills: report .claude/skills/<name> entries that are neither the
-# expected symlink nor an up-to-date copy.
+# expected symlink nor an up-to-date copy, and entries with no source skill.
 check_skills() {
+  stale_skills | while read -r name; do echo ".claude/skills/$name (stale)"; done
   for skill in "$skills_dir"/*/; do
     [ -d "$skill" ] || continue
     name=$(basename "$skill")
@@ -267,11 +282,11 @@ if [ "$check" -eq 0 ]; then
   trap 'rm -rf "$tmp"' EXIT INT TERM
   if [ "$want_codex" -eq 1 ]; then
     gen_codex "$tmp"
-    for f in $(stale_outputs .codex/agents .toml "$tmp"); do rm -f "$repo_root/$f"; done
+    stale_outputs .codex/agents .toml "$tmp" | while read -r f; do rm -f "$repo_root/$f"; done
   fi
   if [ "$want_claude" -eq 1 ]; then
     gen_claude "$tmp"
-    for f in $(stale_outputs .claude/agents .md "$tmp"); do rm -f "$repo_root/$f"; done
+    stale_outputs .claude/agents .md "$tmp" | while read -r f; do rm -f "$repo_root/$f"; done
   fi
   (cd "$tmp" && find . -type f | sed 's|^\./||') | while read -r f; do
     mkdir -p "$repo_root/$(dirname "$f")"
@@ -286,26 +301,27 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 [ "$want_codex" -eq 1 ] && gen_codex "$tmp"
 [ "$want_claude" -eq 1 ] && gen_claude "$tmp"
 
-status=0
-report() {
-  echo "$1"
-  status=1
+# find_diffs: one line per generated path that differs from, or is missing in,
+# the repository, plus stale outputs the generator no longer produces.
+find_diffs() {
+  (cd "$tmp" && find . -type f | sed 's|^\./||' | sort) | while read -r f; do
+    if [ ! -f "$repo_root/$f" ] || ! cmp -s "$tmp/$f" "$repo_root/$f"; then
+      echo "$f"
+    fi
+  done
+  if [ "$want_codex" -eq 1 ]; then
+    stale_outputs .codex/agents .toml "$tmp" | sed 's/$/ (stale)/'
+  fi
+  if [ "$want_claude" -eq 1 ]; then
+    stale_outputs .claude/agents .md "$tmp" | sed 's/$/ (stale)/'
+    check_skills
+  fi
 }
 
-for f in $(cd "$tmp" && find . -type f | sed 's|^\./||' | sort); do
-  if [ ! -f "$repo_root/$f" ] || ! cmp -s "$tmp/$f" "$repo_root/$f"; then
-    report "$f"
-  fi
-done
-if [ "$want_codex" -eq 1 ]; then
-  for f in $(stale_outputs .codex/agents .toml "$tmp"); do report "$f (stale)"; done
-fi
-if [ "$want_claude" -eq 1 ]; then
-  for f in $(stale_outputs .claude/agents .md "$tmp"); do report "$f (stale)"; done
-  for f in $(check_skills); do report "$f"; done
-fi
-
-if [ "$status" -ne 0 ]; then
+diffs=$(find_diffs)
+if [ -n "$diffs" ]; then
+  printf '%s\n' "$diffs"
   echo "sync.sh: generated files differ from .agents/; run .agents/sync.sh $target" >&2
+  exit 1
 fi
-exit "$status"
+exit 0
