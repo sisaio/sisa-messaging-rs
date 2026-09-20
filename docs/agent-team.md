@@ -309,8 +309,8 @@ management overhead:
 
 | Lane | Expected size | Flow |
 |---|---:|---|
-| Patch | Usually 1 commit and at most 5 paths | Primary task packet → developer → reviewer → primary |
-| Standard | At most 25 paths and normally 1–3 commits | Primary → architect only if gated → developer/release engineer → reviewer → primary |
+| Patch | Usually 1 commit and at most 5 paths | Primary task packet → developer → section 5 review, ending in a fresh final review → primary |
+| Standard | At most 25 paths and normally 1–3 commits | Primary → architect only if gated → developer/release engineer → section 5 review, ending in a fresh final review → primary |
 | Multi-PR | More than 25 forecast paths | User-approved PR sequence; every PR follows the normal targets and hard limits |
 
 GitHub Issues and the linked GitHub Project are the authoritative work tracker. Each repository
