@@ -137,7 +137,7 @@ management overhead:
 
 | Lane | Expected size | Flow |
 |---|---:|---|
-| Patch | Usually 1 commit and at most 5 paths | One writer → one review (final if no edit) → one batched fix if needed → one fresh final review; at most two reviewer runs → primary |
+| Patch | Usually 1 commit and at most 5 paths | One writer → one review (final if no edit) → one batched fix if needed → one fresh final review; at most two reviewer runs unless a blocker/high final finding opens G1's one extra fix-and-review round → primary |
 | Standard | At most 25 paths and normally 1–3 commits | Primary → architect only if gated → one writer, plus an exclusive-domain writer only if required → bounded [`agent-workflow.md` section 5](agent-workflow.md#5-workflow-and-review) review → primary |
 | Multi-PR | More than 25 forecast paths | User-approved PR sequence; every PR follows normal targets and hard limits |
 
