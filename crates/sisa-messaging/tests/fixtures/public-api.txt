@@ -1,4 +1,4 @@
-delivery::{Delivery,DeliverySource,Settlement}
+delivery::{Delivery,IndividualCapability,IndividualDeliverySource,IndividualSettlement,IndividualSettlementError,IndividualSourceDescriptor,IndividualSourceDescriptorError,IndividualSourceOpenError,IndividualSourceRequirement,IndividualSourceRequirements,PartitionAdvance,PartitionedLogDeliverySource,PartitionedLogReceive,PartitionedLogSettlement,UnsupportedIndividualRequirement}
 envelope::{Envelope,EnvelopeError,SerializedEnvelope}
 error::{ErrorSummary,MAX_ERROR_SUMMARY_BYTES}
 failure::{ErrorClassifier,FailureKind}
