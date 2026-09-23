@@ -313,8 +313,8 @@ because it converts a commit failure into message loss.
 
 ## 6. Consumer framework
 
-The recommended integration delegates the complete section 5 protocol to
-`sisa-messaging-consumer`:
+For individual delivery (including NATS), the recommended integration delegates the section 5
+protocol to `sisa-messaging-consumer`:
 
 ```mermaid
 flowchart LR
@@ -333,7 +333,7 @@ The source stops polling at `max_in_flight`. Each received delivery retains its 
 handle while an owned workflow task performs the database and handler work. A coordinator can send
 heartbeat acknowledgements while waiting without cancelling or repolling the workflow future.
 
-The workflow returns a private settlement plan:
+The individual-delivery workflow returns a private settlement plan:
 
 | Result | Settlement |
 |---|---|
@@ -359,6 +359,14 @@ flowchart TD
 On cancellation it stops receiving, drains already received work for a bounded duration, settles
 completed work, then drops remaining transactions and leaves their deliveries unacknowledged for
 redelivery. See [Consumer framework](consumer-framework.md) for the API and complete state machine.
+
+Partitioned-log sources use the same inbox transaction outcomes but not the individual-delivery
+ACK/NAK/TERMINATE operations above. After a confirmed commit or durable terminal disposition, the
+partition workflow may `Advance` its ordered cursor; otherwise it must `LeaveUnresolved`. It never
+advances past an earlier unresolved record. Ownership loss is a distinct receive outcome, not a
+clean source close: it fences the old settlement generation and blocks that partition until its
+cursor and ownership are reconciled. An indeterminate advance similarly pauses only the affected
+partition until reconciliation proves whether the cursor moved; other partitions may continue.
 
 ## 7. NATS publish
 

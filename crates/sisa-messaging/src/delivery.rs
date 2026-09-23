@@ -245,6 +245,7 @@ impl ErrorClassifier for IndividualSourceDescriptorError {
 }
 
 /// An individual-source open error with a bounded capability failure or provider failure.
+#[non_exhaustive]
 pub enum IndividualSourceOpenError<E> {
     /// Opening the transport source failed.
     Source(E),
@@ -294,6 +295,7 @@ impl<E: ErrorClassifier> ErrorClassifier for IndividualSourceOpenError<E> {
 }
 
 /// A contract error for an unsupported individual-delivery operation or provider failure.
+#[non_exhaustive]
 pub enum IndividualSettlementError<E> {
     /// The opened transport does not provide the requested operation.
     Unsupported(IndividualCapability),
@@ -457,6 +459,7 @@ pub trait PartitionedLogSettlement: Send + 'static {
 
 /// One result from a partitioned log source.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PartitionedLogReceive<D, P> {
     /// A record with a settlement handle bound to its partition and offset.
     Delivery(D),

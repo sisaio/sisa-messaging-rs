@@ -1109,6 +1109,7 @@ struct PartitionedFixtureSource {
     partitions: BTreeMap<PartitionId, Arc<Mutex<PartitionState>>>,
     ownership_events: VecDeque<PartitionId>,
     next_advance_mode: AdvanceMode,
+    closed: bool,
 }
 
 impl PartitionedFixtureSource {
@@ -1125,6 +1126,7 @@ impl PartitionedFixtureSource {
                 .collect(),
             ownership_events: ownership_events.iter().copied().collect(),
             next_advance_mode: AdvanceMode::Success,
+            closed: false,
         }
     }
 
@@ -1134,6 +1136,10 @@ impl PartitionedFixtureSource {
 
     fn restart_partition(&mut self, partition: PartitionId) {
         self.fence_partition(partition);
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
     }
 
     fn fence_partition(&mut self, partition: PartitionId) {
@@ -1236,13 +1242,29 @@ impl PartitionedFixtureSource {
             )));
         }
 
-        if self.partitions.values().any(|shared_state| {
+        let must_wait = self.partitions.values().any(|shared_state| {
             let state = shared_state.lock().unwrap();
-            state.unresolved.is_some() || (state.owned && state.paused)
-        }) {
-            Poll::Pending
-        } else {
+            state.unresolved.is_some()
+                || state.advance_outstanding_generation == Some(state.generation)
+                || (state.owned && (state.paused || state.reconcile_required))
+        });
+        if must_wait {
+            return Poll::Pending;
+        }
+
+        let all_assigned_partitions_drained = !self.partitions.is_empty()
+            && self.partitions.values().all(|shared_state| {
+                let state = shared_state.lock().unwrap();
+                state.owned
+                    && !state.paused
+                    && !state.reconcile_required
+                    && state.next_offset > state.max_offset
+            });
+        if self.closed || all_assigned_partitions_drained {
             Poll::Ready(Ok(PartitionedLogReceive::Closed))
+        } else {
+            // No assignment and ownership loss are transient, not evidence of a clean close.
+            Poll::Pending
         }
     }
 
@@ -1610,6 +1632,7 @@ fn take_partition_delivery(
             panic!("unexpected ownership loss for partition {partition:?}")
         }
         PartitionedLogReceive::Closed => panic!("unexpected closed partition source"),
+        _ => panic!("unexpected future partition source result"),
     }
 }
 
@@ -1693,6 +1716,65 @@ fn partition_receive_only_consumes_after_poll_and_preserves_pending_readiness() 
     ready.store(true, AtomicOrdering::SeqCst);
     let delivery = take_partition_delivery(&mut readiness_source);
     assert_eq!(delivery.offset, 1);
+}
+
+#[test]
+fn partition_receive_keeps_no_assignment_and_ownership_loss_open_until_clean_close() {
+    let mut no_assignment = KafkaFixture(PartitionedFixtureSource::new(&[], &[]));
+    let mut receive = Box::pin(no_assignment.receive());
+    assert!(poll_once(receive.as_mut()).is_pending());
+    drop(receive);
+    no_assignment.0.close();
+    assert!(matches!(
+        block_on(no_assignment.receive()).unwrap(),
+        PartitionedLogReceive::Closed
+    ));
+
+    let mut lost_source = KafkaFixture(PartitionedFixtureSource::new(
+        &[(PartitionId(3), 1)],
+        &[PartitionId(3)],
+    ));
+    assert!(matches!(
+        block_on(lost_source.receive()).unwrap(),
+        PartitionedLogReceive::OwnershipLost(PartitionId(3))
+    ));
+    let mut after_loss = Box::pin(lost_source.receive());
+    assert!(poll_once(after_loss.as_mut()).is_pending());
+    drop(after_loss);
+    lost_source.0.close();
+    assert!(matches!(
+        block_on(lost_source.receive()).unwrap(),
+        PartitionedLogReceive::Closed
+    ));
+}
+
+#[test]
+fn partition_advance_requires_durable_resolution_before_cursor_movement() {
+    let mut source = IggyFixture::new();
+    let delivery = take_partition_delivery(&mut source);
+    let state = Arc::clone(&source.0.partitions[&delivery.partition]);
+    let generation = delivery.settlement.generation;
+    let (_, settlement) = delivery.into_parts();
+
+    let error = block_on(settlement.advance()).unwrap_err();
+    assert_eq!(error.classify(), FailureKind::Transient);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+
+    let replay = take_partition_delivery(&mut source);
+    assert_eq!(replay.partition, PartitionId(0));
+    assert_eq!(replay.offset, 1);
+    assert_eq!(replay.settlement.generation, generation);
+    let state = state.lock().unwrap();
+    assert_eq!(state.committed_offset, 0);
+    assert_eq!(state.unresolved, Some(1));
+    assert_eq!(state.reconciled_committed_offset, Some(0));
+    assert_eq!(state.reconciled_generation, Some(generation));
 }
 
 #[test]
