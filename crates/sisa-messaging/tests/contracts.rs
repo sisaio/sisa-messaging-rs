@@ -971,6 +971,13 @@ impl Future for PartitionFixtureAdvanceFuture {
         }
         if !state.owned || state.generation != this.generation {
             state.paused = true;
+            state.reconcile_required = true;
+            if this.effect_applied {
+                // Fencing cannot prove non-advancement after this future already applied its
+                // effect. Report an indeterminate operation and let the source reconcile.
+                this.finish(&mut state);
+                return Poll::Ready(Err(ContractError));
+            }
             state.loss_pending = true;
             this.finish(&mut state);
             return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
@@ -1916,6 +1923,44 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         .restart_partition(PartitionId(0));
     let next = take_partition_delivery(&mut after_effect_pending_source);
     assert_eq!(next.offset, 2);
+
+    let mut after_effect_fence_source = IggyFixture::new();
+    after_effect_fence_source.0.next_advance_mode = AdvanceMode::PendingAfterEffect;
+    let after_effect_fence = take_partition_delivery(&mut after_effect_fence_source).settlement;
+    let state = Arc::clone(&after_effect_fence_source.0.partitions[&PartitionId(0)]);
+    let old_generation = state.lock().unwrap().generation;
+    after_effect_fence.mark_durably_resolved();
+    let mut late_advance = Box::pin(after_effect_fence.advance());
+    assert!(poll_once(late_advance.as_mut()).is_pending());
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 1);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+
+    after_effect_fence_source.0.fence_partition(PartitionId(0));
+    let error = block_on(late_advance).unwrap_err();
+    assert_eq!(error.classify(), FailureKind::Transient);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.generation, old_generation + 1);
+        assert_eq!(state.committed_offset, 1);
+        assert_eq!(state.next_offset, 2);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+    let next = take_partition_delivery(&mut after_effect_fence_source);
+    assert_eq!(next.offset, 2);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 1);
+        assert_eq!(state.unresolved, Some(2));
+        assert_eq!(state.reconciled_committed_offset, Some(1));
+        assert_eq!(state.reconciled_generation, Some(old_generation + 1));
+    }
 
     let mut relinquished_source = IggyFixture::new();
     let mut relinquished = take_partition_delivery(&mut relinquished_source).settlement;

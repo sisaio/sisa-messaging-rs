@@ -349,10 +349,11 @@ impl<E: ErrorClassifier> ErrorClassifier for IndividualSettlementError<E> {
 /// An individual-delivery settlement handle.
 ///
 /// Callers should acknowledge only after the consumer transaction has committed, and only a
-/// broker-confirmed success resolves the delivery. An error, timeout, or dropped operation is
-/// indeterminate; the delivery remains unresolved and may be redelivered. Unsupported operations
-/// return a permanent, bounded contract error. Implementations must not emulate an unsupported
-/// operation with a different broker action.
+/// broker-confirmed success confirms settlement to the caller. An error, timeout, or dropped
+/// operation leaves its broker outcome unknown to the caller; the broker may have applied the
+/// settlement without its confirmation reaching the caller, so redelivery may or may not occur.
+/// Unsupported operations return a permanent, bounded contract error. Implementations must not
+/// emulate an unsupported operation with a different broker action.
 pub trait IndividualSettlement: Send + 'static {
     /// Provider error with an explicit retry decision.
     type Error: Error + Send + Sync + 'static + ErrorClassifier;
@@ -368,7 +369,8 @@ pub trait IndividualSettlement: Send + 'static {
     /// Confirms successful processing after the consumer transaction has committed.
     ///
     /// A successful result means the broker confirmed settlement. An error, timeout, or dropped
-    /// future is indeterminate and leaves the delivery unresolved for redelivery or reconciliation.
+    /// future leaves the outcome unknown to the caller: the broker may have applied the ack without
+    /// its confirmation reaching the caller, so redelivery may or may not occur.
     fn ack(self)
     -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
 
