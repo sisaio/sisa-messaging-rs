@@ -99,7 +99,12 @@ The public API is organized around what a caller can do, not around internal lay
 - `Metadata` and validated transport-independent value types.
 - `Serializer` and the optional JSON implementation.
 - `Publisher`: one acknowledged publish attempt.
-- `DeliverySource`, `Delivery`, and `Settlement`: transport-neutral inbound contracts.
+- `Delivery`: splits an owned wire value from a profile-bound settlement handle.
+- `IndividualDeliverySource` and `IndividualSettlement`: individual-delivery receive and
+  settlement, with an immutable source descriptor and truthful delayed-retry, terminal-discard,
+  and heartbeat support.
+- `PartitionedLogDeliverySource` and `PartitionedLogSettlement`: ordered partition progression
+  with explicit ownership loss and consuming, fenced offset advancement.
 - `ErrorClassifier` and `FailureKind`: retryability attached to errors that cross retry boundaries.
 - `EnvelopeMapper`: transport wire conversion.
 
@@ -185,12 +190,14 @@ constructor families.
 
 ## 7. Static dispatch and async contracts
 
-Store, publisher, serializer, handler, and resolver boundaries use generics. Native async trait
-methods return `impl Future + Send`; library crates do not use `async-trait` or allocate a boxed
-future on each operation.
+Store, publisher, serializer, handler, resolver, and inbound profile boundaries use generics.
+Native async trait methods return `impl Future + Send`; library crates do not use `async-trait` or
+allocate a boxed future on each operation. The two inbound profiles are explicit, closed trait
+pairs rather than combinable capability markers or a per-record runtime capability query. This
+keeps individual settlement and partition fencing statically distinct.
 
 Dynamic dispatch remains acceptable at cold application-owned extension points, but no hot
-claim/publish/complete path requires it.
+claim/publish/complete/settle path requires it.
 
 ## 8. Repository source layout
 

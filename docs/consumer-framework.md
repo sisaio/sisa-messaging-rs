@@ -38,61 +38,107 @@ sisa-messaging ───────────────▶ inbound delivery
 `sisa-messaging-consumer` does not depend on SQLx or async-nats. Neither provider depends on the
 other. The application is still the only place that chooses the NATS/PostgreSQL combination.
 
-Transport-neutral inbound contracts live in `sisa-messaging`:
+Transport-neutral inbound contracts live in `sisa-messaging`. `Delivery` always splits once into
+an owned transport wire value and a profile-bound settlement handle; `EnvelopeMapper<Wire>` is the
+same mapping contract used for publication. The profiles are closed and statically dispatched:
 
-- `DeliverySource`: asynchronously yields deliveries and stops cleanly when its source closes;
-- `Delivery`: splits once into an owned transport wire value and settlement handle;
-- `Settlement`: supports `ack`, delayed `nak`, `terminate`, and optional heartbeat acknowledgement;
-- `EnvelopeMapper<Wire>`: the same mapping contract used for publication decodes the wire value
-  into `SerializedEnvelope`.
+- `IndividualDeliverySource` and `IndividualSettlement` model per-delivery acknowledgement.
+  Opening returns an immutable descriptor for acknowledgement wait, delivery bound, delayed retry,
+  terminal discard, and heartbeat support; caller requirements are validated before receiving.
+- `PartitionedLogDeliverySource` and `PartitionedLogSettlement` model ordered offset progression.
+  Receive distinguishes a delivery, ownership loss, and clean close; consuming advancement reports
+  either success or ownership loss.
 
 Their semantic shape is:
 
 ```rust,ignore
-pub trait Settlement: Send + 'static {
+pub trait IndividualSettlement: Send + 'static {
     type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
 
-    fn heartbeat(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn ack(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn nak(self, delay: Duration) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn terminate(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn heartbeat(
+        &mut self,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
+    fn ack(self) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
+    fn nak(
+        self,
+        delay: Duration,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
+    fn terminate(
+        self,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
 }
 
 pub trait Delivery: Send + 'static {
     type Wire: Send + 'static;
-    type Settlement: Settlement;
+    type Settlement: Send + 'static;
 
     fn into_parts(self) -> (Self::Wire, Self::Settlement);
 }
 
-pub trait DeliverySource: Send {
-    type Delivery: Delivery;
+pub trait IndividualDeliverySource: Send {
+    type Delivery: Delivery<Settlement: IndividualSettlement>;
+    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
+
+    fn open(
+        &mut self,
+        requirements: IndividualSourceRequirements,
+    ) -> impl Future<
+        Output = Result<IndividualSourceDescriptor, IndividualSourceOpenError<Self::Error>>,
+    > + Send;
+
+    fn receive(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<Self::Delivery>, Self::Error>> + Send;
+
+}
+
+pub trait PartitionedLogSettlement: Send + 'static {
+    type Partition: Clone + Eq + Hash + Send + Sync + 'static;
+    type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
+
+    fn advance(self) -> impl Future<Output = Result<PartitionAdvance, Self::Error>> + Send;
+    fn partition(&self) -> &Self::Partition;
+}
+
+pub trait PartitionedLogDeliverySource: Send {
+    type Partition: Clone + Eq + Hash + Send + Sync + 'static;
+    type Delivery: Delivery<Settlement: PartitionedLogSettlement<Partition = Self::Partition>>;
     type Error: std::error::Error + Send + Sync + 'static + ErrorClassifier;
 
     fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn receive(
         &mut self,
-    ) -> impl Future<Output = Result<Option<Self::Delivery>, Self::Error>> + Send;
-
-    fn ack_wait(&self) -> Option<Duration>;
-    fn max_deliver(&self) -> Option<NonZeroU64>;
+    ) -> impl Future<Output = Result<PartitionedLogReceive<_, _>, Self::Error>> + Send;
 }
 ```
 
-Terminal settlement consumes the settlement handle, preventing a second terminal action through
-safe Rust. Splitting lets the mapper consume the wire value without cloning or losing the broker
-reply/acknowledgement capability. `None` from `receive` means a clean source close; an error is a
-fatal source result. `open` performs one-time source initialization when `Consumer::run` starts;
-constructors remain I/O-free. After opening, `receive` must be cancel-safe: dropping its readiness
-wait must neither lose nor settle a delivery. `ack_wait` returns `None` when the transport has no
-acknowledgement deadline or heartbeat capability, in which case `heartbeat_interval` must also be
-`None`. `max_deliver` returns `None` for unlimited/unknown delivery count.
+Individual terminal operations consume the handle, preventing a second terminal action through
+safe Rust. Splitting lets the mapper consume the wire value without cloning or losing a settlement
+capability. An individual `None` receive is a clean source close; a partitioned source returns its
+distinct `Closed` outcome. Opening performs one-time initialization when `Consumer::run` starts;
+constructors remain I/O-free. After opening, every readiness wait must be cancel-safe: dropping it
+must neither lose nor settle/advance a delivery. Unsupported individual requirements fail at open
+with a bounded classified error and are never emulated.
+
+A partition settlement owns opaque partition, offset, and fencing generation, and exposes its
+partition so a generic coordinator can associate an ownership-loss event. It advances only after
+the consumer transaction commits or a durable terminal disposition exists. Initially the consumer
+permits one unresolved record per partition: a later offset cannot advance until its earlier record
+resolves. `OwnershipLost` proves fencing prevented advancement. An advance error, timeout, or
+dropped advance future is indeterminate: the source pauses that partition and reconciles the
+authoritative committed cursor plus ownership generation before another offset. It replays when
+the cursor did not advance, continues only when it did, and stays paused or fails when either fact
+is unknowable; other partitions may progress. A source must not emit a new generation while this
+handling is underway. Automatic commit is not a profile option. Redis Streams reclaim is
+individual delivery, not partitioned-log ownership; its unavailable delay, heartbeat, or terminal
+operation must fail requirement validation.
 
 `sisa-messaging-inbox` owns `InboxUnitOfWork`, the ability to begin, commit, and roll back the
 transaction type used by an `InboxStore`. `PostgresInboxStore` implements both capabilities and
 can therefore be passed once to the consumer. `InboxStore::max_attempts` exposes its configured
-recorded-failure bound so consumer construction can compare it with a finite broker delivery bound.
+recorded-failure bound; the consumer compares it with a finite broker delivery bound after an
+individual source opens and before its first receive.
 
 ```rust,ignore
 pub trait InboxUnitOfWork: Send + Sync {
@@ -187,10 +233,12 @@ Settings semantics are fixed:
 - `heartbeat_interval` is optional and must be non-zero and below half a source-reported ack wait.
 - `drain_timeout` bounds the whole graceful drain after receiving stops.
 
-All enabled durations and concurrency values are validated once in `new`. The first release does
-not impose a handler timeout: cancelling arbitrary application code can interrupt external effects
-without rolling them back. Applications needing one implement it deliberately inside their
-handler and retain responsibility for those effects.
+All constructor-known durations and concurrency values are validated once in `new`.
+Descriptor-dependent acknowledgement-wait and delivery-bound checks run after individual-source
+opening and before its first receive. The first release does not impose a handler timeout:
+cancelling arbitrary application code can interrupt external effects without rolling them back.
+Applications needing one implement it deliberately inside their handler and retain responsibility
+for those effects.
 
 There is no built-in heterogeneous handler registry in the first release. A host that truly needs
 one durable consumer for multiple message types can implement an envelope-level router explicitly;
@@ -221,13 +269,12 @@ Constructors do no I/O. The application creates or looks up the JetStream stream
 consumer before constructing `NatsDeliverySource`. It configures the same stable durable name and
 `InboxScope` deliberately; neither is generated by the library.
 
-For long handlers, configure `heartbeat_interval` below half the broker's acknowledgement wait.
-`DeliverySource` reports the known acknowledgement deadline and finite delivery bound, allowing
-`Consumer::new` to validate both relationships without performing I/O. Inbox `max_attempts` must
-not exceed a finite broker `max_deliver`; otherwise the broker can stop delivery before the inbox
-records its dead transition.
+For long individual-delivery handlers, configure `heartbeat_interval` below half the broker's
+acknowledgement wait. The source reports its descriptor during `run` opening, so requirements are
+validated after I/O but before receiving. Inbox `max_attempts` must not exceed a finite reported
+`max_deliver`; otherwise the broker can stop delivery before the inbox records its dead transition.
 
-## 5. Per-delivery state machine
+## 5. Individual-delivery state machine
 
 ```text
 receive delivery
@@ -268,8 +315,10 @@ Rules:
    dead only when the recorded-attempt limit is reached.
 6. An acknowledgement failure after commit does not undo anything. Redelivery observes
    `AlreadyCompleted` and acknowledges again.
-7. A malformed delivery with no trustworthy message identity cannot safely create an inbox row;
-   it is terminated and reported through telemetry.
+7. A malformed individual delivery with no trustworthy message identity cannot safely create an
+   inbox row; it is terminated only when the opened profile supports terminal discard. A malformed
+   partitioned-log record without a trustworthy identity and durable terminal disposition leaves
+   its partition unresolved and pauses it; the consumer must never silently advance the offset.
 8. Broker settlement is idempotent from the framework's perspective. The settlement handle
    prevents two terminal settlement calls through safe Rust.
 9. A transient provider error produces a delayed nak when settlement remains safe. A permanent
@@ -279,9 +328,11 @@ Rules:
     continue. A permanent settlement error stops the runtime rather than producing an unbounded
     stream of messages that cannot be settled.
 
-For NATS, successful processing uses a confirmed acknowledgement when the client supports it.
-`nak`, `terminate`, and heartbeat operations remain bounded by `settlement_timeout`. Failure to settle is
-observable but does not change the database result.
+For NATS, successful processing uses a confirmed acknowledgement. `nak`, `terminate`, and
+heartbeat operations remain bounded by `settlement_timeout`. A partitioned log instead advances
+only after the transaction commits or a durable terminal disposition exists. A failed, timed-out,
+or cancelled advance is indeterminate and requires the partition-scoped reconciliation described
+above; failure to settle or advance is observable but does not change the database result.
 
 ## 6. Concurrency, heartbeat and backpressure
 
@@ -294,9 +345,11 @@ is not polled for more work when all permits are occupied. This bounds:
 - pressure on the database pool.
 
 Each in-flight delivery has one coordinator. The database/handler workflow runs in an owned task;
-the coordinator selects only over task readiness, cancellation, and a heartbeat timer. A heartbeat
-acknowledgement is performed inside the selected arm, so externally visible I/O is not embedded in
-a cancellable `select!` branch future.
+the coordinator selects only over task readiness, cancellation, and an individual-profile
+heartbeat timer. A heartbeat acknowledgement is performed inside the selected arm, so externally
+visible I/O is not embedded in a cancellable `select!` branch future. The initial partitioned-log
+profile admits at most one unresolved record per partition while allowing separate partitions to
+make bounded concurrent progress.
 
 Heartbeat acknowledgement covers database work and handler work. It reduces needless redelivery
 of slow messages but does not promise exclusivity; the inbox remains the correctness mechanism.
@@ -340,8 +393,9 @@ Errors are separated by decision boundary:
 - delivery settlement error: logged once with operation and transport error type.
 
 There is no enum variant containing every SQLx, NATS, codec, and handler error. Internal processing
-produces a small private settlement plan—`Ack`, `Nak { delay }`, or `Term { reason }`—and retains
-typed sources for telemetry and debugging.
+produces a profile-specific private settlement plan: individual `Ack`, `Nak { delay }`, or `Term`,
+or partitioned `Advance` after durable resolution / `LeaveUnresolved`. Typed sources remain
+available for telemetry and debugging.
 
 ## 9. Observability
 
@@ -356,21 +410,28 @@ inbox state remains authoritative; consumer counters describe activity observed 
 
 ## 10. Required framework tests
 
-- Successful handler: claim, handler, complete, commit, confirmed ack—in that order.
+- Individual successful handler: claim, handler, complete, commit, confirmed ack—in that order.
 - Handler error: rollback finishes before failure recording and broker settlement.
-- Permanent failure terminates the delivery immediately; transient failure naks until the recorded limit.
+- Individual permanent failure terminates only when supported; transient failure uses delayed nak
+  only when supported, otherwise construction/open validation rejects that policy.
 - Commit timeout/failure never calls `fail` and never acks.
 - Ack failure after commit causes a harmless completed redelivery.
 - Duplicate delivery does not invoke the handler.
 - Concurrent duplicate reports `InProgress` and receives a delayed nak.
 - Dead receipt never invokes the handler and is terminated.
-- Malformed wire input with no safe identity is terminated without an inbox insert.
+- Malformed individual wire input with no safe identity is terminated only when supported; a
+  partitioned record without durable terminal disposition pauses rather than skips its offset.
 - Type/version/body mismatch cannot expose payload or header values in errors.
 - `max_in_flight` bounds source polling and open transactions.
-- Heartbeat acknowledgements occur during slow handlers and stop after terminal settlement.
-- Cancellation stops pulls, drains resolved work, and leaves unresolved work for redelivery.
+- Individual heartbeat acknowledgements occur during slow handlers and stop after terminal
+  settlement; a source that lacks heartbeat cannot be configured to require it.
+- Cancellation stops pulls, drains resolved work, and leaves individual unresolved work for
+  redelivery.
 - A handler panic cannot commit or acknowledge the delivery.
 - Source closure and fatal source errors have distinct exit results.
 - Permanent provider/settlement errors stop receiving and retain their typed source.
-- Construction rejects a heartbeat/ack-wait mismatch and an inbox attempt bound above finite broker
-  `max_deliver`.
+- Opening rejects an unsupported individual requirement, a heartbeat/ack-wait mismatch, and an
+  inbox attempt bound above finite `max_deliver`; requirements are checked before receiving.
+- Partitioned log tests prove commit-before-advance, no advancement past an unresolved earlier
+  record, explicit ownership loss, reconciliation after indeterminate advancement, and independent
+  progress in separate partitions.

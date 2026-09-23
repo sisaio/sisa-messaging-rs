@@ -42,13 +42,15 @@ Settings are separated by responsibility:
 - `OutboxRetention`: published/dead retention and pass size.
 - `InboxSettings`: recorded-failure limit.
 - `InboxRetention`: completed/dead retention and pass size.
-- `ConsumerSettings`: receive concurrency, source/database/settlement bounds, negative-ack delay,
-  heartbeat interval, and drain behavior.
+- `ConsumerSettings`: receive concurrency, source/database/settlement bounds, individual-profile
+  delayed-retry and heartbeat policy, and drain behavior.
 - `NatsPublisherSettings`: publish timeout and behavior not owned by the resolver/context.
 
-There is no NATS consumer settings duplicate. `NatsDeliverySource` reads the durable consumer's
-already configured acknowledgement wait and delivery bound; generic concurrency, database,
-settlement, negative-ack delay, heartbeat, and drain policy belong to `ConsumerSettings`.
+There is no NATS consumer settings duplicate. An individual source reports its immutable
+descriptor—acknowledgement wait, delivery bound, and supported operations—when it opens; the
+consumer validates its requirements before receiving. Generic concurrency, database, settlement,
+negative-ack delay, heartbeat, and drain policy belong to `ConsumerSettings`. A partitioned-log
+source has no acknowledgement-wait or automatic-commit setting.
 
 PostgreSQL connection policy belongs to the application-owned pool, so there is no provider
 settings type used only for statement timeout. `max_attempts` belongs to portable
@@ -56,14 +58,24 @@ settings type used only for statement timeout. `max_attempts` belongs to portabl
 
 ## 3. Validation
 
-Validate settings once in the runtime object's constructor. Real cross-field checks include:
+Validate settings known without a transport once in the runtime object's constructor. Real
+cross-field checks include:
 
 - non-zero publish, poll, idle-poll, store, source, database, settlement, and drain timeouts;
 - non-zero capacity;
 - `store_timeout < lease / 2`;
 - retry base delay not greater than maximum delay;
-- consumer heartbeat interval, when enabled, shorter than half the configured broker ack wait;
-- inbox `max_attempts` not greater than a finite broker `max_deliver`.
+- individual-profile heartbeat interval, when enabled, shorter than half the opened source's
+  reported acknowledgement wait, checked after opening; and
+- inbox `max_attempts` not greater than an individual source's finite reported `max_deliver`,
+  checked after opening.
+
+Checks that depend on broker state belong to source opening, after the source returns its immutable
+descriptor and before the first receive. Static settings remain validated in the constructor;
+descriptor-dependent requirements are validated only at open time.
+An individual source that cannot satisfy a requested delayed retry, terminal discard, heartbeat,
+acknowledgement wait, or delivery bound fails with the bounded classified contract error; it never
+emulates another broker operation. Partitioned logs do not expose automatic commit as a setting.
 
 Use types for local invariants: `NonZeroU32` for limits and attempts, `NonZeroUsize` for
 concurrency, and validated domain string types. Do not add a validator that repeats what a field
@@ -195,7 +207,8 @@ Error mapping rules:
 - Native async trait methods; no `async-trait` in library crates.
 - No boxed futures on the hot path.
 - No database transaction across broker I/O.
-- The consumer framework commits or rolls back before terminal broker settlement.
+- The consumer framework commits or rolls back before individual settlement or partition
+  advancement, and never holds a database transaction across broker I/O.
 - No externally visible I/O in a `tokio::select!` branch future.
 - Bound calls explicitly with the owning timeout.
 - Cancellation stops new work and then follows the documented drain/release sequence.

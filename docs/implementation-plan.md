@@ -63,7 +63,7 @@ multiple sources.
 
 | Crate | Publishes | Depends on workspace crates |
 |---|---|---|
-| `sisa-messaging` | Envelope, metadata, serialization, publish, delivery and settlement contracts | none |
+| `sisa-messaging` | Envelope, metadata, serialization, publish, individual-delivery and partitioned-log inbound contracts | none |
 | `sisa-messaging-outbox` | Enqueue/store capabilities, dispatcher, retry and dead-letter contracts | messaging |
 | `sisa-messaging-inbox` | Inbox state, store, unit-of-work, maintenance and dead-letter contracts | messaging |
 | `sisa-messaging-consumer` | Typed bounded consumer runtime and handler contract | messaging, inbox |
@@ -101,7 +101,11 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 ### Phase 2 — shared messaging model
 
 - Implement message and envelope identities, metadata, headers, serialization, failure
-  classification, publisher, mapper, delivery, settlement, and delivery-source contracts.
+  classification, publisher, mapper, and closed individual-delivery and partitioned-log inbound
+  contracts.
+- Keep individual settlement capabilities truthful through immutable opened-source descriptors;
+  reject unsupported required operations rather than emulating them. Require fenced, ordered
+  partition advancement after durable resolution and surface ownership loss explicitly.
 - Keep wire-independent values free of SQLx, async-nats, Tokio runtime, and telemetry SDK types.
 - Freeze metadata JSON and framework-header mappings with contract fixtures and round-trip
   tests.
@@ -154,10 +158,11 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 ### Phase 7 — consumer runtime
 
 - Implement typed `ConsumerHandler` and the bounded `Consumer` receive/process/settle loop.
-- Open the source once under a timeout and require cancel-safe receive readiness afterward.
+- Open the source once under a timeout, validate individual-profile requirements against its
+  immutable descriptor, and require cancel-safe receive readiness afterward.
 - Centralize the full claim/handle/rollback/fail/complete/commit/settle decision table.
-- Coordinate heartbeat acknowledgement without placing workflow I/O in cancellable `select!`
-  branch futures.
+- Coordinate individual-profile heartbeat acknowledgement without placing workflow I/O in
+  cancellable `select!` branch futures; do not represent automatic partition commit.
 - Implement stop-receiving, bounded-drain, abort, and unacknowledged-redelivery shutdown.
 - Test every settlement branch with deterministic protocol implementations, then prove the same
   behavior with real PostgreSQL and NATS.
@@ -263,13 +268,22 @@ not appear in test names.
 - Concurrent claims for one key run at most one handler.
 - Handler effects and inbox completion commit atomically.
 - A broker acknowledgement never precedes commit.
+- Partition advancement never precedes commit or a durable terminal disposition, never crosses an
+  unresolved earlier offset in its partition, and is fenced against ownership loss.
 - Completed and in-progress duplicates never invoke the handler.
 - Rollback precedes classified failure recording; permanent and exhausted failures become dead.
 - Commit ambiguity never records handler failure or acknowledges.
 - Permanent provider/settlement failures stop the runtime and leave the delivery unresolved.
-- Heartbeat acknowledgement protects slow work without becoming a correctness mechanism.
+- Individual-profile heartbeat acknowledgement protects slow work without becoming a correctness
+  mechanism; sources without it do not claim it.
 - Cancellation bounds new work, drains completions, and leaves unresolved deliveries for
   redelivery.
+- Ownership loss stops its partition without advancement. An error, timeout, cancellation, or
+  dropped partition advance is indeterminate: pause that partition and reconcile its authoritative
+  committed cursor and ownership generation before later offsets; replay only if it did not
+  advance, continue only if it did, and otherwise remain paused or fail. Other partitions may
+  continue. A malformed partitioned record without a trustworthy identity and durable terminal
+  disposition pauses its partition rather than skipping the offset.
 - Retention deletes only completed/dead receipts; dead retry clears death fields and attempts.
 
 ### NATS and observability
