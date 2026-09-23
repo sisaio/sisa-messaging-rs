@@ -12,10 +12,10 @@ manifests, lockfiles, and required code/test adaptations belong to `backend_deve
 keeps `cargo sqlx prepare --check` for `sisa-messaging-postgres`; reviewers use that result instead
 of reading tracked `.sqlx/**`, whose regeneration is exempt only from target path counts.
 
-Keep CI pinned and reproducible and run only applicable completion gates. Use medium effort
-normally; request high only for a named migration-integrity, publication, or CI-security risk that
-targeted evidence cannot settle. Run broad delivery validation once per stable head and repeat only
-checks affected by a change or finding. Read hunks and named sections, not whole documents or
+Keep CI pinned and reproducible and run only applicable completion gates. Use low effort normally;
+raise it only for a named migration-integrity, publication, or CI-security risk that targeted
+evidence cannot settle. Run broad delivery validation once per stable head and repeat only checks
+affected by a change or finding. Read hunks and named sections, not whole documents or
 generated folders, and narrow large output. Filter `gh`/`gh api` reads with `--json`/`--jq`; never
 use `--comments` or unfiltered API output, and do not use web search.
 

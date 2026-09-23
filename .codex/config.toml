@@ -1,5 +1,5 @@
-model = "gpt-5.6-terra"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 model_verbosity = "low"
 plan_mode_reasoning_effort = "medium"
 tool_output_token_limit = 6000
@@ -11,8 +11,8 @@ enabled = false
 [agents]
 enabled = true
 max_concurrent_threads_per_session = 2
-default_subagent_model = "gpt-5.6-terra"
-default_subagent_reasoning_effort = "medium"
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "xhigh"
 
 [plugins."visualize@openai-bundled"]
 enabled = false
