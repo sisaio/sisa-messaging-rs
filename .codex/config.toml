@@ -1,4 +1,4 @@
-model = "gpt-6-sol"
+model = "gpt-6-luna"
 model_reasoning_effort = "xhigh"
 model_verbosity = "low"
 plan_mode_reasoning_effort = "medium"
@@ -11,7 +11,7 @@ enabled = false
 [agents]
 enabled = true
 max_concurrent_threads_per_session = 2
-default_subagent_model = "gpt-6-sol"
+default_subagent_model = "gpt-6-luna"
 default_subagent_reasoning_effort = "xhigh"
 
 [plugins."visualize@openai-bundled"]
