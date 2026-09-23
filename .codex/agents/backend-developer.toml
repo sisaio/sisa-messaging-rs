@@ -1,7 +1,7 @@
 name = "backend_developer"
 description = "Rust and SQL implementation owner. Use after requirements and any required architecture design are settled."
 model = "gpt-6-sol"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """

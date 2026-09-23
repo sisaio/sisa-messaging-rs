@@ -1,7 +1,7 @@
 name = "release_engineer"
 description = "On-demand delivery specialist for GitHub CI/CD, Atlas migration mechanics, release artifacts, and crates.io publication preparation."
 model = "gpt-6-luna"
-model_reasoning_effort = "low"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """

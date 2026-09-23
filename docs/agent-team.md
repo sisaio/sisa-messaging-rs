@@ -10,19 +10,19 @@ This repository uses one primary Codex agent and four project-scoped custom agen
 
 | Role | Model / normal effort | Writes files | Use and escalation trade-off |
 |---|---|---:|---|
-| Primary delivery lead | `gpt-6-sol` / `medium` | Docs only | Requirements, orchestration, and acceptance; raise effort only for a named unresolved risk |
+| Primary delivery lead | `gpt-6-sol` / `xhigh` | Docs only | Balanced reasoning depth for requirements, orchestration, and acceptance |
 | `architect` | `gpt-6-sol` / `high` | No | Flagship reasoning for gated architecture and adversarial design analysis |
-| `backend_developer` | `gpt-6-sol` / `medium` | Yes | Strong model with moderate reasoning for sustained Rust/SQL implementation; high is a task-specific override for a named correctness risk |
+| `backend_developer` | `gpt-6-sol` / `xhigh` | Yes | Balanced reasoning depth for sustained Rust/SQL implementation |
 | `reviewer` | `gpt-6-sol` / `high` | No | Flagship independent integration and final-approval review |
-| `release_engineer` | `gpt-6-luna` / `low` | Yes, narrowly | Fast, low-effort delivery work; raise effort only for a named migration-integrity, publication, or CI-security risk |
+| `release_engineer` | `gpt-6-luna` / `medium` | Yes, narrowly | Fast-model delivery work at medium effort; raise effort only for a named migration-integrity, publication, or CI-security risk |
 
 GPT-6 Astra is not a primary or project-agent model and is not an escalation path. Balanced uses
-`gpt-6-sol` at medium effort: model capability and reasoning effort are separate settings, so this
-keeps routine implementation capable without paying the high-effort cost on every request. High
-effort remains bounded to architecture, which is spawned only behind its design/risk gate, and
-independent review, which owns final approval. The project config caps spawned agents at two
-concurrent threads, and the normal workflow remains sequential because overlapping writers and
-implementation-aware final reviewers are prohibited.
+`gpt-6-sol` at extra-high (`xhigh`) effort, while fast uses `gpt-6-luna` at medium effort: model
+capability and reasoning effort are separate settings. The balanced tier gives the primary and
+default subagent more reasoning depth; flagship high effort remains bounded to architecture, which
+is spawned only behind its design/risk gate, and independent review, which owns final approval. The
+project config caps spawned agents at two concurrent threads, and the normal workflow remains
+sequential because overlapping writers and implementation-aware final reviewers are prohibited.
 
 [Official OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model)
 recommends explicitly tuning delegation and calibrating verification to the task. This repository
