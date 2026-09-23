@@ -883,6 +883,8 @@ struct PartitionState {
     committed_offset: u64,
     unresolved: Option<u64>,
     generation: u64,
+    reconciled_committed_offset: Option<u64>,
+    reconciled_generation: Option<u64>,
     owned: bool,
     paused: bool,
     reconcile_required: bool,
@@ -898,6 +900,8 @@ impl PartitionState {
             committed_offset: 0,
             unresolved: None,
             generation: 7,
+            reconciled_committed_offset: None,
+            reconciled_generation: None,
             owned: true,
             paused: false,
             reconcile_required: false,
@@ -936,6 +940,15 @@ impl PartitionedLogSettlement for PartitionFixtureSettlement {
     type Error = ContractError;
 
     fn advance(self) -> impl Future<Output = Result<PartitionAdvance, Self::Error>> + Send {
+        {
+            let mut state = self.state.lock().unwrap();
+            if state.partition == self.partition && state.unresolved == Some(self.offset) {
+                // Even an unpolled future can be dropped. Conservatively pause until the source
+                // reconciles both the authoritative cursor and the current ownership generation.
+                state.paused = true;
+                state.reconcile_required = true;
+            }
+        }
         let mut effect_applied = false;
         poll_fn(move |_context| {
             if matches!(self.mode, AdvanceMode::PendingAfterEffect) && effect_applied {
@@ -972,6 +985,8 @@ impl PartitionedLogSettlement for PartitionFixtureSettlement {
             match self.mode {
                 AdvanceMode::Success => {
                     state.unresolved = None;
+                    state.paused = false;
+                    state.reconcile_required = false;
                     Poll::Ready(Ok(PartitionAdvance::Advanced))
                 }
                 AdvanceMode::ErrorAfterEffect => {
@@ -1072,17 +1087,33 @@ impl PartitionedFixtureSource {
                 state.paused = true;
                 return Poll::Ready(Ok(PartitionedLogReceive::OwnershipLost(*partition)));
             }
-            if state.reconcile_required && state.owned {
-                if let Some(offset) = state.unresolved {
-                    if state.committed_offset >= offset {
-                        state.unresolved = None;
-                    } else {
-                        state.next_offset = offset;
-                        state.unresolved = None;
+        }
+
+        let has_ready_partition = self.partitions.values().any(|shared_state| {
+            let state = shared_state.lock().unwrap();
+            state.owned
+                && !state.paused
+                && !state.reconcile_required
+                && state.unresolved.is_none()
+                && state.next_offset <= state.max_offset
+        });
+        if !has_ready_partition {
+            for shared_state in self.partitions.values() {
+                let mut state = shared_state.lock().unwrap();
+                if state.reconcile_required && state.owned {
+                    if let Some(offset) = state.unresolved {
+                        if state.committed_offset >= offset {
+                            state.unresolved = None;
+                        } else {
+                            state.next_offset = offset;
+                            state.unresolved = None;
+                        }
                     }
+                    state.reconciled_committed_offset = Some(state.committed_offset);
+                    state.reconciled_generation = Some(state.generation);
+                    state.reconcile_required = false;
+                    state.paused = false;
                 }
-                state.reconcile_required = false;
-                state.paused = false;
             }
         }
 
@@ -1090,6 +1121,7 @@ impl PartitionedFixtureSource {
             let mut state = shared_state.lock().unwrap();
             if !state.owned
                 || state.paused
+                || state.reconcile_required
                 || state.unresolved.is_some()
                 || state.next_offset > state.max_offset
             {
@@ -1579,7 +1611,7 @@ fn partition_receive_only_consumes_after_poll_and_preserves_pending_readiness() 
 }
 
 #[test]
-fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_restart() {
+fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery() {
     let mut lost_source = KafkaFixture(PartitionedFixtureSource::new(
         &[(PartitionId(3), 1)],
         &[PartitionId(3)],
@@ -1589,9 +1621,16 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_restart(
         PartitionedLogReceive::OwnershipLost(PartitionId(3))
     ));
 
-    let mut unpolled_advance_source = IggyFixture::new();
-    let (_, unpolled_advance) = take_partition_delivery(&mut unpolled_advance_source).into_parts();
+    let mut unpolled_advance_source = KafkaFixture(PartitionedFixtureSource::new(
+        &[(PartitionId(0), 1), (PartitionId(1), 2)],
+        &[],
+    ));
+    let first = take_partition_delivery(&mut unpolled_advance_source);
+    assert_eq!(first.partition, PartitionId(0));
+    let (first_offset, unpolled_advance) = first.into_parts();
+    assert_eq!(first_offset, 1);
     let state = Arc::clone(&unpolled_advance_source.0.partitions[&PartitionId(0)]);
+    let generation = state.lock().unwrap().generation;
     unpolled_advance.mark_durably_resolved();
     let unpolled_advance = Box::pin(unpolled_advance.advance());
     drop(unpolled_advance);
@@ -1599,10 +1638,55 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_restart(
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
         assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+        assert_eq!(state.reconciled_committed_offset, None);
+        assert_eq!(state.reconciled_generation, None);
     }
-    unpolled_advance_source.0.restart_partition(PartitionId(0));
+
+    let other_first = take_partition_delivery(&mut unpolled_advance_source);
+    assert_eq!(other_first.partition, PartitionId(1));
+    assert_eq!(other_first.offset, 1);
+    let (other_offset, other_first_settlement) = other_first.into_parts();
+    assert_eq!(other_offset, 1);
+    other_first_settlement.mark_durably_resolved();
+    assert_eq!(
+        block_on(other_first_settlement.advance()).unwrap(),
+        PartitionAdvance::Advanced
+    );
+    let other_second = take_partition_delivery(&mut unpolled_advance_source);
+    assert_eq!(other_second.partition, PartitionId(1));
+    assert_eq!(other_second.offset, 2);
+    let (other_offset, other_second_settlement) = other_second.into_parts();
+    assert_eq!(other_offset, 2);
+    other_second_settlement.mark_durably_resolved();
+    assert_eq!(
+        block_on(other_second_settlement.advance()).unwrap(),
+        PartitionAdvance::Advanced
+    );
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+        assert_eq!(state.reconciled_committed_offset, None);
+        assert_eq!(state.reconciled_generation, None);
+    }
+
     let replay = take_partition_delivery(&mut unpolled_advance_source);
+    assert_eq!(replay.partition, PartitionId(0));
     assert_eq!(replay.offset, 1);
+    assert_eq!(replay.settlement.generation, generation);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert_eq!(state.reconciled_committed_offset, Some(0));
+        assert_eq!(state.reconciled_generation, Some(generation));
+        assert!(!state.paused);
+        assert!(!state.reconcile_required);
+    }
 
     let mut before_effect_source = IggyFixture::new();
     before_effect_source.0.next_advance_mode = AdvanceMode::ErrorBeforeEffect;
