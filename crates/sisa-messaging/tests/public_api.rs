@@ -4,12 +4,17 @@ use std::path::Path;
 // Import every crate-root export so missing or relocated names fail at compile time.
 #[allow(unused_imports)]
 use sisa_messaging::{
-    ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata, DeliverySource,
-    Envelope, EnvelopeError, EnvelopeMapper, ErrorClassifier, ErrorSummary, FailureKind,
-    FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers,
-    HeadersError, MAX_CUSTOM_HEADER_BYTES, MAX_CUSTOM_HEADER_COUNT, MAX_ERROR_SUMMARY_BYTES,
-    Message, MessageId, MessageType, Metadata, MetadataValue, OrderingKey, Publisher, RequestId,
-    RoutingMetadata, SerializedEnvelope, Serializer, Settlement, TraceMetadata, ValidationError,
+    ContentType, ConversationId, CorrelationMetadata, Delivery, DeliveryMetadata, Envelope,
+    EnvelopeError, EnvelopeMapper, ErrorClassifier, ErrorSummary, FailureKind, FrameworkHeader,
+    HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers, HeadersError,
+    IndividualCapability, IndividualDeliverySource, IndividualSettlement,
+    IndividualSettlementError, IndividualSourceDescriptor, IndividualSourceDescriptorError,
+    IndividualSourceOpenError, IndividualSourceRequirement, IndividualSourceRequirements,
+    MAX_CUSTOM_HEADER_BYTES, MAX_CUSTOM_HEADER_COUNT, MAX_ERROR_SUMMARY_BYTES, Message, MessageId,
+    MessageType, Metadata, MetadataValue, OrderingKey, PartitionAdvance,
+    PartitionedLogDeliverySource, PartitionedLogReceive, PartitionedLogSettlement, Publisher,
+    RequestId, RoutingMetadata, SerializedEnvelope, Serializer, TraceMetadata,
+    UnsupportedIndividualRequirement, ValidationError,
 };
 
 #[cfg(feature = "json")]

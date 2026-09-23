@@ -1,17 +1,24 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
-use std::future::{Future, ready};
+use std::future::{Future, poll_fn, ready};
 use std::num::NonZeroU64;
+use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use sisa_messaging::{
-    ContentType, ConversationId, Delivery, DeliverySource, Envelope, EnvelopeMapper,
-    ErrorClassifier, ErrorSummary, FailureKind, FrameworkHeader, HeaderName, HeaderNameError,
-    HeaderValue, HeaderValueError, Headers, HeadersError, MAX_CUSTOM_HEADER_BYTES,
-    MAX_CUSTOM_HEADER_COUNT, MAX_ERROR_SUMMARY_BYTES, Message, MessageId, MessageType, Metadata,
-    MetadataValue, OrderingKey, Publisher, RequestId, SerializedEnvelope, Settlement,
-    ValidationError,
+    ContentType, ConversationId, Delivery, Envelope, EnvelopeMapper, ErrorClassifier, ErrorSummary,
+    FailureKind, FrameworkHeader, HeaderName, HeaderNameError, HeaderValue, HeaderValueError,
+    Headers, HeadersError, IndividualCapability, IndividualDeliverySource, IndividualSettlement,
+    IndividualSettlementError, IndividualSourceDescriptor, IndividualSourceDescriptorError,
+    IndividualSourceOpenError, IndividualSourceRequirement, IndividualSourceRequirements,
+    MAX_CUSTOM_HEADER_BYTES, MAX_CUSTOM_HEADER_COUNT, MAX_ERROR_SUMMARY_BYTES, Message, MessageId,
+    MessageType, Metadata, MetadataValue, OrderingKey, PartitionAdvance,
+    PartitionedLogDeliverySource, PartitionedLogReceive, PartitionedLogSettlement, Publisher,
+    RequestId, SerializedEnvelope, UnsupportedIndividualRequirement, ValidationError,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -483,6 +490,63 @@ impl ErrorClassifier for ContractError {
     }
 }
 
+struct SecretProviderError;
+
+impl std::fmt::Debug for SecretProviderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SecretProviderError(SECRET_SENTINEL)")
+    }
+}
+
+impl std::fmt::Display for SecretProviderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SECRET_SENTINEL payload/header/url")
+    }
+}
+
+impl Error for SecretProviderError {}
+
+impl ErrorClassifier for SecretProviderError {
+    fn classify(&self) -> FailureKind {
+        FailureKind::Transient
+    }
+}
+
+#[test]
+fn individual_provider_errors_redact_formatting_and_safe_summaries_but_retain_typed_access() {
+    let open = IndividualSourceOpenError::Source(SecretProviderError);
+    let open_debug = format!("{open:?}");
+    let open_display = open.to_string();
+    assert!(!open_debug.contains("SECRET_SENTINEL"));
+    assert!(!open_display.contains("SECRET_SENTINEL"));
+    assert!(Error::source(&open).is_none());
+    let open_summary = ErrorSummary::from_safe_error(&open);
+    assert!(!open_summary.as_str().contains("SECRET_SENTINEL"));
+    assert!(!open_summary.to_string().contains("SECRET_SENTINEL"));
+    assert!(matches!(
+        &open,
+        IndividualSourceOpenError::Source(error)
+            if error.to_string().contains("SECRET_SENTINEL")
+    ));
+    assert_eq!(open.classify(), FailureKind::Transient);
+
+    let settlement = IndividualSettlementError::Operation(SecretProviderError);
+    let settlement_debug = format!("{settlement:?}");
+    let settlement_display = settlement.to_string();
+    assert!(!settlement_debug.contains("SECRET_SENTINEL"));
+    assert!(!settlement_display.contains("SECRET_SENTINEL"));
+    assert!(Error::source(&settlement).is_none());
+    let settlement_summary = ErrorSummary::from_safe_error(&settlement);
+    assert!(!settlement_summary.as_str().contains("SECRET_SENTINEL"));
+    assert!(!settlement_summary.to_string().contains("SECRET_SENTINEL"));
+    assert!(matches!(
+        &settlement,
+        IndividualSettlementError::Operation(error)
+            if error.to_string().contains("SECRET_SENTINEL")
+    ));
+    assert_eq!(settlement.classify(), FailureKind::Transient);
+}
+
 struct ContractPublisher;
 
 impl Publisher for ContractPublisher {
@@ -510,72 +574,1135 @@ impl EnvelopeMapper<Vec<u8>> for ContractMapper {
     }
 }
 
-struct ContractSettlement;
+#[derive(Clone, Copy)]
+struct IndividualSupport {
+    delayed_retry: bool,
+    terminal_discard: bool,
+    heartbeat: bool,
+}
 
-impl Settlement for ContractSettlement {
+impl IndividualSupport {
+    fn descriptor(
+        self,
+        ack_wait: Option<Duration>,
+        max_deliver: Option<NonZeroU64>,
+    ) -> IndividualSourceDescriptor {
+        IndividualSourceDescriptor::new(
+            ack_wait,
+            max_deliver,
+            self.delayed_retry,
+            self.terminal_discard,
+            self.heartbeat,
+        )
+        .unwrap()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IndividualEvent {
+    Heartbeat,
+    Ack,
+    Nak,
+    Terminate,
+}
+
+struct IndividualFixtureSettlement {
+    support: IndividualSupport,
+    events: Arc<Mutex<Vec<IndividualEvent>>>,
+    progress: Arc<Mutex<IndividualProgress>>,
+}
+
+impl IndividualFixtureSettlement {
+    fn record(&self, event: IndividualEvent) {
+        self.events.lock().unwrap().push(event);
+    }
+
+    fn settled(&self, event: IndividualEvent) {
+        self.record(event);
+        self.progress.lock().unwrap().settled = true;
+    }
+}
+
+#[derive(Default)]
+struct IndividualProgress {
+    outstanding: bool,
+    settled: bool,
+}
+
+impl IndividualSettlement for IndividualFixtureSettlement {
     type Error = ContractError;
 
-    fn heartbeat(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready(Ok(()))
+    fn heartbeat(
+        &mut self,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send {
+        let support = self.support;
+        let events = Arc::clone(&self.events);
+        poll_fn(move |_| {
+            if !support.heartbeat {
+                return Poll::Ready(Err(IndividualSettlementError::Unsupported(
+                    IndividualCapability::Heartbeat,
+                )));
+            }
+            events.lock().unwrap().push(IndividualEvent::Heartbeat);
+            Poll::Ready(Ok(()))
+        })
     }
 
-    fn ack(self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready(Ok(()))
+    fn ack(
+        self,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send {
+        poll_fn(move |_| {
+            self.settled(IndividualEvent::Ack);
+            Poll::Ready(Ok(()))
+        })
     }
 
-    fn nak(self, _delay: Duration) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready(Ok(()))
+    fn nak(
+        self,
+        _delay: Duration,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send {
+        poll_fn(move |_| {
+            if !self.support.delayed_retry {
+                return Poll::Ready(Err(IndividualSettlementError::Unsupported(
+                    IndividualCapability::DelayedRetry,
+                )));
+            }
+            self.settled(IndividualEvent::Nak);
+            Poll::Ready(Ok(()))
+        })
     }
 
-    fn terminate(self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready(Ok(()))
+    fn terminate(
+        self,
+    ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send {
+        poll_fn(move |_| {
+            if !self.support.terminal_discard {
+                return Poll::Ready(Err(IndividualSettlementError::Unsupported(
+                    IndividualCapability::TerminalDiscard,
+                )));
+            }
+            self.settled(IndividualEvent::Terminate);
+            Poll::Ready(Ok(()))
+        })
     }
 }
 
-struct ContractDelivery {
+struct IndividualFixtureDelivery {
     wire: Vec<u8>,
-
-    settlement: ContractSettlement,
+    settlement: IndividualFixtureSettlement,
 }
 
-impl Delivery for ContractDelivery {
+impl Delivery for IndividualFixtureDelivery {
     type Wire = Vec<u8>;
-    type Settlement = ContractSettlement;
+    type Settlement = IndividualFixtureSettlement;
 
     fn into_parts(self) -> (Self::Wire, Self::Settlement) {
         (self.wire, self.settlement)
     }
 }
 
-struct ContractSource;
+struct IndividualSourceFixture {
+    descriptor: IndividualSourceDescriptor,
+    next: Option<IndividualFixtureDelivery>,
+    progress: Arc<Mutex<IndividualProgress>>,
+}
 
-impl DeliverySource for ContractSource {
-    type Delivery = ContractDelivery;
+impl IndividualSourceFixture {
+    fn new(
+        descriptor: IndividualSourceDescriptor,
+        support: IndividualSupport,
+        events: Arc<Mutex<Vec<IndividualEvent>>>,
+    ) -> Self {
+        let progress = Arc::new(Mutex::new(IndividualProgress::default()));
+        Self {
+            descriptor,
+            next: Some(IndividualFixtureDelivery {
+                wire: vec![1, 2, 3],
+                settlement: IndividualFixtureSettlement {
+                    support,
+                    events,
+                    progress: Arc::clone(&progress),
+                },
+            }),
+            progress,
+        }
+    }
+
+    fn poll_receive(&mut self) -> Poll<Result<Option<IndividualFixtureDelivery>, ContractError>> {
+        if let Some(delivery) = self.next.take() {
+            self.progress.lock().unwrap().outstanding = true;
+            return Poll::Ready(Ok(Some(delivery)));
+        }
+
+        let progress = self.progress.lock().unwrap();
+        if progress.outstanding && !progress.settled {
+            Poll::Pending
+        } else {
+            Poll::Ready(Ok(None))
+        }
+    }
+
+    fn open(
+        &mut self,
+        requirements: IndividualSourceRequirements,
+    ) -> impl Future<
+        Output = Result<IndividualSourceDescriptor, IndividualSourceOpenError<ContractError>>,
+    > + Send {
+        let descriptor = self.descriptor;
+        ready(
+            descriptor
+                .validate(requirements)
+                .map(|()| descriptor)
+                .map_err(IndividualSourceOpenError::Unsupported),
+        )
+    }
+
+    fn receive(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<IndividualFixtureDelivery>, ContractError>> + Send {
+        poll_fn(move |_| self.poll_receive())
+    }
+}
+
+struct NatsFixture(IndividualSourceFixture);
+struct RabbitMqFixture(IndividualSourceFixture);
+struct RedisStreamsFixture(IndividualSourceFixture);
+
+impl NatsFixture {
+    fn new() -> Self {
+        let support = IndividualSupport {
+            delayed_retry: true,
+            terminal_discard: true,
+            heartbeat: true,
+        };
+        Self(IndividualSourceFixture::new(
+            support.descriptor(Some(Duration::from_secs(30)), NonZeroU64::new(5)),
+            support,
+            Arc::default(),
+        ))
+    }
+}
+
+impl RabbitMqFixture {
+    fn new() -> Self {
+        let support = IndividualSupport {
+            delayed_retry: false,
+            terminal_discard: true,
+            heartbeat: false,
+        };
+        Self(IndividualSourceFixture::new(
+            support.descriptor(None, None),
+            support,
+            Arc::default(),
+        ))
+    }
+}
+
+impl RedisStreamsFixture {
+    fn new() -> Self {
+        let support = IndividualSupport {
+            delayed_retry: false,
+            terminal_discard: false,
+            heartbeat: false,
+        };
+        Self(IndividualSourceFixture::new(
+            support.descriptor(None, None),
+            support,
+            Arc::default(),
+        ))
+    }
+}
+
+macro_rules! impl_individual_source {
+    ($fixture:ty) => {
+        impl IndividualDeliverySource for $fixture {
+            type Delivery = IndividualFixtureDelivery;
+            type Error = ContractError;
+
+            fn open(
+                &mut self,
+                requirements: IndividualSourceRequirements,
+            ) -> impl Future<
+                Output = Result<IndividualSourceDescriptor, IndividualSourceOpenError<Self::Error>>,
+            > + Send {
+                self.0.open(requirements)
+            }
+
+            fn receive(
+                &mut self,
+            ) -> impl Future<Output = Result<Option<Self::Delivery>, Self::Error>> + Send {
+                self.0.receive()
+            }
+        }
+    };
+}
+
+impl_individual_source!(NatsFixture);
+impl_individual_source!(RabbitMqFixture);
+impl_individual_source!(RedisStreamsFixture);
+
+struct ReadinessFixture {
+    ready: Arc<AtomicBool>,
+    source: IndividualSourceFixture,
+}
+
+impl IndividualDeliverySource for ReadinessFixture {
+    type Delivery = IndividualFixtureDelivery;
     type Error = ContractError;
 
-    fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready(Ok(()))
+    fn open(
+        &mut self,
+        requirements: IndividualSourceRequirements,
+    ) -> impl Future<
+        Output = Result<IndividualSourceDescriptor, IndividualSourceOpenError<Self::Error>>,
+    > + Send {
+        self.source.open(requirements)
     }
 
     fn receive(
         &mut self,
     ) -> impl Future<Output = Result<Option<Self::Delivery>, Self::Error>> + Send {
-        ready(Ok(None))
+        let ready = Arc::clone(&self.ready);
+        poll_fn(move |_context| {
+            if ready.load(AtomicOrdering::SeqCst) {
+                self.source.poll_receive()
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct PartitionId(u8);
+
+#[derive(Debug)]
+struct PartitionState {
+    partition: PartitionId,
+    next_offset: u64,
+    committed_offset: u64,
+    unresolved: Option<u64>,
+    generation: u64,
+    owned: bool,
+    paused: bool,
+    reconcile_required: bool,
+    loss_pending: bool,
+    max_offset: u64,
+}
+
+impl PartitionState {
+    fn new(partition: PartitionId, max_offset: u64) -> Self {
+        Self {
+            partition,
+            next_offset: 1,
+            committed_offset: 0,
+            unresolved: None,
+            generation: 7,
+            owned: true,
+            paused: false,
+            reconcile_required: false,
+            loss_pending: false,
+            max_offset,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AdvanceMode {
+    Success,
+    OwnershipLost,
+    ErrorBeforeEffect,
+    ErrorAfterEffect,
+    PendingAfterEffect,
+}
+
+struct PartitionFixtureSettlement {
+    partition: PartitionId,
+    offset: u64,
+    generation: u64,
+    state: Arc<Mutex<PartitionState>>,
+    resolved: Arc<AtomicBool>,
+    mode: AdvanceMode,
+}
+
+impl PartitionFixtureSettlement {
+    fn mark_durably_resolved(&self) {
+        self.resolved.store(true, AtomicOrdering::SeqCst);
+    }
+}
+
+impl PartitionedLogSettlement for PartitionFixtureSettlement {
+    type Partition = PartitionId;
+    type Error = ContractError;
+
+    fn advance(self) -> impl Future<Output = Result<PartitionAdvance, Self::Error>> + Send {
+        let mut effect_applied = false;
+        poll_fn(move |_context| {
+            if matches!(self.mode, AdvanceMode::PendingAfterEffect) && effect_applied {
+                return Poll::Pending;
+            }
+            let mut state = self.state.lock().unwrap();
+            if state.partition != self.partition {
+                return Poll::Ready(Err(ContractError));
+            }
+            if !state.owned || state.generation != self.generation {
+                state.paused = true;
+                state.loss_pending = true;
+                return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
+            }
+            if matches!(self.mode, AdvanceMode::OwnershipLost) {
+                state.owned = false;
+                state.paused = true;
+                state.loss_pending = true;
+                return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
+            }
+            if !self.resolved.load(AtomicOrdering::SeqCst)
+                || state.unresolved != Some(self.offset)
+                || self.offset != state.committed_offset + 1
+            {
+                return Poll::Ready(Err(ContractError));
+            }
+            if matches!(self.mode, AdvanceMode::ErrorBeforeEffect) {
+                state.paused = true;
+                state.reconcile_required = true;
+                return Poll::Ready(Err(ContractError));
+            }
+
+            state.committed_offset = self.offset;
+            match self.mode {
+                AdvanceMode::Success => {
+                    state.unresolved = None;
+                    Poll::Ready(Ok(PartitionAdvance::Advanced))
+                }
+                AdvanceMode::ErrorAfterEffect => {
+                    state.paused = true;
+                    state.reconcile_required = true;
+                    Poll::Ready(Err(ContractError))
+                }
+                AdvanceMode::PendingAfterEffect => {
+                    state.paused = true;
+                    state.reconcile_required = true;
+                    effect_applied = true;
+                    Poll::Pending
+                }
+                AdvanceMode::OwnershipLost | AdvanceMode::ErrorBeforeEffect => {
+                    Poll::Ready(Err(ContractError))
+                }
+            }
+        })
     }
 
-    fn ack_wait(&self) -> Option<Duration> {
-        Some(Duration::from_secs(30))
+    fn partition(&self) -> &Self::Partition {
+        &self.partition
+    }
+}
+
+struct PartitionFixtureDelivery {
+    partition: PartitionId,
+    offset: u64,
+    settlement: PartitionFixtureSettlement,
+}
+
+impl Delivery for PartitionFixtureDelivery {
+    type Wire = u64;
+    type Settlement = PartitionFixtureSettlement;
+
+    fn into_parts(self) -> (Self::Wire, Self::Settlement) {
+        (self.offset, self.settlement)
+    }
+}
+
+struct PartitionedFixtureSource {
+    partitions: BTreeMap<PartitionId, Arc<Mutex<PartitionState>>>,
+    ownership_events: VecDeque<PartitionId>,
+    next_advance_mode: AdvanceMode,
+}
+
+impl PartitionedFixtureSource {
+    fn new(partitions: &[(PartitionId, u64)], ownership_events: &[PartitionId]) -> Self {
+        Self {
+            partitions: partitions
+                .iter()
+                .map(|(partition, max_offset)| {
+                    (
+                        *partition,
+                        Arc::new(Mutex::new(PartitionState::new(*partition, *max_offset))),
+                    )
+                })
+                .collect(),
+            ownership_events: ownership_events.iter().copied().collect(),
+            next_advance_mode: AdvanceMode::Success,
+        }
     }
 
-    fn max_deliver(&self) -> Option<NonZeroU64> {
-        NonZeroU64::new(5)
+    fn open(&mut self) -> impl Future<Output = Result<(), ContractError>> + Send {
+        ready(Ok(()))
+    }
+
+    fn restart_partition(&mut self, partition: PartitionId) {
+        if let Some(state) = self.partitions.get(&partition) {
+            let mut state = state.lock().unwrap();
+            state.generation += 1;
+            state.owned = true;
+            state.paused = state.unresolved.is_some();
+            state.reconcile_required = state.unresolved.is_some();
+            state.loss_pending = false;
+        }
+    }
+
+    fn poll_receive(
+        &mut self,
+    ) -> Poll<Result<PartitionedLogReceive<PartitionFixtureDelivery, PartitionId>, ContractError>>
+    {
+        if let Some(partition) = self.ownership_events.pop_front() {
+            if let Some(shared_state) = self.partitions.get(&partition) {
+                let mut state = shared_state.lock().unwrap();
+                state.owned = false;
+                state.paused = true;
+                state.loss_pending = false;
+            }
+            return Poll::Ready(Ok(PartitionedLogReceive::OwnershipLost(partition)));
+        }
+
+        for (partition, shared_state) in &self.partitions {
+            let mut state = shared_state.lock().unwrap();
+            if state.loss_pending {
+                state.loss_pending = false;
+                state.owned = false;
+                state.paused = true;
+                return Poll::Ready(Ok(PartitionedLogReceive::OwnershipLost(*partition)));
+            }
+            if state.reconcile_required && state.owned {
+                if let Some(offset) = state.unresolved {
+                    if state.committed_offset >= offset {
+                        state.unresolved = None;
+                    } else {
+                        state.next_offset = offset;
+                        state.unresolved = None;
+                    }
+                }
+                state.reconcile_required = false;
+                state.paused = false;
+            }
+        }
+
+        for (partition, shared_state) in &self.partitions {
+            let mut state = shared_state.lock().unwrap();
+            if !state.owned
+                || state.paused
+                || state.unresolved.is_some()
+                || state.next_offset > state.max_offset
+            {
+                continue;
+            }
+
+            let offset = state.next_offset;
+            state.next_offset += 1;
+            state.unresolved = Some(offset);
+            let generation = state.generation;
+            let state = Arc::clone(shared_state);
+            let mode = self.next_advance_mode;
+            self.next_advance_mode = AdvanceMode::Success;
+            return Poll::Ready(Ok(PartitionedLogReceive::Delivery(
+                PartitionFixtureDelivery {
+                    partition: *partition,
+                    offset,
+                    settlement: PartitionFixtureSettlement {
+                        partition: *partition,
+                        offset,
+                        generation,
+                        state,
+                        resolved: Arc::new(AtomicBool::new(false)),
+                        mode,
+                    },
+                },
+            )));
+        }
+
+        if self.partitions.values().any(|shared_state| {
+            let state = shared_state.lock().unwrap();
+            state.unresolved.is_some() || (state.owned && state.paused)
+        }) {
+            Poll::Pending
+        } else {
+            Poll::Ready(Ok(PartitionedLogReceive::Closed))
+        }
+    }
+
+    fn receive(
+        &mut self,
+    ) -> impl Future<
+        Output = Result<
+            PartitionedLogReceive<PartitionFixtureDelivery, PartitionId>,
+            ContractError,
+        >,
+    > + Send {
+        poll_fn(move |_| self.poll_receive())
+    }
+}
+
+struct KafkaFixture(PartitionedFixtureSource);
+struct IggyFixture(PartitionedFixtureSource);
+
+impl KafkaFixture {
+    fn new() -> Self {
+        Self(PartitionedFixtureSource::new(
+            &[(PartitionId(0), 2), (PartitionId(1), 1)],
+            &[],
+        ))
+    }
+}
+
+impl IggyFixture {
+    fn new() -> Self {
+        Self(PartitionedFixtureSource::new(&[(PartitionId(0), 2)], &[]))
+    }
+}
+
+macro_rules! impl_partitioned_source {
+    ($fixture:ty) => {
+        impl PartitionedLogDeliverySource for $fixture {
+            type Partition = PartitionId;
+            type Delivery = PartitionFixtureDelivery;
+            type Error = ContractError;
+
+            fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+                self.0.open()
+            }
+
+            fn receive(
+                &mut self,
+            ) -> impl Future<
+                Output = Result<
+                    PartitionedLogReceive<Self::Delivery, Self::Partition>,
+                    Self::Error,
+                >,
+            > + Send {
+                self.0.receive()
+            }
+        }
+    };
+}
+
+impl_partitioned_source!(KafkaFixture);
+impl_partitioned_source!(IggyFixture);
+
+struct PartitionReadinessFixture {
+    ready: Arc<AtomicBool>,
+    source: PartitionedFixtureSource,
+}
+
+impl PartitionedLogDeliverySource for PartitionReadinessFixture {
+    type Partition = PartitionId;
+    type Delivery = PartitionFixtureDelivery;
+    type Error = ContractError;
+
+    fn open(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.source.open()
+    }
+
+    fn receive(
+        &mut self,
+    ) -> impl Future<
+        Output = Result<PartitionedLogReceive<Self::Delivery, Self::Partition>, Self::Error>,
+    > + Send {
+        let ready = Arc::clone(&self.ready);
+        poll_fn(move |_| {
+            if ready.load(AtomicOrdering::SeqCst) {
+                self.source.poll_receive()
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+}
+
+fn poll_once<F: Future>(mut future: Pin<&mut F>) -> Poll<F::Output> {
+    let mut context = Context::from_waker(Waker::noop());
+    future.as_mut().poll(&mut context)
+}
+
+fn block_on<F: Future>(future: F) -> F::Output {
+    let mut future = Box::pin(future);
+    match poll_once(future.as_mut()) {
+        Poll::Ready(output) => output,
+        Poll::Pending => panic!("in-memory contract future unexpectedly remained pending"),
     }
 }
 
 fn assert_send<T: Send>(_: T) {}
 
+fn assert_send_sync<T: Send + Sync>() {}
+
+fn assert_individual_source<T: IndividualDeliverySource + Sync>() {}
+
+fn assert_individual_settlement<T: IndividualSettlement + Sync>() {}
+
+fn assert_partitioned_source<T: PartitionedLogDeliverySource + Sync>() {}
+
+fn assert_partitioned_settlement<T: PartitionedLogSettlement + Sync>() {}
+
 #[test]
-fn async_capabilities_use_send_native_futures_and_static_dispatch() {
+fn inbound_public_types_and_native_futures_are_send_sync_and_statically_dispatched() {
+    assert_send_sync::<IndividualCapability>();
+    assert_send_sync::<IndividualSourceRequirement>();
+    assert_send_sync::<IndividualSourceRequirements>();
+    assert_send_sync::<IndividualSourceDescriptor>();
+    assert_send_sync::<IndividualSourceDescriptorError>();
+    assert_send_sync::<UnsupportedIndividualRequirement>();
+    assert_send_sync::<IndividualSourceOpenError<ContractError>>();
+    assert_send_sync::<IndividualSettlementError<ContractError>>();
+    assert_send_sync::<PartitionAdvance>();
+    assert_send_sync::<PartitionedLogReceive<PartitionFixtureDelivery, PartitionId>>();
+
+    assert_individual_source::<NatsFixture>();
+    assert_individual_source::<RabbitMqFixture>();
+    assert_individual_source::<RedisStreamsFixture>();
+    assert_individual_source::<ReadinessFixture>();
+    assert_individual_settlement::<IndividualFixtureSettlement>();
+    assert_partitioned_source::<KafkaFixture>();
+    assert_partitioned_source::<IggyFixture>();
+    assert_partitioned_source::<PartitionReadinessFixture>();
+    assert_partitioned_settlement::<PartitionFixtureSettlement>();
+
+    let support = IndividualSupport {
+        delayed_retry: true,
+        terminal_discard: true,
+        heartbeat: true,
+    };
+    let mut settlement = IndividualFixtureSettlement {
+        support,
+        events: Arc::default(),
+        progress: Arc::default(),
+    };
+    let mut individual = NatsFixture::new();
+    let mut kafka = KafkaFixture::new();
+    let mut iggy = IggyFixture::new();
+    let mut rabbit = RabbitMqFixture::new();
+    let mut redis = RedisStreamsFixture::new();
+
+    // Return-position `impl Future` keeps these generic calls on concrete source and settlement types.
+    assert_send(individual.open(IndividualSourceRequirements::new()));
+    assert_send(individual.receive());
+    assert_send(rabbit.open(IndividualSourceRequirements::new()));
+    assert_send(rabbit.receive());
+    assert_send(redis.open(IndividualSourceRequirements::new()));
+    assert_send(redis.receive());
+    assert_send(settlement.heartbeat());
+    assert_send(
+        IndividualFixtureSettlement {
+            support,
+            events: Arc::default(),
+            progress: Arc::default(),
+        }
+        .ack(),
+    );
+    assert_send(
+        IndividualFixtureSettlement {
+            support,
+            events: Arc::default(),
+            progress: Arc::default(),
+        }
+        .nak(Duration::from_secs(1)),
+    );
+    assert_send(
+        IndividualFixtureSettlement {
+            support,
+            events: Arc::default(),
+            progress: Arc::default(),
+        }
+        .terminate(),
+    );
+    assert_send(kafka.open());
+    assert_send(kafka.receive());
+    assert_send(iggy.open());
+    assert_send(iggy.receive());
+    let mut partition_readiness = PartitionReadinessFixture {
+        ready: Arc::default(),
+        source: PartitionedFixtureSource::new(&[(PartitionId(0), 1)], &[]),
+    };
+    assert_send(partition_readiness.open());
+    assert_send(partition_readiness.receive());
+    assert_send(
+        PartitionFixtureSettlement {
+            partition: PartitionId(0),
+            offset: 1,
+            generation: 7,
+            state: Arc::new(Mutex::new(PartitionState::new(PartitionId(0), 1))),
+            resolved: Arc::new(AtomicBool::new(true)),
+            mode: AdvanceMode::Success,
+        }
+        .advance(),
+    );
+}
+
+#[test]
+fn individual_fixtures_report_truthful_snapshots_and_reject_missing_requirements() {
+    let all_capabilities = IndividualSourceRequirements::new()
+        .requiring_ack_wait()
+        .requiring_max_deliver()
+        .requiring_delayed_retry()
+        .requiring_terminal_discard()
+        .requiring_heartbeat();
+    let mut nats = NatsFixture::new();
+    let nats_descriptor = block_on(nats.open(all_capabilities)).unwrap();
+
+    assert_eq!(nats_descriptor.ack_wait(), Some(Duration::from_secs(30)));
+    assert_eq!(nats_descriptor.max_deliver(), NonZeroU64::new(5));
+    assert!(nats_descriptor.supports_delayed_retry());
+    assert!(nats_descriptor.supports_terminal_discard());
+    assert!(nats_descriptor.supports_heartbeat());
+
+    let mut rabbit = RabbitMqFixture::new();
+    let rabbit_descriptor = block_on(rabbit.open(IndividualSourceRequirements::new())).unwrap();
+    assert_eq!(rabbit_descriptor.ack_wait(), None);
+    assert_eq!(rabbit_descriptor.max_deliver(), None);
+    assert!(!rabbit_descriptor.supports_delayed_retry());
+    assert!(rabbit_descriptor.supports_terminal_discard());
+    assert!(!rabbit_descriptor.supports_heartbeat());
+    let error =
+        block_on(rabbit.open(IndividualSourceRequirements::new().requiring_delayed_retry()))
+            .unwrap_err();
+    assert_eq!(error.classify(), FailureKind::Permanent);
+    assert!(matches!(
+        error,
+        IndividualSourceOpenError::Unsupported(error)
+            if error.requirement() == IndividualSourceRequirement::DelayedRetry
+    ));
+
+    let mut redis = RedisStreamsFixture::new();
+    let redis_descriptor = block_on(redis.open(IndividualSourceRequirements::new())).unwrap();
+    assert_eq!(redis_descriptor.ack_wait(), None);
+    assert_eq!(redis_descriptor.max_deliver(), None);
+    assert!(!redis_descriptor.supports_delayed_retry());
+    assert!(!redis_descriptor.supports_terminal_discard());
+    assert!(!redis_descriptor.supports_heartbeat());
+    let error =
+        block_on(redis.open(IndividualSourceRequirements::new().requiring_terminal_discard()))
+            .unwrap_err();
+    assert!(matches!(
+        error,
+        IndividualSourceOpenError::Unsupported(error)
+            if error.requirement() == IndividualSourceRequirement::TerminalDiscard
+    ));
+
+    assert_eq!(
+        IndividualSourceDescriptor::new(Some(Duration::ZERO), NonZeroU64::new(1), true, true, true,),
+        Err(IndividualSourceDescriptorError::ZeroAckWait)
+    );
+}
+
+#[test]
+fn individual_operations_fail_classified_without_emulation_and_delivery_splits_once() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let support = IndividualSupport {
+        delayed_retry: false,
+        terminal_discard: true,
+        heartbeat: false,
+    };
+    let mut settlement = IndividualFixtureSettlement {
+        support,
+        events: Arc::clone(&events),
+        progress: Arc::default(),
+    };
+
+    let heartbeat_error = block_on(settlement.heartbeat()).unwrap_err();
+    assert!(matches!(
+        heartbeat_error,
+        IndividualSettlementError::Unsupported(IndividualCapability::Heartbeat)
+    ));
+    assert_eq!(heartbeat_error.classify(), FailureKind::Permanent);
+    let retry_error = block_on(
+        IndividualFixtureSettlement {
+            support,
+            events: Arc::clone(&events),
+            progress: Arc::default(),
+        }
+        .nak(Duration::from_secs(10)),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        retry_error,
+        IndividualSettlementError::Unsupported(IndividualCapability::DelayedRetry)
+    ));
+    assert_eq!(
+        retry_error.to_string(),
+        "individual settlement operation is unsupported"
+    );
+    assert!(events.lock().unwrap().is_empty());
+
+    let mut nats = NatsFixture::new();
+    let unpolled_receive = Box::pin(nats.receive());
+    drop(unpolled_receive);
+    let delivery = block_on(nats.receive()).unwrap().unwrap();
+    let mut unresolved_receive = Box::pin(nats.receive());
+    assert!(poll_once(unresolved_receive.as_mut()).is_pending());
+    drop(unresolved_receive);
+    let (wire, settlement) = delivery.into_parts();
+    assert_eq!(wire, [1, 2, 3]);
+    block_on(settlement.ack()).unwrap();
+    assert!(block_on(nats.receive()).unwrap().is_none());
+
+    let mut redis = RedisStreamsFixture::new();
+    let (wire, settlement) = block_on(redis.receive()).unwrap().unwrap().into_parts();
+    assert_eq!(wire, [1, 2, 3]);
+    let error = block_on(settlement.terminate()).unwrap_err();
+    assert!(matches!(
+        error,
+        IndividualSettlementError::Unsupported(IndividualCapability::TerminalDiscard)
+    ));
+}
+
+#[test]
+fn cancel_safe_individual_readiness_keeps_the_delivery_available() {
+    let support = IndividualSupport {
+        delayed_retry: true,
+        terminal_discard: true,
+        heartbeat: true,
+    };
+    let ready = Arc::new(AtomicBool::new(false));
+    let mut source = ReadinessFixture {
+        ready: Arc::clone(&ready),
+        source: IndividualSourceFixture::new(
+            support.descriptor(Some(Duration::from_secs(30)), NonZeroU64::new(5)),
+            support,
+            Arc::default(),
+        ),
+    };
+    let unpolled = Box::pin(source.receive());
+    drop(unpolled);
+    let mut pending = Box::pin(source.receive());
+    assert!(poll_once(pending.as_mut()).is_pending());
+    drop(pending);
+
+    ready.store(true, AtomicOrdering::SeqCst);
+    let delivery = block_on(source.receive()).unwrap().unwrap();
+    assert_eq!(delivery.into_parts().0, [1, 2, 3]);
+}
+
+fn take_partition_delivery(
+    source: &mut impl PartitionedLogDeliverySource<
+        Partition = PartitionId,
+        Delivery = PartitionFixtureDelivery,
+        Error = ContractError,
+    >,
+) -> PartitionFixtureDelivery {
+    match block_on(source.receive()).unwrap() {
+        PartitionedLogReceive::Delivery(delivery) => delivery,
+        PartitionedLogReceive::OwnershipLost(partition) => {
+            panic!("unexpected ownership loss for partition {partition:?}")
+        }
+        PartitionedLogReceive::Closed => panic!("unexpected closed partition source"),
+    }
+}
+
+fn take_partition_and_settlement<D, P>(delivery: D) -> (P, <D as Delivery>::Settlement)
+where
+    D: Delivery,
+    <D as Delivery>::Settlement: PartitionedLogSettlement<Partition = P>,
+    P: Clone,
+{
+    let (_, settlement) = delivery.into_parts();
+    let partition = settlement.partition().clone();
+    (partition, settlement)
+}
+
+#[test]
+fn partitioned_sources_hold_gaps_and_allow_other_partitions_to_progress() {
+    let mut kafka = KafkaFixture::new();
+    block_on(kafka.open()).unwrap();
+
+    let first = take_partition_delivery(&mut kafka);
+    assert_eq!(first.partition, PartitionId(0));
+    assert_eq!(first.offset, 1);
+    let second_partition = take_partition_delivery(&mut kafka);
+    assert_eq!(second_partition.partition, PartitionId(1));
+    assert_eq!(second_partition.offset, 1);
+
+    let (offset, second_settlement) = second_partition.into_parts();
+    assert_eq!(offset, 1);
+    second_settlement.mark_durably_resolved();
+    assert_eq!(
+        block_on(second_settlement.advance()).unwrap(),
+        PartitionAdvance::Advanced
+    );
+
+    let mut blocked_by_gap = Box::pin(kafka.receive());
+    assert!(poll_once(blocked_by_gap.as_mut()).is_pending());
+    drop(blocked_by_gap);
+    let (first_offset, first_settlement) = first.into_parts();
+    assert_eq!(first_offset, 1);
+    first_settlement.mark_durably_resolved();
+    assert_eq!(
+        block_on(first_settlement.advance()).unwrap(),
+        PartitionAdvance::Advanced
+    );
+
+    let later = take_partition_delivery(&mut kafka);
+    assert_eq!(later.partition, PartitionId(0));
+    assert_eq!(later.offset, 2);
+
+    let mut iggy = IggyFixture::new();
+    block_on(iggy.open()).unwrap();
+    let iggy_delivery = take_partition_delivery(&mut iggy);
+    assert_eq!(iggy_delivery.partition, PartitionId(0));
+    assert_eq!(iggy_delivery.offset, 1);
+}
+
+#[test]
+fn partition_receive_only_consumes_after_poll_and_preserves_pending_readiness() {
+    let mut unpolled_source = IggyFixture::new();
+    let unpolled_receive = Box::pin(unpolled_source.receive());
+    drop(unpolled_receive);
+    let unpolled_delivery = take_partition_delivery(&mut unpolled_source);
+    assert_eq!(unpolled_delivery.offset, 1);
+
+    let ready = Arc::new(AtomicBool::new(false));
+    let mut readiness_source = PartitionReadinessFixture {
+        ready: Arc::clone(&ready),
+        source: PartitionedFixtureSource::new(&[(PartitionId(0), 1)], &[]),
+    };
+    let mut pending_receive = Box::pin(readiness_source.receive());
+    assert!(poll_once(pending_receive.as_mut()).is_pending());
+    drop(pending_receive);
+    {
+        let state = readiness_source.source.partitions[&PartitionId(0)]
+            .lock()
+            .unwrap();
+        assert_eq!(state.next_offset, 1);
+        assert_eq!(state.unresolved, None);
+    }
+
+    ready.store(true, AtomicOrdering::SeqCst);
+    let delivery = take_partition_delivery(&mut readiness_source);
+    assert_eq!(delivery.offset, 1);
+}
+
+#[test]
+fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_restart() {
+    let mut lost_source = KafkaFixture(PartitionedFixtureSource::new(
+        &[(PartitionId(3), 1)],
+        &[PartitionId(3)],
+    ));
+    assert!(matches!(
+        block_on(lost_source.receive()).unwrap(),
+        PartitionedLogReceive::OwnershipLost(PartitionId(3))
+    ));
+
+    let mut unpolled_advance_source = IggyFixture::new();
+    let (_, unpolled_advance) = take_partition_delivery(&mut unpolled_advance_source).into_parts();
+    let state = Arc::clone(&unpolled_advance_source.0.partitions[&PartitionId(0)]);
+    unpolled_advance.mark_durably_resolved();
+    let unpolled_advance = Box::pin(unpolled_advance.advance());
+    drop(unpolled_advance);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+    }
+    unpolled_advance_source.0.restart_partition(PartitionId(0));
+    let replay = take_partition_delivery(&mut unpolled_advance_source);
+    assert_eq!(replay.offset, 1);
+
+    let mut before_effect_source = IggyFixture::new();
+    before_effect_source.0.next_advance_mode = AdvanceMode::ErrorBeforeEffect;
+    let before_effect = take_partition_delivery(&mut before_effect_source).settlement;
+    let state = Arc::clone(&before_effect_source.0.partitions[&PartitionId(0)]);
+    before_effect.mark_durably_resolved();
+    let error = block_on(before_effect.advance()).unwrap_err();
+    assert_eq!(error.classify(), FailureKind::Transient);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+    before_effect_source.0.restart_partition(PartitionId(0));
+    let replay = take_partition_delivery(&mut before_effect_source);
+    assert_eq!(replay.offset, 1);
+
+    let mut after_effect_error_source = IggyFixture::new();
+    after_effect_error_source.0.next_advance_mode = AdvanceMode::ErrorAfterEffect;
+    let after_effect_error = take_partition_delivery(&mut after_effect_error_source).settlement;
+    let state = Arc::clone(&after_effect_error_source.0.partitions[&PartitionId(0)]);
+    after_effect_error.mark_durably_resolved();
+    let error = block_on(after_effect_error.advance()).unwrap_err();
+    assert_eq!(error.classify(), FailureKind::Transient);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 1);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+    let next = take_partition_delivery(&mut after_effect_error_source);
+    assert_eq!(next.offset, 2);
+
+    let mut after_effect_pending_source = IggyFixture::new();
+    after_effect_pending_source.0.next_advance_mode = AdvanceMode::PendingAfterEffect;
+    let after_effect_pending = take_partition_delivery(&mut after_effect_pending_source).settlement;
+    let state = Arc::clone(&after_effect_pending_source.0.partitions[&PartitionId(0)]);
+    after_effect_pending.mark_durably_resolved();
+    let mut pending_advance = Box::pin(after_effect_pending.advance());
+    assert!(poll_once(pending_advance.as_mut()).is_pending());
+    drop(pending_advance);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 1);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+    after_effect_pending_source
+        .0
+        .restart_partition(PartitionId(0));
+    let next = take_partition_delivery(&mut after_effect_pending_source);
+    assert_eq!(next.offset, 2);
+
+    let mut relinquished_source = IggyFixture::new();
+    let mut relinquished = take_partition_delivery(&mut relinquished_source).settlement;
+    let state = Arc::clone(&relinquished_source.0.partitions[&PartitionId(0)]);
+    relinquished.mark_durably_resolved();
+    relinquished.mode = AdvanceMode::OwnershipLost;
+    assert_eq!(
+        block_on(relinquished.advance()).unwrap(),
+        PartitionAdvance::OwnershipLost
+    );
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(!state.owned);
+    }
+
+    let mut stale_source = IggyFixture::new();
+    let (delivery_partition, stale) =
+        take_partition_and_settlement(take_partition_delivery(&mut stale_source));
+    let state = Arc::clone(&stale_source.0.partitions[&PartitionId(0)]);
+    stale.mark_durably_resolved();
+    state.lock().unwrap().generation += 1;
+    assert_eq!(
+        block_on(stale.advance()).unwrap(),
+        PartitionAdvance::OwnershipLost
+    );
+    assert!(matches!(
+        block_on(stale_source.receive()).unwrap(),
+        PartitionedLogReceive::OwnershipLost(partition) if partition == delivery_partition
+    ));
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+    }
+    stale_source.0.restart_partition(delivery_partition);
+    let replay = take_partition_delivery(&mut stale_source);
+    assert_eq!(replay.partition, delivery_partition);
+    assert_eq!(replay.offset, 1);
+}
+
+#[test]
+fn contract_futures_retain_send_and_existing_publication_contracts() {
     let serialized = SerializedEnvelope {
         message_id: MessageId::new(),
         message_type: MessageType::new("contracts.test").unwrap(),
@@ -587,29 +1714,6 @@ fn async_capabilities_use_send_native_futures_and_static_dispatch() {
     };
 
     assert_send(ContractPublisher.publish(&serialized));
-
-    let mut source = ContractSource;
-
-    assert_send(source.open());
-    assert_send(source.receive());
-    assert_eq!(source.ack_wait(), Some(Duration::from_secs(30)));
-    assert_eq!(source.max_deliver(), NonZeroU64::new(5));
-
-    let mut settlement = ContractSettlement;
-
-    assert_send(settlement.heartbeat());
-    assert_send(ContractSettlement.ack());
-    assert_send(ContractSettlement.nak(Duration::from_secs(1)));
-    assert_send(ContractSettlement.terminate());
-
-    let delivery = ContractDelivery {
-        wire: Vec::new(),
-        settlement: ContractSettlement,
-    };
-
-    let (wire, _settlement) = delivery.into_parts();
-
-    assert!(wire.is_empty());
     assert_eq!(
         ContractMapper.encode(&serialized).unwrap(),
         serialized.payload

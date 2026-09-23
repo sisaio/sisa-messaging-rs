@@ -21,7 +21,13 @@ mod metadata;
 mod publisher;
 mod serializer;
 
-pub use delivery::{Delivery, DeliverySource, Settlement};
+pub use delivery::{
+    Delivery, IndividualCapability, IndividualDeliverySource, IndividualSettlement,
+    IndividualSettlementError, IndividualSourceDescriptor, IndividualSourceDescriptorError,
+    IndividualSourceOpenError, IndividualSourceRequirement, IndividualSourceRequirements,
+    PartitionAdvance, PartitionedLogDeliverySource, PartitionedLogReceive,
+    PartitionedLogSettlement, UnsupportedIndividualRequirement,
+};
 pub use envelope::{Envelope, EnvelopeError, SerializedEnvelope};
 pub use error::{ErrorSummary, MAX_ERROR_SUMMARY_BYTES};
 pub use failure::{ErrorClassifier, FailureKind};
