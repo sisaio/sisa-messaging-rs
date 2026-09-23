@@ -366,7 +366,10 @@ partition workflow may `Advance` its ordered cursor; otherwise it must `LeaveUnr
 advances past an earlier unresolved record. Ownership loss is a distinct receive outcome, not a
 clean source close: it fences the old settlement generation and blocks that partition until its
 cursor and ownership are reconciled. An indeterminate advance similarly pauses only the affected
-partition until reconciliation proves whether the cursor moved; other partitions may continue.
+partition. Before reading the cursor, reconciliation must prove the old advance is quiescent or
+fence its generation so it cannot still take effect. Only then can it determine whether the cursor
+moved; other partitions may continue. See [Consumer framework](consumer-framework.md) for the
+complete rule.
 
 ## 7. NATS publish
 
