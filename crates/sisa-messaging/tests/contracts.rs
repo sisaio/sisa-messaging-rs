@@ -885,6 +885,7 @@ struct PartitionState {
     generation: u64,
     reconciled_committed_offset: Option<u64>,
     reconciled_generation: Option<u64>,
+    advance_outstanding_generation: Option<u64>,
     owned: bool,
     paused: bool,
     reconcile_required: bool,
@@ -902,6 +903,7 @@ impl PartitionState {
             generation: 7,
             reconciled_committed_offset: None,
             reconciled_generation: None,
+            advance_outstanding_generation: None,
             owned: true,
             paused: false,
             reconcile_required: false,
@@ -917,6 +919,7 @@ enum AdvanceMode {
     OwnershipLost,
     ErrorBeforeEffect,
     ErrorAfterEffect,
+    PendingBeforeEffect,
     PendingAfterEffect,
 }
 
@@ -935,6 +938,119 @@ impl PartitionFixtureSettlement {
     }
 }
 
+struct PartitionFixtureAdvanceFuture {
+    partition: PartitionId,
+    offset: u64,
+    generation: u64,
+    state: Arc<Mutex<PartitionState>>,
+    resolved: Arc<AtomicBool>,
+    mode: AdvanceMode,
+    effect_applied: bool,
+    completed: bool,
+}
+
+impl PartitionFixtureAdvanceFuture {
+    fn finish(&mut self, state: &mut PartitionState) {
+        if state.advance_outstanding_generation == Some(self.generation) {
+            state.advance_outstanding_generation = None;
+        }
+        self.completed = true;
+    }
+}
+
+impl Future for PartitionFixtureAdvanceFuture {
+    type Output = Result<PartitionAdvance, ContractError>;
+
+    fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let shared_state = Arc::clone(&this.state);
+        let mut state = shared_state.lock().unwrap();
+        if state.partition != this.partition {
+            this.completed = true;
+            return Poll::Ready(Err(ContractError));
+        }
+        if !state.owned || state.generation != this.generation {
+            state.paused = true;
+            state.loss_pending = true;
+            this.finish(&mut state);
+            return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
+        }
+        if matches!(this.mode, AdvanceMode::OwnershipLost) {
+            state.owned = false;
+            state.paused = true;
+            state.loss_pending = true;
+            this.finish(&mut state);
+            return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
+        }
+        if !this.resolved.load(AtomicOrdering::SeqCst)
+            || state.unresolved != Some(this.offset)
+            || this.offset != state.committed_offset + 1
+        {
+            this.finish(&mut state);
+            return Poll::Ready(Err(ContractError));
+        }
+        if matches!(this.mode, AdvanceMode::ErrorBeforeEffect) {
+            state.paused = true;
+            state.reconcile_required = true;
+            this.finish(&mut state);
+            return Poll::Ready(Err(ContractError));
+        }
+        if matches!(this.mode, AdvanceMode::PendingBeforeEffect) {
+            return Poll::Pending;
+        }
+        if matches!(this.mode, AdvanceMode::PendingAfterEffect) && this.effect_applied {
+            return Poll::Pending;
+        }
+
+        state.committed_offset = this.offset;
+        match this.mode {
+            AdvanceMode::Success => {
+                state.unresolved = None;
+                state.paused = false;
+                state.reconcile_required = false;
+                this.finish(&mut state);
+                Poll::Ready(Ok(PartitionAdvance::Advanced))
+            }
+            AdvanceMode::ErrorAfterEffect => {
+                state.paused = true;
+                state.reconcile_required = true;
+                this.finish(&mut state);
+                Poll::Ready(Err(ContractError))
+            }
+            AdvanceMode::PendingAfterEffect => {
+                state.paused = true;
+                state.reconcile_required = true;
+                this.effect_applied = true;
+                Poll::Pending
+            }
+            AdvanceMode::OwnershipLost
+            | AdvanceMode::ErrorBeforeEffect
+            | AdvanceMode::PendingBeforeEffect => {
+                state.paused = true;
+                state.reconcile_required = true;
+                this.finish(&mut state);
+                Poll::Ready(Err(ContractError))
+            }
+        }
+    }
+}
+
+impl Drop for PartitionFixtureAdvanceFuture {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        let mut state = self.state.lock().unwrap();
+        if state.partition == self.partition
+            && state.advance_outstanding_generation == Some(self.generation)
+        {
+            state.advance_outstanding_generation = None;
+            state.paused = true;
+            state.reconcile_required = true;
+        }
+    }
+}
+
 impl PartitionedLogSettlement for PartitionFixtureSettlement {
     type Partition = PartitionId;
     type Error = ContractError;
@@ -943,68 +1059,23 @@ impl PartitionedLogSettlement for PartitionFixtureSettlement {
         {
             let mut state = self.state.lock().unwrap();
             if state.partition == self.partition && state.unresolved == Some(self.offset) {
-                // Even an unpolled future can be dropped. Conservatively pause until the source
-                // reconciles both the authoritative cursor and the current ownership generation.
+                // Track the future from construction so even an unpolled live future prevents
+                // reconciliation until it completes, is dropped, or a newer generation fences it.
                 state.paused = true;
                 state.reconcile_required = true;
+                state.advance_outstanding_generation = Some(self.generation);
             }
         }
-        let mut effect_applied = false;
-        poll_fn(move |_context| {
-            if matches!(self.mode, AdvanceMode::PendingAfterEffect) && effect_applied {
-                return Poll::Pending;
-            }
-            let mut state = self.state.lock().unwrap();
-            if state.partition != self.partition {
-                return Poll::Ready(Err(ContractError));
-            }
-            if !state.owned || state.generation != self.generation {
-                state.paused = true;
-                state.loss_pending = true;
-                return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
-            }
-            if matches!(self.mode, AdvanceMode::OwnershipLost) {
-                state.owned = false;
-                state.paused = true;
-                state.loss_pending = true;
-                return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
-            }
-            if !self.resolved.load(AtomicOrdering::SeqCst)
-                || state.unresolved != Some(self.offset)
-                || self.offset != state.committed_offset + 1
-            {
-                return Poll::Ready(Err(ContractError));
-            }
-            if matches!(self.mode, AdvanceMode::ErrorBeforeEffect) {
-                state.paused = true;
-                state.reconcile_required = true;
-                return Poll::Ready(Err(ContractError));
-            }
-
-            state.committed_offset = self.offset;
-            match self.mode {
-                AdvanceMode::Success => {
-                    state.unresolved = None;
-                    state.paused = false;
-                    state.reconcile_required = false;
-                    Poll::Ready(Ok(PartitionAdvance::Advanced))
-                }
-                AdvanceMode::ErrorAfterEffect => {
-                    state.paused = true;
-                    state.reconcile_required = true;
-                    Poll::Ready(Err(ContractError))
-                }
-                AdvanceMode::PendingAfterEffect => {
-                    state.paused = true;
-                    state.reconcile_required = true;
-                    effect_applied = true;
-                    Poll::Pending
-                }
-                AdvanceMode::OwnershipLost | AdvanceMode::ErrorBeforeEffect => {
-                    Poll::Ready(Err(ContractError))
-                }
-            }
-        })
+        PartitionFixtureAdvanceFuture {
+            partition: self.partition,
+            offset: self.offset,
+            generation: self.generation,
+            state: self.state,
+            resolved: self.resolved,
+            mode: self.mode,
+            effect_applied: false,
+            completed: false,
+        }
     }
 
     fn partition(&self) -> &Self::Partition {
@@ -1055,8 +1126,13 @@ impl PartitionedFixtureSource {
     }
 
     fn restart_partition(&mut self, partition: PartitionId) {
+        self.fence_partition(partition);
+    }
+
+    fn fence_partition(&mut self, partition: PartitionId) {
         if let Some(state) = self.partitions.get(&partition) {
             let mut state = state.lock().unwrap();
+            // Advancing the authoritative generation fences any late effect from older futures.
             state.generation += 1;
             state.owned = true;
             state.paused = state.unresolved.is_some();
@@ -1100,7 +1176,9 @@ impl PartitionedFixtureSource {
         if !has_ready_partition {
             for shared_state in self.partitions.values() {
                 let mut state = shared_state.lock().unwrap();
-                if state.reconcile_required && state.owned {
+                let advance_can_still_effect_cursor =
+                    state.advance_outstanding_generation == Some(state.generation);
+                if state.reconcile_required && state.owned && !advance_can_still_effect_cursor {
                     if let Some(offset) = state.unresolved {
                         if state.committed_offset >= offset {
                             state.unresolved = None;
@@ -1687,6 +1765,101 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         assert!(!state.paused);
         assert!(!state.reconcile_required);
     }
+
+    let mut live_advance_source = KafkaFixture(PartitionedFixtureSource::new(
+        &[(PartitionId(0), 1), (PartitionId(1), 1)],
+        &[],
+    ));
+    live_advance_source.0.next_advance_mode = AdvanceMode::PendingBeforeEffect;
+    let first = take_partition_delivery(&mut live_advance_source);
+    assert_eq!(first.partition, PartitionId(0));
+    let (_, first_settlement) = first.into_parts();
+    let state = Arc::clone(&live_advance_source.0.partitions[&PartitionId(0)]);
+    let generation = state.lock().unwrap().generation;
+    first_settlement.mark_durably_resolved();
+    let mut live_advance = Box::pin(first_settlement.advance());
+    assert!(poll_once(live_advance.as_mut()).is_pending());
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert_eq!(state.advance_outstanding_generation, Some(generation));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+
+    let other_partition = take_partition_delivery(&mut live_advance_source);
+    assert_eq!(other_partition.partition, PartitionId(1));
+    assert_eq!(other_partition.offset, 1);
+    let (_, other_settlement) = other_partition.into_parts();
+    other_settlement.mark_durably_resolved();
+    assert_eq!(
+        block_on(other_settlement.advance()).unwrap(),
+        PartitionAdvance::Advanced
+    );
+    let mut blocked_receive = Box::pin(live_advance_source.receive());
+    assert!(poll_once(blocked_receive.as_mut()).is_pending());
+    drop(blocked_receive);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert_eq!(state.reconciled_committed_offset, None);
+        assert_eq!(state.reconciled_generation, None);
+        assert_eq!(state.advance_outstanding_generation, Some(generation));
+        assert!(state.paused);
+        assert!(state.reconcile_required);
+    }
+
+    drop(live_advance);
+    let replay = take_partition_delivery(&mut live_advance_source);
+    assert_eq!(replay.partition, PartitionId(0));
+    assert_eq!(replay.offset, 1);
+    assert_eq!(replay.settlement.generation, generation);
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.unresolved, Some(1));
+        assert_eq!(state.reconciled_committed_offset, Some(0));
+        assert_eq!(state.reconciled_generation, Some(generation));
+        assert_eq!(state.advance_outstanding_generation, None);
+    }
+
+    let mut fenced_source = IggyFixture::new();
+    fenced_source.0.next_advance_mode = AdvanceMode::PendingBeforeEffect;
+    let fenced_delivery = take_partition_delivery(&mut fenced_source);
+    let (fenced_partition, fenced_settlement) = take_partition_and_settlement(fenced_delivery);
+    let state = Arc::clone(&fenced_source.0.partitions[&fenced_partition]);
+    let old_generation = state.lock().unwrap().generation;
+    fenced_settlement.mark_durably_resolved();
+    let mut old_advance = Box::pin(fenced_settlement.advance());
+    assert!(poll_once(old_advance.as_mut()).is_pending());
+    fenced_source.0.fence_partition(fenced_partition);
+    assert_eq!(
+        block_on(old_advance).unwrap(),
+        PartitionAdvance::OwnershipLost
+    );
+    {
+        let state = state.lock().unwrap();
+        assert_eq!(state.generation, old_generation + 1);
+        assert_eq!(state.committed_offset, 0);
+        assert_eq!(state.next_offset, 2);
+        assert_eq!(state.unresolved, Some(1));
+        assert!(state.reconcile_required);
+    }
+    assert!(matches!(
+        block_on(fenced_source.receive()).unwrap(),
+        PartitionedLogReceive::OwnershipLost(partition) if partition == fenced_partition
+    ));
+    fenced_source.0.restart_partition(fenced_partition);
+    let replay = take_partition_delivery(&mut fenced_source);
+    assert_eq!(replay.partition, fenced_partition);
+    assert_eq!(replay.offset, 1);
+    assert_eq!(
+        state.lock().unwrap().committed_offset,
+        0,
+        "a late old-generation attempt must not mutate the committed cursor"
+    );
 
     let mut before_effect_source = IggyFixture::new();
     before_effect_source.0.next_advance_mode = AdvanceMode::ErrorBeforeEffect;

@@ -126,11 +126,14 @@ partition so a generic coordinator can associate an ownership-loss event. It adv
 the consumer transaction commits or a durable terminal disposition exists. Initially the consumer
 permits one unresolved record per partition: a later offset cannot advance until its earlier record
 resolves. `OwnershipLost` proves fencing prevented advancement. An advance error, timeout, or
-dropped advance future is indeterminate: the source pauses that partition and reconciles the
-authoritative committed cursor plus ownership generation before another offset. It replays when
-the cursor did not advance, continues only when it did, and stays paused or fails when either fact
-is unknowable; other partitions may progress. A source must not emit a new generation while this
-handling is underway. Automatic commit is not a profile option. Redis Streams reclaim is
+dropped advance future is indeterminate: the source pauses that partition. Before reading the
+authoritative committed cursor and ownership generation, it must establish that the previous
+advance cannot still change the cursor, either by proving it is quiescent or by an authoritative
+fence against its old generation. It replays when the cursor did not advance,
+continues only when it did, and stays paused or fails when the advance's effects, cursor, or
+fencing cannot be established; other partitions may progress. No replay or later offset may be
+emitted while the old advance could still take effect. A source must not emit a new generation
+while this handling is underway. Automatic commit is not a profile option. Redis Streams reclaim is
 individual delivery, not partitioned-log ownership; its unavailable delay, heartbeat, or terminal
 operation must fail requirement validation.
 
@@ -276,6 +279,14 @@ validated after I/O but before receiving. Inbox `max_attempts` must not exceed a
 
 ## 5. Individual-delivery state machine
 
+The flow below uses both delayed retry and terminal discard. A consumer selecting this flow
+requires both capabilities in `IndividualSourceRequirements` when it opens the source; if either
+is absent, opening fails before the first receive. Configuring `heartbeat_interval` additionally
+requires heartbeat support and a reported `ack_wait` so the interval can be checked. A policy may
+omit an optional requirement only if none of its reachable paths invokes that operation; this
+contract does not define a fallback policy for a source lacking delay or terminal discard.
+Unsupported operations are never emulated with acknowledgement, immediate retry, or offset skip.
+
 ```text
 receive delivery
       │
@@ -385,8 +396,9 @@ the consumer so the application supervisor observes the programming fault.
 
 Errors are separated by decision boundary:
 
-- `ConsumerConfigError`: invalid settings or incompatible acknowledgement timing;
-- `ConsumerError`: fatal source, provider, settlement, panic, or runtime failure that ends `run`;
+- `ConsumerConfigError`: constructor-known invalid settings;
+- `ConsumerError`: descriptor-dependent startup incompatibility after source opening, or a fatal
+  source, provider, settlement, panic, or runtime failure that ends `run`;
 - handler error: application-owned and classified as transient or permanent;
 - inbox/unit-of-work error: provider-owned and retained as a source;
 - mapping/codec error: mapped to a stable poison reason without rendering payload bytes;
