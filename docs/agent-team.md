@@ -10,22 +10,24 @@ This repository uses one primary Codex agent and four project-scoped custom agen
 
 | Role | Model / normal effort | Writes files | Use and escalation trade-off |
 |---|---|---:|---|
-| Primary delivery lead | Cost-controlled GPT-5.x / low or medium | Docs only | Requirements, orchestration, and acceptance; raise effort only for a named unresolved risk |
-| `architect` | `gpt-5.6-sol` / `high` | No | Flagship reasoning for gated architecture and adversarial design analysis |
-| `backend_developer` | `gpt-5.6-terra` / `medium` | Yes | Cost-balanced sustained Rust/SQL implementation; high is a task-specific override for a named correctness risk |
-| `reviewer` | `gpt-5.6-sol` / `high` | No | Flagship independent integration and final-approval review |
-| `release_engineer` | `gpt-5.6-luna` / `medium` | Yes, narrowly | Faster delivery work; high is reserved for migration-integrity, publication, or CI-security risk |
+| Primary delivery lead | `gpt-6-sol` / `medium` | Docs only | Requirements, orchestration, and acceptance; raise effort only for a named unresolved risk |
+| `architect` | `gpt-6-sol` / `high` | No | Flagship reasoning for gated architecture and adversarial design analysis |
+| `backend_developer` | `gpt-6-sol` / `medium` | Yes | Strong model with moderate reasoning for sustained Rust/SQL implementation; high is a task-specific override for a named correctness risk |
+| `reviewer` | `gpt-6-sol` / `high` | No | Flagship independent integration and final-approval review |
+| `release_engineer` | `gpt-6-luna` / `low` | Yes, narrowly | Fast, low-effort delivery work; raise effort only for a named migration-integrity, publication, or CI-security risk |
 
-GPT-6 Astra is not a primary or project-agent model and is not an escalation path. The model split
-preserves diversity between the Terra implementation writer and Sol final reviewer. High effort is
-bounded to architecture, which is spawned only behind its design/risk gate, and independent review,
-which owns final approval; routine implementation and delivery remain medium. The project config
-caps spawned agents at two concurrent threads, and the normal workflow remains sequential because
-overlapping writers and implementation-aware final reviewers are prohibited.
+GPT-6 Astra is not a primary or project-agent model and is not an escalation path. Balanced uses
+`gpt-6-sol` at medium effort: model capability and reasoning effort are separate settings, so this
+keeps routine implementation capable without paying the high-effort cost on every request. High
+effort remains bounded to architecture, which is spawned only behind its design/risk gate, and
+independent review, which owns final approval. The project config caps spawned agents at two
+concurrent threads, and the normal workflow remains sequential because overlapping writers and
+implementation-aware final reviewers are prohibited.
 
 [Official OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model)
 recommends explicitly tuning delegation and calibrating verification to the task. This repository
-applies those harness principles with its own approved GPT-5.x model constraint and evidence gates.
+applies those harness principles with its own approved GPT-6 Sol/Luna model constraint and evidence
+gates.
 
 ## 2. Roles intentionally not created
 
@@ -115,8 +117,9 @@ re-runs `.agents/sync.sh all`; never edit a generated file by hand.
   instruction body.
 - `.agents/harnesses/codex.toml` maps each tier to a Codex model and reasoning effort and holds
   Codex-only config, including the primary model, compaction limit, agent block, and plugins.
-- `.agents/harnesses/claude.toml` maps tiers to Claude Code aliases, adds read-only-role
-  `disallowedTools`, and holds the permission allowlist, including `Bash(rtk *)`.
+- `.agents/harnesses/claude.toml` maps tiers to generic Claude Code aliases (`opus`, `sonnet`,
+  `haiku`), which resolve to the latest model in each family rather than a pinned version; it also
+  adds read-only-role `disallowedTools` and holds the permission allowlist, including `Bash(rtk *)`.
 - `.agents/skills/<name>/SKILL.md` holds skills shared by both harnesses.
 - `.agents/sync.sh <codex|claude|all> [--check]` generates Codex and Claude role files, config,
   settings, `CLAUDE.md`, and skill links. `--check` regenerates into a temporary directory and fails
@@ -173,7 +176,7 @@ was 0.17% and instruction files under 2k tokens per thread:
 
 | Role | Share | Measured detail |
 |---|---:|---|
-| Primary orchestrator | 33% | On `gpt-5.6-sol`; largest thread 628 requests, 206 `wait_agent` polls at a median one-minute gap, each resending 150–217k context |
+| Primary orchestrator | 33% | Historical baseline ran on `gpt-5.6-sol`; largest thread 628 requests, 206 `wait_agent` polls at a median one-minute gap, each resending 150–217k context |
 | `backend_developer` | 30% | 22 spawns |
 | `reviewer` | 22% | 45 spawns; worst run 137 requests, 108 shell commands, 2 compactions, 216k context |
 | Guardian auto-review | 8% | Desktop Auto approval mode |
@@ -182,8 +185,8 @@ was 0.17% and instruction files under 2k tokens per thread:
 
 The owner records the same metrics on the next full issue flow and compares them here. That
 post-merge Dependabot/feature comparison is follow-up evidence, not a gate for the policy change
-that defines it. Two owner actions remain outside the repository: choose a cost-controlled primary
-default at medium effort, and reconsider Desktop Auto review or widen its sandbox allowlist.
+that defines it. One owner action remains outside the repository: reconsider Desktop Auto review
+or widen its sandbox allowlist.
 
 This repository maintains no Markdown task cards, separate story files, second backlog, or routine
 ADR stream. Issues record intent, PRs record review and validation, Git records the accepted change,

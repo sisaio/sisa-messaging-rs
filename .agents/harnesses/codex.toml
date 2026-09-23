@@ -1,23 +1,24 @@
 # Codex harness mapping for the roles in .agents/roles/*.md.
 # Read by .agents/sync.sh; do not edit the generated .codex/ files by hand.
 
-# Tier to Codex model and reasoning effort.
+# Tier to Codex model and reasoning effort. Balanced uses the Sol model at medium effort;
+# model capability and reasoning effort are tuned separately.
 [tiers.flagship]
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 effort = "high"
 
 [tiers.balanced]
-model = "gpt-5.6-terra"
+model = "gpt-6-sol"
 effort = "medium"
 
 [tiers.fast]
-model = "gpt-5.6-luna"
-effort = "medium"
+model = "gpt-6-luna"
+effort = "low"
 
 # Everything under [config] is emitted verbatim as .codex/config.toml, with the
 # leading "config." stripped from each table header.
 [config]
-model = "gpt-5.6-terra"
+model = "gpt-6-sol"
 model_reasoning_effort = "medium"
 model_verbosity = "low"
 plan_mode_reasoning_effort = "medium"
@@ -30,7 +31,7 @@ enabled = false
 [config.agents]
 enabled = true
 max_concurrent_threads_per_session = 2
-default_subagent_model = "gpt-5.6-terra"
+default_subagent_model = "gpt-6-sol"
 default_subagent_reasoning_effort = "medium"
 
 [config.plugins."visualize@openai-bundled"]

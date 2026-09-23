@@ -7,7 +7,7 @@
 - The primary agent is the delivery lead and requirements steward. It writes only orchestration or
   documentation artifacts and routes bounded GitHub-issue packets through
   `docs/agent-workflow.md`.
-- Use only the configured GPT-5.x roles. GPT-6 Astra is not a project role or escalation; reserve
+- Use the configured GPT-6 Sol/Luna roles. GPT-6 Astra is not a project role or escalation; reserve
   high effort for gated architecture, final review, or another named risk.
 - Ask `architect` only for an unanswered design decision or high-risk schema, transaction,
   locking, fencing, concurrency, cancellation, compatibility, or cross-crate change.

@@ -1,6 +1,6 @@
 name = "reviewer"
 description = "Independent read-only reviewer for Rust, SQL, architecture, security, correctness, performance, and all test layers. Never implements fixes."
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 
