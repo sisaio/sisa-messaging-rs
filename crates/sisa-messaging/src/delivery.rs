@@ -348,28 +348,45 @@ impl<E: ErrorClassifier> ErrorClassifier for IndividualSettlementError<E> {
 
 /// An individual-delivery settlement handle.
 ///
-/// Unsupported operations return a permanent, bounded contract error. Implementations must not
-/// emulate an unsupported operation with a different broker action.
+/// Callers should acknowledge only after the consumer transaction has committed, and only a
+/// broker-confirmed success resolves the delivery. An error, timeout, or dropped operation is
+/// indeterminate; the delivery remains unresolved and may be redelivered. Unsupported operations
+/// return a permanent, bounded contract error. Implementations must not emulate an unsupported
+/// operation with a different broker action.
 pub trait IndividualSettlement: Send + 'static {
     /// Provider error with an explicit retry decision.
     type Error: Error + Send + Sync + 'static + ErrorClassifier;
 
     /// Extends the delivery deadline while processing continues.
+    ///
+    /// Call periodically while work is in progress when the source descriptor advertises heartbeat
+    /// support. Failure or cancellation does not resolve the delivery.
     fn heartbeat(
         &mut self,
     ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
 
-    /// Confirms successful processing.
+    /// Confirms successful processing after the consumer transaction has committed.
+    ///
+    /// A successful result means the broker confirmed settlement. An error, timeout, or dropped
+    /// future is indeterminate and leaves the delivery unresolved for redelivery or reconciliation.
     fn ack(self)
     -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
 
     /// Requests redelivery after the supplied delay.
+    ///
+    /// Use only when delayed retry is advertised by the source descriptor. Unsupported delayed
+    /// retry must return the bounded unsupported-operation error, not emulate a delay with another
+    /// broker action. An error, timeout, or dropped future leaves settlement indeterminate.
     fn nak(
         self,
         delay: Duration,
     ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
 
     /// Terminates redelivery for a poison or permanently failed delivery.
+    ///
+    /// Use only when terminal discard is advertised by the source descriptor. A successful result
+    /// means the broker confirmed the terminal disposition. An error, timeout, or dropped future
+    /// leaves settlement indeterminate.
     fn terminate(
         self,
     ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send;
@@ -413,11 +430,14 @@ pub enum PartitionAdvance {
 /// The implementation owns the opaque partition, offset, and fencing generation. It may advance
 /// only after the record has committed or received a durable terminal disposition. One unresolved
 /// record may exist per partition; a later offset must not advance ahead of it. An error, timeout,
-/// or dropped advance future is indeterminate and requires the source to pause that partition and
-/// reconcile the authoritative committed cursor and ownership generation before delivering another
-/// offset. Reconciliation replays when the cursor did not advance, continues when it did, and keeps
-/// the partition paused if either fact cannot be established. Providers unable to fence and
-/// reconcile this state cannot implement this profile.
+/// or dropped advance future is indeterminate and requires the source to pause that partition. The
+/// source must not reconcile or redeliver while the corresponding operation can still take effect,
+/// including while a pending or unpolled future remains live. It may resume only after the operation
+/// is conclusively quiescent or an authoritative generation fence prevents any late effect, and
+/// then only after reconciling the committed cursor and ownership generation. Reconciliation replays
+/// when the cursor did not advance, continues when it did, and keeps the partition paused if either
+/// fact cannot be established. Providers unable to fence and reconcile this state cannot implement
+/// this profile.
 pub trait PartitionedLogSettlement: Send + 'static {
     /// Partition identifier surfaced by the corresponding source.
     type Partition: Clone + Eq + Hash + Send + Sync + 'static;
