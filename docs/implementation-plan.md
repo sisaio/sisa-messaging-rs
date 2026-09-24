@@ -213,7 +213,7 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Rehearse an empty PostgreSQL 18 install and application-owned schema selection.
 - Package the complete checked migration directory as a versioned release asset compatible with
   `sisa-messaging-postgres`; verify the asset digest and a clean install from the packaged copy.
-- Publish in dependency order: messaging; outbox, inbox, and NATS; then consumer and PostgreSQL.
+- Publish in dependency order: messaging; Kafka; outbox, inbox, and NATS; then consumer and PostgreSQL.
 - Tag the compatible workspace and schema baseline together.
 
 ## 5. Dependency and feature policy
