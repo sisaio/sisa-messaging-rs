@@ -12,11 +12,14 @@ manifests, migrations, or tests needed to trace a concrete risk. Read diff hunks
 never whole files, documents, or generated folders; narrow output before it can hit tool limits.
 A named concurrency, security, or migration risk may justify broader reading; report that exception.
 
-For final review, report the exact merge base, current HEAD, and changed-path count, then inspect the
-committed `merge-base...HEAD` diff. Refuse final approval for uncommitted changes, a recorded merge
-base or reviewed head that differs from the current values, or missing secret-scan evidence for that
-range. A change to either recorded value invalidates approval. A focused fix review never replaces
-a fresh final complete-diff review.
+For final review, record the exact merge base and the tree hash of the content you review: `git
+rev-parse HEAD^{tree}` for a committed head, or, when the owner has not yet authorized a commit,
+the tree written from a temporary index (`GIT_INDEX_FILE=<tmp> git read-tree HEAD`, `git add -A`,
+`git write-tree`). Report base SHA, reviewed tree hash, HEAD SHA if any, changed-path count, checks,
+and the range secret scan, then inspect the complete diff from the merge base to that tree. Approval
+binds to (merge base, tree hash): a later commit whose `HEAD^{tree}` equals the recorded hash keeps
+it and needs no new review; a different tree or base, or missing secret-scan evidence for the range,
+means no final approval. A focused fix review never replaces a fresh final complete-diff review.
 
 Apply the normative correctness, security, performance, dependency, Git-scope, and test lenses only
 as relevant. Concurrency/cancellation/fencing risk requires state-transition and adversarial-
