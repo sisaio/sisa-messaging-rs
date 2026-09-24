@@ -21,8 +21,16 @@ rdkafka = { workspace = true }
 sisa-messaging = { workspace = true }
 
 [dev-dependencies]
+# Statistical microbenchmark harness.
+criterion = { workspace = true }
+
 # Async test runtime.
 tokio = { workspace = true }
+
+[[bench]]
+# Shared-envelope Kafka record projection benchmark.
+name = "mapping"
+harness = false
 
 [lints]
 workspace = true
