@@ -17,6 +17,8 @@
 
 mod client;
 mod error;
+mod mapper;
+mod publisher;
 mod settings;
 
 pub use client::KafkaClient;
@@ -24,4 +26,6 @@ pub use error::{
     KafkaClientError, KafkaClientErrorKind, KafkaMappingError, KafkaPublishError,
     KafkaPublishErrorKind, RoutingDestinationError,
 };
+pub use mapper::{KafkaEnvelopeMapper, KafkaHeader, KafkaRecord};
+pub use publisher::{KafkaPublisher, KafkaTopicResolver, RoutingDestinationResolver};
 pub use settings::{KafkaAcks, KafkaClientSettings, KafkaPublisherSettings};
