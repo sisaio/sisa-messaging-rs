@@ -115,4 +115,4 @@ or merge. Before push or final acceptance, scan secrets over the exact final-rev
 is independent evidence. At handoff report issue, branch, rounds and messages, changed and PR path
 counts, checks, risks, and next safe slice.
 
-G6 keeps this file at most 8 KB; the guarantees it preserves are listed in `agent-team.md`.
+G6 caps this file at 8 KB, `AGENTS.md` at 6 KB, and each role source at 3 KB via `sync.sh --check`.
