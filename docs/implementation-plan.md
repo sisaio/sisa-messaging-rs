@@ -30,7 +30,8 @@ sisa-messaging-rs/
 │   ├── sisa-messaging-inbox/
 │   ├── sisa-messaging-consumer/
 │   ├── sisa-messaging-postgres/
-│   └── sisa-messaging-nats/
+│   ├── sisa-messaging-nats/
+│   └── sisa-messaging-kafka/
 ├── examples/
 │   ├── outbox-basic/
 │   ├── axum-outbox/
@@ -69,6 +70,7 @@ multiple sources.
 | `sisa-messaging-consumer` | Typed bounded consumer runtime and handler contract | messaging, inbox |
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox | messaging, outbox, inbox |
 | `sisa-messaging-nats` | JetStream publisher, delivery source, wire mapper and settlement | messaging |
+| `sisa-messaging-kafka` | Kafka publisher and wire mapper; partitioned-log delivery source and settlement in Phase 6a | messaging |
 
 Provider crates never depend on each other. Examples, system tests, and the system benchmark are
 the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and consumer crates.
@@ -155,6 +157,25 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
   that hides the NATS SDK client behind a provider handle.
 - Implement OTel messaging semantic conventions without payload, raw dynamic subject, credential,
   or header-value leakage.
+
+### Phase 6a — Kafka provider
+
+- Use `rdkafka = 0.39.0` with an exact workspace pin. Its locked `rdkafka-sys
+  4.10.0+2.12.1` builds and statically links bundled `librdkafka 2.12.1` with the provider's
+  current feature set. The Rust bindings are MIT licensed; bundled librdkafka has
+  a permissive BSD-style license with binary redistribution notice requirements. Review the
+  native dependency and advisories during each version update, and run `cargo deny check` whenever
+  dependency state changes. At selection, the upstream Rust repository was active (last push
+  2026-07-15 and not archived); the exact pin makes upgrades an explicit security review decision.
+- Let the application supply Kafka settings, explicitly start and own the provider handle, and
+  supervise its lifecycle. The provider constructs its internal SDK client. Keep credentials/TLS,
+  topic/group provisioning, and reconnect policy application-owned.
+- Map envelopes and publish only after the configured delivery report. Implement the partitioned-log
+  source and settlement profile with ordered post-processing offset commits, ownership fencing,
+  cancellation safety, and explicit handling of ambiguous commits.
+- Exercise deterministic contract tests and real Kafka publish, redelivery, rebalance, offset-gap,
+  cancellation, source-failure, and commit-ambiguity cases. Record the Kafka mapping benchmark and
+  its measured environment and result before provider review completes.
 
 ### Phase 7 — consumer runtime
 

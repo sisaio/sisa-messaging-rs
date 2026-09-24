@@ -7,7 +7,7 @@ number:
 
 1. Did a local algorithm or representation regress?
 2. How do PostgreSQL queries scale with realistic table state?
-3. What throughput and latency do NATS publication and consumption achieve independently?
+3. What throughput and latency do NATS and Kafka publication and consumption achieve independently?
 4. What does the complete enqueue → dispatch → broker → consume → commit path cost?
 
 Correctness tests remain separate. A fast result is invalid if rows are lost, acknowledged before
@@ -32,6 +32,8 @@ crates/
 │   ├── mapping.rs
 │   ├── publish.rs
 │   └── consume.rs
+├── sisa-messaging-kafka/benches/
+│   └── mapping.rs
 └── sisa-messaging-consumer/benches/
     └── processing.rs
 benchmarks/
@@ -98,6 +100,25 @@ These benchmarks isolate CPU and allocation cost. They do not claim database or 
 
 The mapper benchmarks require no network. Broker publication/consumption belongs to the integration
 suite below.
+
+### Kafka mapping
+
+- Encode and decode a deterministic envelope with a representative payload, ordering key,
+  framework metadata, and custom headers.
+- Time the mapper independently of topic resolution, client construction, and broker I/O.
+- Record the exact input profile, command, host, toolchain, and measured encode/decode results.
+
+The named `sisa-messaging-kafka/benches/mapping.rs` benchmark is the provider's first hot-path
+baseline. Broker publication and ordered offset settlement require separate real-broker profiles;
+the local mapper result does not represent network throughput or durability.
+
+Initial local smoke run (2026-09-24, macOS 26.5.2 arm64, rustc 1.98.0, default
+Kafka features): `cargo bench -p sisa-messaging-kafka --bench mapping --
+--warm-up-time 0.1 --measurement-time 0.5 --sample-size 10`. For the
+`typical-4k-8-ordered` fixture, Criterion estimated 1.3107 µs for encode
+(95% interval 1.3054–1.3173 µs) and 2.7586 µs for decode
+(2.7425–2.7777 µs). This short run is a starting measurement, not a release
+regression threshold.
 
 ## 5. PostgreSQL benchmarks
 
