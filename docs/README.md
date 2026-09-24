@@ -27,7 +27,7 @@ database pools, broker connection lifecycles, telemetry exporters, or process sh
    IDs, async traits, and module rules.
 7. [Observability](observability.md) — tracing, logging, direct OpenTelemetry metrics, names,
    attributes, and ownership.
-8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, consumer, and full-pipeline
+8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, consumer, and full-pipeline
    performance measurement.
 9. [Implementation plan](implementation-plan.md) — repository layout, build order, test strategy,
    dependency policy, and completion gates.
