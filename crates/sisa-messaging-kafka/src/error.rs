@@ -147,6 +147,10 @@ pub struct KafkaPublishError {
 }
 
 impl KafkaPublishError {
+    pub(crate) fn new(kind: KafkaPublishErrorKind, failure_kind: FailureKind) -> Self {
+        Self { kind, failure_kind }
+    }
+
     /// Returns the structured operation stage that failed.
     #[must_use]
     pub const fn kind(self) -> KafkaPublishErrorKind {

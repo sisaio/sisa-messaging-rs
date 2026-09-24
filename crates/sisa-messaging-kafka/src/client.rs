@@ -52,6 +52,10 @@ impl KafkaClient {
     pub fn in_flight_count(&self) -> i32 {
         self.producer.in_flight_count()
     }
+
+    pub(crate) fn producer(&self) -> &FutureProducer {
+        &self.producer
+    }
 }
 
 impl fmt::Debug for KafkaClient {
