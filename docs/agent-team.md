@@ -12,15 +12,18 @@ This repository uses one primary Codex agent and four project-scoped custom agen
 |---|---|---:|---|
 | Primary delivery lead | `gpt-6-luna` / `xhigh` | Docs only | Balanced reasoning depth for requirements, orchestration, and acceptance |
 | `architect` | `gpt-6-sol` / `high` | No | Flagship reasoning for gated architecture and adversarial design analysis |
-| `backend_developer` | `gpt-6-luna` / `xhigh` | Yes | Balanced reasoning depth for sustained Rust/SQL implementation |
+| `backend_developer` | `gpt-6-sol` / `medium` | Yes | Flagship model at medium effort for sustained Rust/SQL implementation; fewer fix rounds is the lever |
 | `reviewer` | `gpt-6-sol` / `high` | No | Flagship independent integration and final-approval review |
-| `release_engineer` | `gpt-6-luna` / `medium` | Yes, narrowly | Fast-model delivery work at medium effort; raise effort only for a named migration-integrity, publication, or CI-security risk |
+| `release_engineer` | `gpt-6-luna` / `xhigh` | Yes, narrowly | Luna at extra-high effort for delivery work |
 
-GPT-6 Astra is not a primary or project-agent model and is not an escalation path. Balanced uses
-`gpt-6-luna` at extra-high (`xhigh`) effort, while fast uses `gpt-6-luna` at medium effort: model
-capability and reasoning effort are separate settings. The balanced tier gives the primary and
-default subagent more reasoning depth; flagship high effort remains bounded to architecture, which
-is spawned only behind its design/risk gate, and independent review, which owns final approval. The
+GPT-6 Astra is not a primary or project-agent model and is not an escalation path. Balanced is
+`gpt-6-sol` at medium effort and fast is `gpt-6-luna` at extra-high (`xhigh`) effort: model
+capability and reasoning effort are separate settings, and the 23–24 September measurements showed
+reasoning output under 1% of tokens at `xhigh` while the Luna writer on PR #57 needed four
+reviewer-driven fix rounds, so the writer moved to the stronger model at lower effort. Writer and
+final reviewer now share a model; independence comes from the fresh reviewer context, the effort
+difference, and the read-only reviewer rules. Flagship high effort remains bounded to architecture,
+spawned only behind its design/risk gate, and independent review, which owns final approval. The
 project config caps spawned agents at two concurrent threads, and the normal workflow remains
 sequential because overlapping writers and implementation-aware final reviewers are prohibited.
 
@@ -116,10 +119,14 @@ re-runs `.agents/sync.sh all`; never edit a generated file by hand.
   (`flagship`, `balanced`, or `fast`), and `write` (`true` or `false`), followed by the shared
   instruction body.
 - `.agents/harnesses/codex.toml` maps each tier to a Codex model and reasoning effort and holds
-  Codex-only config, including the primary model, compaction limit, agent block, and plugins.
-- `.agents/harnesses/claude.toml` maps tiers to generic Claude Code aliases (`opus`, `sonnet`,
-  `haiku`), which resolve to the latest model in each family rather than a pinned version; it also
-  adds read-only-role `disallowedTools` and holds the permission allowlist, including `Bash(rtk *)`.
+  Codex-only config, including the primary model, compaction limit, agent block, plugins, and
+  `[sandbox_workspace_write] network_access = true`, so routine `gh`, crates.io, and local-database
+  calls run inside the sandbox instead of escalating to the guardian auto-reviewer (61 runs and
+  13.4M tokens on 23–24 September 2026); auto review stays on for other escapes.
+- `.agents/harnesses/claude.toml` maps tiers to generic Claude Code aliases (flagship and balanced
+  to `opus`, fast to `sonnet`), which resolve to the latest model in each family rather than a
+  pinned version; it also adds read-only-role `disallowedTools` and holds the permission allowlist,
+  including `Bash(rtk *)`.
 - `.agents/skills/<name>/SKILL.md` holds skills shared by both harnesses.
 - `.agents/sync.sh <codex|claude|all> [--check]` generates Codex and Claude role files, config,
   settings, `CLAUDE.md`, and skill links. `--check` regenerates into a temporary directory and fails
@@ -173,6 +180,23 @@ was 0.17% and instruction files under 2k tokens per thread:
 - Agents touched `.sqlx/**` in 91 commands; 62 of PR #38's 89 paths were metadata. PR #47's
   five-path Cargo bump plus one test adaptation spawned two writers and four reviewers, consuming
   10.8M tokens across 11 threads.
+
+23–24 September 2026, 135.8M tokens over 91 threads (PR #54 about 44M, PR #57 about 57M), with the
+compaction limit holding peak context at 96k and average request context at 57k:
+
+- Duplicate final reviews: because the primary may not commit until the owner asks while final
+  approval was bound to a committed HEAD, PR #54 ran `final_review`, `postfix_final_review`, and
+  `committed_final_review` within 20 minutes, and PR #57 ran a final review on the uncommitted tree
+  and an identical `committed_final_review` after the authorized commits. Approval now binds to the
+  reviewed tree hash; record duplicate final reviews per PR (expected 0).
+- Guardian auto-review: 61 runs, 13.4M tokens (10%), 12–27 requests each over the full transcript;
+  every classified trigger was a routine `gh`, `docker run`, or `cargo` network call. Sandbox
+  network access is now on; record guardian runs per PR (expected near 0).
+- Writer quality: the `gpt-6-luna` `xhigh` developer on PR #57 made 438 requests with 10 compactions
+  and needed 5 reviewer runs over 4 fix rounds; reasoning output was under 1% of tokens. Balanced is
+  now `gpt-6-sol` at medium; record developer requests, compactions, reviewer runs, and fix rounds
+  on the next comparable PR and revert the tier if requests and reviewer runs do not both fall by a
+  third.
 
 | Role | Share | Measured detail |
 |---|---:|---|
