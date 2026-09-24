@@ -7,9 +7,11 @@ Sisa Messaging provides two independent reliability mechanisms:
 - a transactional outbox that commits a message with application data and publishes it later;
 - a transactional inbox that deduplicates consumer effects in the application's transaction.
 
-The outbox durably retries eligible messages with **at-least-once** publication semantics. Once a
-broker may have accepted a publish, duplicates are possible. It does not promise that every row is
-eventually published: expiry, a permanent failure, or exhausted retry policy moves a row to dead.
+The outbox durably retries eligible messages. With broker-confirmed publisher settings, it provides
+**at-least-once** publication semantics. Kafka `acks=0` can report success without broker receipt,
+so the outbox may complete a row that Kafka never received. Once a broker may have accepted a
+publish, duplicates are possible. The outbox does not promise that every row is eventually
+published: expiry, a permanent failure, or exhausted retry policy moves a row to dead.
 It does not guarantee exactly-once publication or global ordering. An ordering key serializes
 publication for that key in durable row ID order; it does not claim application commit order or
 domain sequence order.
@@ -32,6 +34,7 @@ not used.
 | `sisa-messaging-consumer` | Typed inbound receive/process/settle runtime |
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox |
 | `sisa-messaging-nats` | NATS JetStream mapping, subject resolution, publication, and inbound delivery |
+| `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, and outbound publication |
 
 Rust import names follow Cargo's hyphen-to-underscore conversion, for example
 `sisa_messaging_outbox`.
@@ -48,20 +51,23 @@ sisa-messaging-inbox   ───────▶ sisa-messaging
 sisa-messaging-consumer ──────▶ sisa-messaging + sisa-messaging-inbox
 sisa-messaging-postgres ──────▶ sisa-messaging + outbox + inbox
 sisa-messaging-nats ──────────▶ sisa-messaging
+sisa-messaging-kafka ─────────▶ sisa-messaging
 
-application / system tests compose postgres + outbox + consumer + nats
+application / system tests compose postgres + outbox + consumer + a transport provider
 ```
 
 Rules:
 
-- `sisa-messaging` has no SQLx, PostgreSQL, NATS, Tokio runtime, exporter, or application
+- `sisa-messaging` has no SQLx, PostgreSQL, transport SDK, Tokio runtime, exporter, or application
   configuration dependency.
 - Outbox and inbox depend only on the shared messaging model and the minimum runtime utilities
   their algorithms require.
 - PostgreSQL depends on messaging, outbox, and inbox because it implements their traits.
-- Consumer depends on messaging and inbox. It names neither SQLx nor NATS.
+- Consumer depends on messaging and inbox. It names neither SQLx nor a transport provider.
 - NATS depends only on messaging. It implements both outbound publication and inbound delivery
   contracts, and does not know an outbox or inbox exists.
+- Kafka depends only on messaging. It maps envelopes and implements outbound publication without
+  depending on the outbox or inbox.
 - Provider crates never depend on one another.
 - Only applications and system tests name concrete provider combinations.
 
@@ -72,7 +78,9 @@ Rules:
 | Outbox/manual-inbox transaction and commit/rollback | Application |
 | Framework-managed per-delivery transaction | `sisa-messaging-consumer`, explicitly delegated by application |
 | PostgreSQL pool and connection policy | Application |
-| NATS client, authentication, TLS, JetStream context and stream | Application |
+| Transport authentication, TLS, connection initiation/lifecycle, and returned handle | Application |
+| SDK client construction behind a provider handle, when supported | Transport provider |
+| NATS stream and consumer provisioning | Application |
 | Configuration source and deserialization | Application |
 | Envelope and transport-independent metadata | `sisa-messaging` |
 | Retry decision and worker lifecycle | `sisa-messaging-outbox` |
@@ -85,8 +93,10 @@ Rules:
 | Metric instruments and tracing callsites | Owning library crate |
 | Purge and statistics schedules | Application or one explicit supervised maintenance task |
 
-Nothing starts in a constructor. Constructors perform no I/O. A host explicitly starts the
-dispatcher, observer, purge task, and consumer loop.
+Nothing starts in a constructor. Constructors perform no I/O. A host explicitly starts transport
+clients, the dispatcher, observer, purge task, and consumer loop. Providers may offer typed settings
+and an explicit start operation so the host does not import a broker SDK. Such an operation does not
+imply broker readiness unless it performs and documents a bounded readiness check.
 
 ## 5. Public capabilities
 
@@ -98,7 +108,7 @@ The public API is organized around what a caller can do, not around internal lay
 - `Envelope<T>` and `SerializedEnvelope`.
 - `Metadata` and validated transport-independent value types.
 - `Serializer` and the optional JSON implementation.
-- `Publisher`: one acknowledged publish attempt.
+- `Publisher`: one publish attempt that completes at the provider's configured confirmation level.
 - `Delivery`: splits an owned wire value from a profile-bound settlement handle.
 - `IndividualDeliverySource` and `IndividualSettlement`: individual-delivery receive and
   settlement, with an immutable source descriptor and truthful delayed-retry, terminal-discard,

@@ -7,9 +7,9 @@ performance program, and engineering rules for the repository. They are normativ
 and public documentation must agree with them.
 
 The project is a set of Rust libraries for durable message publication, transactional consumer
-deduplication, a typed consumer runtime, PostgreSQL persistence, and NATS JetStream transport. It
-is not a service and does not own application startup, configuration loading, database pools,
-broker connections, telemetry exporters, or process shutdown.
+deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, and
+Kafka publication. It is not a service and does not own application startup, configuration loading,
+database pools, broker connection lifecycles, telemetry exporters, or process shutdown.
 
 ## Read in this order
 
@@ -40,12 +40,17 @@ broker connections, telemetry exporters, or process shutdown.
 
 ## Fixed decisions
 
-- Eligible publication uses at-least-once semantics. Duplicate publication is expected; expiry,
-  permanent failure, or exhausted retry policy can instead make a row dead.
+- Eligible publication uses at-least-once broker delivery when the publisher confirms broker
+  acceptance. Kafka `acks=0` allows a successful client delivery report without broker
+  acknowledgement, so the outbox can complete a row the broker never received. Duplicate
+  publication is still possible; expiry, permanent failure, or exhausted retry policy can instead
+  make a row dead.
 - The durable and direct paths remain visibly different: the store enqueues; the transport
   publishes.
-- The application owns pools, network connections, broker resources, configuration sources,
-  telemetry providers, and task supervision. It either owns inbox transactions through the
+- The application owns pools, broker connection initiation and lifecycle, broker resources,
+  authentication policy, configuration sources, telemetry providers, and task supervision. A
+  transport provider may construct its internal SDK client from application-supplied settings and
+  return an application-owned handle. The application either owns inbox transactions through the
   low-level API or explicitly delegates each delivery transaction to the consumer framework.
 - Libraries accept typed settings and never read environment variables.
 - Every crate uses Rust edition 2024 with a single workspace MSRV of Rust 1.94. Provider crates

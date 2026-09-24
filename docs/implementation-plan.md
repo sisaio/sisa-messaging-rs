@@ -150,8 +150,9 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Implement subject resolution, envelope/header mapping, current negotiated payload checking, and
   JetStream publication with awaited acknowledgement.
 - Implement delivery source, confirmed ack, delayed nak, terminate, and heartbeat acknowledgement.
-- Keep stream/consumer creation, credentials, TLS, connection, and reconnect supervision outside
-  the crate.
+- Keep stream/consumer creation, credential and TLS policy, connection initiation, and reconnect
+  supervision application-owned. Offer typed provider settings and an explicit start operation
+  that hides the NATS SDK client behind a provider handle.
 - Implement OTel messaging semantic conventions without payload, raw dynamic subject, credential,
   or header-value leakage.
 
