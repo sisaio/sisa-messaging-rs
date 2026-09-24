@@ -15,7 +15,9 @@ fn envelope() -> SerializedEnvelope {
         .expect("fixture header fits");
 
     SerializedEnvelope {
-        message_id: MessageId::new(),
+        message_id: "01890f52-7b00-7000-8000-000000000001"
+            .parse::<MessageId>()
+            .expect("valid fixed message id"),
         message_type: MessageType::new("orders.created").expect("valid fixture type"),
         message_version: 4,
         content_type: ContentType::new("application/json").expect("valid fixture type"),
@@ -23,9 +25,21 @@ fn envelope() -> SerializedEnvelope {
         metadata: Metadata {
             correlation: CorrelationMetadata {
                 correlation_id: Some(MetadataValue::new("corr-1").expect("valid fixture id")),
-                conversation_id: Some(ConversationId::new()),
-                causation_id: Some(MessageId::new()),
-                request_id: Some(RequestId::new()),
+                conversation_id: Some(
+                    "01890f52-7b00-7000-8000-000000000002"
+                        .parse::<ConversationId>()
+                        .expect("valid fixed conversation id"),
+                ),
+                causation_id: Some(
+                    "01890f52-7b00-7000-8000-000000000003"
+                        .parse::<MessageId>()
+                        .expect("valid fixed causation id"),
+                ),
+                request_id: Some(
+                    "01890f52-7b00-7000-8000-000000000004"
+                        .parse::<RequestId>()
+                        .expect("valid fixed request id"),
+                ),
             },
             trace: TraceMetadata {
                 traceparent: Some(
@@ -51,25 +65,54 @@ fn envelope() -> SerializedEnvelope {
 }
 
 #[test]
-fn kafka_mapping_round_trips_shared_envelope_and_ordering_key() {
+fn kafka_mapping_uses_stable_wire_headers_and_decodes_an_independent_record() {
     let expected = envelope();
     let mapper = KafkaEnvelopeMapper;
 
-    let wire = mapper.encode(&expected).expect("fixture maps");
-    let key = wire.key.clone();
-    let has_message_id = wire
-        .headers
-        .iter()
-        .any(|header| header.name == "message-id");
-    let has_custom_header = wire
-        .headers
-        .iter()
-        .any(|header| header.name == "x-request-zone");
-    let decoded = mapper.decode(wire).expect("wire decodes");
+    let encoded = mapper.encode(&expected).expect("fixture maps");
+    let expected_headers = vec![
+        ("message-id", "01890f52-7b00-7000-8000-000000000001"),
+        ("message-type", "orders.created"),
+        ("message-version", "4"),
+        ("content-type", "application/json"),
+        ("ordering-key", "order-7"),
+        ("correlation-id", "corr-1"),
+        ("conversation-id", "01890f52-7b00-7000-8000-000000000002"),
+        ("causation-id", "01890f52-7b00-7000-8000-000000000003"),
+        ("request-id", "01890f52-7b00-7000-8000-000000000004"),
+        ("source", "orders-api"),
+        ("destination", "orders.created"),
+        ("reply-to", "orders.results"),
+        ("sent-at-ms", "1700000000000"),
+        ("deduplication-id", "dedup-7"),
+        ("tenant-id", "tenant-1"),
+        (
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        ),
+        ("tracestate", "vendor=value"),
+        ("x-request-zone", "west"),
+    ]
+    .into_iter()
+    .map(|(name, value)| KafkaHeader {
+        name: name.to_owned(),
+        value: Some(value.as_bytes().to_vec()),
+    })
+    .collect::<Vec<_>>();
 
-    assert_eq!(key.as_deref(), Some(b"order-7".as_slice()));
-    assert!(has_message_id);
-    assert!(has_custom_header);
+    assert_eq!(encoded.key.as_deref(), Some(b"order-7".as_slice()));
+    assert_eq!(encoded.payload, br#"{"order":7}"#);
+    assert_eq!(encoded.headers, expected_headers);
+
+    let hand_built_record = KafkaRecord {
+        key: Some(b"order-7".to_vec()),
+        payload: br#"{"order":7}"#.to_vec(),
+        headers: expected_headers,
+    };
+    let decoded = mapper
+        .decode(hand_built_record)
+        .expect("hand-built record decodes");
+
     assert_eq!(decoded, expected);
 }
 

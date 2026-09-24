@@ -1257,6 +1257,7 @@ dependencies = [
 name = "sisa-messaging-kafka"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rdkafka",
  "sisa-messaging",
  "tokio",

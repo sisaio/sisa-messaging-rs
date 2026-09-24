@@ -4,12 +4,17 @@ use sisa_messaging::{ErrorClassifier, SerializedEnvelope};
 
 use crate::RoutingDestinationError;
 
-/// Error raised by a Kafka topic resolver.
+/// Resolves a Kafka topic synchronously for each publish operation.
+///
+/// Implementations should be quick and nonblocking because resolution runs in the publish
+/// path. The resolver error's [`ErrorClassifier`] classification is preserved by the publisher:
+/// transient errors are retryable, while permanent errors are not expected to succeed if retried.
 pub trait KafkaTopicResolver: Send + Sync {
     /// Error returned when a topic cannot be selected for an envelope.
     type Error: Error + Send + Sync + 'static + ErrorClassifier;
 
-    /// Resolves the Kafka topic for one envelope.
+    /// Resolves the Kafka topic for one envelope. This method runs synchronously during each
+    /// publish operation and should not block on I/O.
     fn resolve(&self, envelope: &SerializedEnvelope) -> Result<String, Self::Error>;
 }
 

@@ -68,11 +68,11 @@ async fn broker_accepts_commit_for_revoked_partition_from_current_member_generat
 
     assert!(
         revoked_commit_result.is_ok(),
-        "the broker accepted an offset commit from a current member after that member lost this partition",
+        "expected the broker to accept an explicit offset commit from the member after it lost partition ownership",
     );
     assert_eq!(
         committed_offset(&new_generation, &topic, partition),
         Offset::Offset(offset + 1),
-        "the broker committed the revoked partition's cursor",
+        "expected the broker to commit the explicit offset for the revoked partition",
     );
 }

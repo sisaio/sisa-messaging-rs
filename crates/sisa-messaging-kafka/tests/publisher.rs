@@ -5,9 +5,18 @@ use sisa_messaging::{
     MetadataValue, Publisher, RoutingMetadata, SerializedEnvelope,
 };
 use sisa_messaging_kafka::{
-    KafkaClient, KafkaClientSettings, KafkaPublishErrorKind, KafkaPublisher,
+    KafkaClient, KafkaClientErrorKind, KafkaClientSettings, KafkaPublishErrorKind, KafkaPublisher,
     KafkaPublisherSettings, RoutingDestinationResolver,
 };
+
+#[test]
+fn delivery_report_only_error_cannot_disable_delivery_confirmation() {
+    let error = KafkaClientSettings::new(["localhost:1"])
+        .with_advanced_property(" Delivery.Report.Only.Error ", "true")
+        .expect_err("delivery report suppression can leave publish futures pending");
+
+    assert_eq!(error.kind(), KafkaClientErrorKind::TypedPropertyOverride);
+}
 
 fn local_client(properties: &[(&str, &str)]) -> KafkaClient {
     let config = properties.iter().fold(

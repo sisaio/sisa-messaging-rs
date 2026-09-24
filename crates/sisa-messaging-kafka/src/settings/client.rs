@@ -5,6 +5,7 @@ use crate::{KafkaClientError, KafkaClientErrorKind};
 
 /// Kafka producer acknowledgement policy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum KafkaAcks {
     /// Send without waiting for a broker acknowledgement (`acks=0`).
     None,
@@ -79,7 +80,11 @@ impl KafkaClientSettings {
 
         if matches!(
             name.as_str(),
-            "acks" | "request.required.acks" | "bootstrap.servers" | "metadata.broker.list"
+            "acks"
+                | "request.required.acks"
+                | "bootstrap.servers"
+                | "metadata.broker.list"
+                | "delivery.report.only.error"
         ) {
             return Err(KafkaClientError::new(
                 KafkaClientErrorKind::TypedPropertyOverride,
