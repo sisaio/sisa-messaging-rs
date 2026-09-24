@@ -51,13 +51,11 @@ sequenceDiagram
 
     loop Each record, bounded by max_in_flight
         Dispatcher->>Publisher: publish(record)
-        Publisher->>Broker: Publish once
-        alt Broker acknowledges
-            Broker-->>Publisher: Acknowledgement
-            Publisher-->>Dispatcher: Published
+        Publisher->>Broker: Submit one transport attempt
+        alt Publisher reports success at configured confirmation level
+            Publisher-->>Dispatcher: Publish succeeded
             Dispatcher->>DB: Complete WHERE id + claim_token
         else Transient, permanent, or timeout
-            Broker-->>Publisher: Failure or no acknowledgement
             Publisher-->>Dispatcher: Classified failure
             Dispatcher->>DB: Retry or dead WHERE id + claim_token
         end
@@ -96,10 +94,17 @@ flowchart TD
 ### Publish and outcome
 
 Each claimed message is published with bounded concurrency and an explicit timeout. The publisher
-returns only after the broker acknowledges the operation or a classified failure occurs. It does
-not retry internally; the outbox retry policy owns retry scheduling.
+returns after success at its configured confirmation level or a classified failure. The provider
+makes one send call per outbox attempt; a transport client may retry within that call. In particular,
+librdkafka can retry local queueing and broker delivery within its configured timeouts. The outbox
+retry policy schedules a separate attempt after a reported failure. NATS waits for a JetStream
+acknowledgement. Kafka waits for a librdkafka delivery report: `acks=0` provides no broker
+acknowledgement, `acks=1` confirms the leader, and `acks=all` confirms the in-sync replicas under
+the topic's replication and `min.insync.replicas` settings. With `acks=0`, the outbox may mark a row
+published even if Kafka never received it. Use `acks=all` with suitable topic settings when durable
+broker-confirmed completion is required.
 
-- Acknowledged publish: `complete` increments `attempts`, sets `published_at`, and clears the
+- Successful publish: `complete` increments `attempts`, sets `published_at`, and clears the
   claim.
 - Transient failure with retry budget: `fail` increments `attempts`, records a safe error summary,
   moves `claimable_at` by the retry delay, and clears the claim.
@@ -109,9 +114,9 @@ not retry internally; the outbox retry policy owns retry scheduling.
 
 ```mermaid
 flowchart TD
-    Result[Publish result] --> Ack{Acknowledged?}
-    Ack -- Yes --> Complete[Complete and clear claim]
-    Ack -- No --> Retryable{Transient and retry budget remains?}
+    Result[Publish result] --> Success{Succeeded at configured level?}
+    Success -- Yes --> Complete[Complete and clear claim]
+    Success -- No --> Retryable{Transient and retry budget remains?}
     Retryable -- Yes --> Retry[Record safe error,<br/>schedule backoff, clear claim]
     Retryable -- No --> Dead[Record safe error and death reason,<br/>mark dead, clear claim]
     Complete --> Fence{Outcome row matched<br/>id + claim_token?}
@@ -142,7 +147,7 @@ sequenceDiagram
 
     par Publish remains unresolved
         Dispatcher->>Publisher: Await bounded publish
-        Publisher-->>Dispatcher: Acknowledged or failed
+        Publisher-->>Dispatcher: Succeeded or failed
     and Renew before lease threshold
         Dispatcher->>DB: Extend WHERE id + original claim_token
         alt Claim still owned
@@ -162,7 +167,9 @@ returned and the row is retried after its lease lapses.
 
 ## 3. Duplicate windows
 
-At-least-once publication necessarily permits duplicates:
+Publication can produce duplicates in these windows. Broker-confirmed publisher settings provide
+at-least-once publication for eligible rows; Kafka `acks=0` also risks completion without broker
+receipt.
 
 1. **Publish/complete crash:** the broker accepts the message, then the worker dies before the
    database records completion.
@@ -401,8 +408,9 @@ For one `SerializedEnvelope`, the NATS publisher resolves a subject, projects fr
 and custom headers, applies the broker deduplication ID, checks the current negotiated payload
 limit, publishes once, and awaits the JetStream acknowledgement under `publish_timeout`.
 
-The application owns the NATS client and JetStream context. The library neither connects nor
-creates streams or consumers.
+The application initiates the NATS connection and owns the returned provider handle and broker
+resources. The provider may construct its internal SDK client from application-supplied settings
+when explicitly started. It does not connect autonomously or create streams or consumers.
 
 ## 8. Maintenance
 
