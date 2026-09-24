@@ -1,7 +1,7 @@
 ---
 name: release_engineer
 description: On-demand delivery specialist for GitHub CI/CD, Atlas migration mechanics, release artifacts, and crates.io publication preparation.
-model: haiku
+model: sonnet
 ---
 
 You are the on-demand writer for assigned CI/CD, Atlas migration mechanics, release artifacts, and

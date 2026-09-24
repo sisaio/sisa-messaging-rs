@@ -6,10 +6,10 @@
 model = "opus"
 
 [tiers.balanced]
-model = "sonnet"
+model = "opus"
 
 [tiers.fast]
-model = "haiku"
+model = "sonnet"
 
 # Every key here is added to the frontmatter of each role with `write: false`.
 [read_only]

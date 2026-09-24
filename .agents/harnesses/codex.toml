@@ -1,19 +1,21 @@
 # Codex harness mapping for the roles in .agents/roles/*.md.
 # Read by .agents/sync.sh; do not edit the generated .codex/ files by hand.
 
-# Tier to Codex model and reasoning effort. Balanced uses the Luna model at extra-high effort;
-# model capability and reasoning effort are tuned separately.
+# Tier to Codex model and reasoning effort. Balanced is the flagship model at medium effort for the
+# writer; fast is the Luna model at extra-high effort for delivery work. Reasoning output stayed
+# under 1% of tokens at xhigh while the Luna writer on PR #57 needed four reviewer-driven fix rounds,
+# so model capability, not effort, is the quality lever.
 [tiers.flagship]
 model = "gpt-6-sol"
 effort = "high"
 
 [tiers.balanced]
-model = "gpt-6-luna"
-effort = "xhigh"
+model = "gpt-6-sol"
+effort = "medium"
 
 [tiers.fast]
 model = "gpt-6-luna"
-effort = "medium"
+effort = "xhigh"
 
 # Everything under [config] is emitted verbatim as .codex/config.toml, with the
 # leading "config." stripped from each table header.
@@ -25,14 +27,19 @@ plan_mode_reasoning_effort = "medium"
 tool_output_token_limit = 6000
 model_auto_compact_token_limit = 100000
 
+# Routine gh, crates.io, and local-database calls no longer escalate to the guardian auto-reviewer,
+# which cost 13.4M tokens over 61 runs on 23-24 Sep 2026. Auto review stays on for other escapes.
+[config.sandbox_workspace_write]
+network_access = true
+
 [config.mcp_servers.node_repl]
 enabled = false
 
 [config.agents]
 enabled = true
 max_concurrent_threads_per_session = 2
-default_subagent_model = "gpt-6-luna"
-default_subagent_reasoning_effort = "xhigh"
+default_subagent_model = "gpt-6-sol"
+default_subagent_reasoning_effort = "medium"
 
 [config.plugins."visualize@openai-bundled"]
 enabled = false
