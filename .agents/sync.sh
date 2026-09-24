@@ -318,10 +318,27 @@ find_diffs() {
   fi
 }
 
-diffs=$(find_diffs)
+# check_sizes: G6 caps on the files every thread loads. Bytes, not tokens, so
+# the check is deterministic; a new rule must displace text, not extend it.
+check_sizes() {
+  cap() {
+    size=$(wc -c <"$repo_root/$1" | tr -d ' ')
+    if [ "$size" -gt "$2" ]; then
+      echo "$1 ($size bytes exceeds the $2-byte cap)"
+    fi
+  }
+  cap AGENTS.md 6144
+  cap docs/agent-workflow.md 8192
+  for role in "$repo_root"/.agents/roles/*.md; do
+    cap ".agents/roles/$(basename "$role")" 3072
+  done
+  return 0
+}
+
+diffs=$(find_diffs; check_sizes)
 if [ -n "$diffs" ]; then
   printf '%s\n' "$diffs"
-  echo "sync.sh: generated files differ from .agents/; run .agents/sync.sh $target" >&2
+  echo "sync.sh: generated files differ from .agents/ or a G6 size cap is exceeded; fix the source, then run .agents/sync.sh $target" >&2
   exit 1
 fi
 exit 0

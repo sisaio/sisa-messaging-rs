@@ -129,8 +129,11 @@ re-runs `.agents/sync.sh all`; never edit a generated file by hand.
   including `Bash(rtk *)`.
 - `.agents/skills/<name>/SKILL.md` holds skills shared by both harnesses.
 - `.agents/sync.sh <codex|claude|all> [--check]` generates Codex and Claude role files, config,
-  settings, `CLAUDE.md`, and skill links. `--check` regenerates into a temporary directory and fails
-  on drift; the `prek` hook runs it.
+  settings, `CLAUDE.md`, and skill links. `--check` regenerates into a temporary directory, fails on
+  drift, and enforces the G6 size caps (`AGENTS.md` 6 KB, each role source 3 KB,
+  `docs/agent-workflow.md` 8 KB) so the files every thread loads cannot grow back; the `prek` hook
+  runs it. Role sources hold only role-specific instructions; portable rules live once in
+  `AGENTS.md` with full text in the workflow document.
 - `.coderabbit.yaml` configures repository-aware review; GitHub CI owns hard file-count and
   executable quality gates.
 - `AGENTS.md` contains the small routing policy loaded for every task; Claude loads it through the
