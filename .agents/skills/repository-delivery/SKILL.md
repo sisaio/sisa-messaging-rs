@@ -42,10 +42,12 @@ before exceeding a target and split before a hard limit.
   finding reopens review; a medium/low final finding is fixed without a reviewer when the fix meets
   the small-fix definition and the primary verifies the hunks, otherwise deferred to a linked issue.
   Normative docs/agent configuration receive final review only; editorial changes receive none.
-- A fresh read-only final reviewer examines the committed `merge-base...HEAD` range and records
-  exact base/head SHAs, path count, checks, and a range-aligned secret scan. Any base or head change
-  invalidates approval. Review diff hunks and named sections; use CI `cargo sqlx prepare --check`
-  evidence instead of reading generated `.sqlx/**` metadata.
+- A fresh read-only final reviewer examines the complete diff from the merge base to the reviewed
+  tree and records the base SHA, reviewed tree hash, path count, checks, and a range-aligned secret
+  scan. Approval binds to that (base, tree) pair: when the owner authorizes the commit, commit
+  exactly the reviewed content, compare `git rev-parse HEAD^{tree}` with the record, and put both in
+  the PR body; equal hashes need no new review, anything else does. Review diff hunks and named sections;
+  use CI `cargo sqlx prepare --check` evidence instead of reading generated `.sqlx/**` metadata.
 - Report readiness only when the reviewed range is current, required CI passes, and no required
   finding remains unresolved.
 - At every handoff report issue, branch, current commit round and exact message, changed-path and PR
