@@ -1,0 +1,28 @@
+[package]
+name = "sisa-messaging-kafka"
+version = "0.1.0"
+description = "Kafka transport provider for Sisa messaging contracts"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# TLS support is opt-in to avoid an OpenSSL build dependency by default.
+default = []
+tls = ["rdkafka/ssl"]
+
+[dependencies]
+# Kafka wire client configured by the application.
+rdkafka = { workspace = true }
+
+# Transport-independent envelope and publisher contracts.
+sisa-messaging = { workspace = true }
+
+[dev-dependencies]
+# Async test runtime.
+tokio = { workspace = true }
+
+[lints]
+workspace = true
