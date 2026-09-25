@@ -31,7 +31,8 @@ sisa-messaging-rs/
 │   ├── sisa-messaging-consumer/
 │   ├── sisa-messaging-postgres/
 │   ├── sisa-messaging-nats/
-│   └── sisa-messaging-kafka/
+│   ├── sisa-messaging-kafka/
+│   └── sisa-messaging-iggy/
 ├── examples/
 │   ├── outbox-basic/
 │   ├── axum-outbox/
@@ -71,6 +72,7 @@ multiple sources.
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox | messaging, outbox, inbox |
 | `sisa-messaging-nats` | JetStream publisher, delivery source, wire mapper and settlement | messaging |
 | `sisa-messaging-kafka` | Kafka publisher and wire mapper; partitioned-log delivery source and settlement in Phase 6a | messaging |
+| `sisa-messaging-iggy` | Apache Iggy publisher and wire mapper; partitioned-log delivery source deferred to Phase 6b's fencing decision | messaging |
 
 Provider crates never depend on each other. Examples, system tests, and the system benchmark are
 the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and consumer crates.
@@ -79,7 +81,7 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 
 ### Phase 1 — workspace foundation
 
-- Create Rust 2024 manifests with `rust-version = "1.94"` inherited by every crate. Pin the
+- Create Rust 2024 manifests with `rust-version = "1.95"` inherited by every crate. Pin the
   development toolchain independently to the chosen current stable patch release.
 - Create the license, security policy, dependency policy, lint policy, CI, release metadata, and
   feature-matrix jobs.
@@ -96,7 +98,7 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Pin the Atlas Community CLI release or container digest in CI and upgrade it through an explicit
   tooling change; do not build releases against a floating `latest-community` image.
 - Establish the public API inventory before publishing a crate.
-- Run a dedicated CI build on Rust 1.94; run formatting, Clippy, documentation, full tests, and
+- Run a dedicated CI build on Rust 1.95; run formatting, Clippy, documentation, full tests, and
   benchmarks with the pinned development toolchain. Raising that toolchain alone does not raise
   the published MSRV.
 
@@ -177,6 +179,37 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
   cancellation, source-failure, and commit-ambiguity cases. Record the Kafka mapping benchmark and
   its measured environment and result before provider review completes.
 
+### Phase 6b — Apache Iggy provider
+
+- Use `iggy = 0.11.0` (Apache-2.0) with an exact workspace pin and default features disabled. The
+  SDK declares `rust-version = "1.95"`, so the owner raised the single workspace MSRV from 1.94 to
+  1.95 on 2026-09-24. Its dependency tree adds `webpki-roots` and `webpki-root-certs` under
+  CDLA-Permissive-2.0, which `deny.toml` allows explicitly for those root-store crates. The SDK
+  also pulls QUIC, HTTP, and WebSocket clients that features cannot remove, including the
+  `aws-lc-sys` native cryptography build behind its HTTP and WebSocket legs; the provider offers
+  TCP only and does not expose them. At selection, the upstream Apache repository was active (last
+  push 2026-09-24, not archived); the exact pin makes upgrades an explicit security review.
+- Let the application supply `IggyClientSettings`, call `IggyClient::start`, and own the returned
+  handle. The provider builds the SDK TCP client with reconnection disabled so reconnect
+  supervision, credentials/TLS policy, and stream/topic/consumer-group provisioning stay
+  application-owned.
+- Publish one message per call through a direct send request and report success only when the
+  server replies; do not use the SDK's background batching producer. Any timeout is an unknown
+  outcome classified transient, because the SDK's detached transport task still sends a queued
+  request. Within one call the SDK replays the same request id when it observes no reply, and a
+  reply that the write was already applied counts as success; an application retry is a new
+  request that the server deduplicates only when the topic enables message deduplication. The
+  provider documents this rather than adding its own retries. Header names and values are capped
+  at 255 bytes; an oversized `tracestate` is omitted and `traceparent` stays required.
+- Defer the partitioned-log delivery source and settlement. Iggy offset stores carry no
+  consumer-group membership generation, ownership is checked only when a write is admitted, and
+  offset reads may come from a lagging follower, so the #23 fencing and reconciliation rules cannot
+  be met. A real-broker negative feasibility test records the gap; the inbound slice follows in a
+  separately approved issue once the fencing decision is made.
+- Exercise deterministic mapping, settings, resolver, and error-classification tests plus real
+  Iggy publish confirmation and offset-fencing tests. Record the Iggy mapping benchmark and its
+  measured environment and result before provider review completes.
+
 ### Phase 7 — consumer runtime
 
 - Implement typed `ConsumerHandler` and the bounded `Consumer` receive/process/settle loop.
@@ -213,7 +246,8 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Rehearse an empty PostgreSQL 18 install and application-owned schema selection.
 - Package the complete checked migration directory as a versioned release asset compatible with
   `sisa-messaging-postgres`; verify the asset digest and a clean install from the packaged copy.
-- Publish in dependency order: messaging; Kafka; outbox, inbox, and NATS; then consumer and PostgreSQL.
+- Publish in dependency order: messaging; Kafka and Iggy; outbox, inbox, and NATS; then consumer
+  and PostgreSQL.
 - Tag the compatible workspace and schema baseline together.
 
 ## 5. Dependency and feature policy

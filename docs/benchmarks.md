@@ -7,7 +7,8 @@ number:
 
 1. Did a local algorithm or representation regress?
 2. How do PostgreSQL queries scale with realistic table state?
-3. What throughput and latency do NATS and Kafka publication and consumption achieve independently?
+3. What throughput and latency do NATS, Kafka, and Iggy publication and consumption achieve
+   independently?
 4. What does the complete enqueue → dispatch → broker → consume → commit path cost?
 
 Correctness tests remain separate. A fast result is invalid if rows are lost, acknowledged before
@@ -33,6 +34,8 @@ crates/
 │   ├── publish.rs
 │   └── consume.rs
 ├── sisa-messaging-kafka/benches/
+│   └── mapping.rs
+├── sisa-messaging-iggy/benches/
 │   └── mapping.rs
 └── sisa-messaging-consumer/benches/
     └── processing.rs
@@ -118,6 +121,24 @@ Kafka features): `cargo bench -p sisa-messaging-kafka --bench mapping --
 `typical-4k-8-ordered` fixture, Criterion estimated 1.3107 µs for encode
 (95% interval 1.3054–1.3173 µs) and 2.7586 µs for decode
 (2.7425–2.7777 µs). This short run is a starting measurement, not a release
+regression threshold.
+
+### Iggy mapping
+
+- Encode and decode a deterministic envelope with a representative payload, ordering key,
+  framework metadata, and custom headers.
+- Time the mapper independently of destination resolution, client construction, and broker I/O.
+- Record the exact input profile, command, host, toolchain, and measured encode/decode results.
+
+The named `sisa-messaging-iggy/benches/mapping.rs` benchmark is the provider's first hot-path
+baseline. Broker publication requires a separate real-broker profile; the local mapper result does
+not represent network throughput or durability.
+
+Initial local run (2026-09-24, Apple M4 Pro, macOS arm64 Darwin 25.5.0, rustc 1.98.0, default
+Iggy features): `cargo bench -p sisa-messaging-iggy --bench mapping -- --warm-up-time 1
+--measurement-time 3`. For the 4 KiB payload, eight custom header, full framework metadata,
+ordering-key fixture, Criterion estimated about 1.46 µs for encode (interval 1.4254–1.5134 µs)
+and about 2.92 µs for decode (2.9025–2.9458 µs). This is a starting measurement, not a release
 regression threshold.
 
 ## 5. PostgreSQL benchmarks

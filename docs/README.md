@@ -8,8 +8,9 @@ and public documentation must agree with them.
 
 The project is a set of Rust libraries for durable message publication, transactional consumer
 deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, and
-Kafka publication. It is not a service and does not own application startup, configuration loading,
-database pools, broker connection lifecycles, telemetry exporters, or process shutdown.
+Kafka and Apache Iggy publication. It is not a service and does not own application startup,
+configuration loading, database pools, broker connection lifecycles, telemetry exporters, or
+process shutdown.
 
 ## Read in this order
 
@@ -27,8 +28,8 @@ database pools, broker connection lifecycles, telemetry exporters, or process sh
    IDs, async traits, and module rules.
 7. [Observability](observability.md) — tracing, logging, direct OpenTelemetry metrics, names,
    attributes, and ownership.
-8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, consumer, and full-pipeline
-   performance measurement.
+8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, Iggy, consumer, and
+   full-pipeline performance measurement.
 9. [Implementation plan](implementation-plan.md) — repository layout, build order, test strategy,
    dependency policy, and completion gates.
 10. [`0001_messaging.sql`](../migrations/0001_messaging.sql) — the executable PostgreSQL 18+
@@ -44,7 +45,9 @@ database pools, broker connection lifecycles, telemetry exporters, or process sh
   acceptance. Kafka `acks=0` allows a successful client delivery report without broker
   acknowledgement, so the outbox can complete a row the broker never received. Duplicate
   publication is still possible; expiry, permanent failure, or exhausted retry policy can instead
-  make a row dead.
+  make a row dead. Apache Iggy publication succeeds only when the server answers the send request;
+  in a cluster that reply follows quorum commit, and on a single node disk durability follows the
+  server's fsync configuration.
 - The durable and direct paths remain visibly different: the store enqueues; the transport
   publishes.
 - The application owns pools, broker connection initiation and lifecycle, broker resources,
@@ -53,7 +56,7 @@ database pools, broker connection lifecycles, telemetry exporters, or process sh
   return an application-owned handle. The application either owns inbox transactions through the
   low-level API or explicitly delegates each delivery transaction to the consumer framework.
 - Libraries accept typed settings and never read environment variables.
-- Every crate uses Rust edition 2024 with a single workspace MSRV of Rust 1.94. Provider crates
+- Every crate uses Rust edition 2024 with a single workspace MSRV of Rust 1.95. Provider crates
   do not introduce separate MSRV exceptions.
 - Providers use static dispatch. No service locator, DI container, `async-trait`, or hot-path
   `Box<dyn Trait>` is introduced.
