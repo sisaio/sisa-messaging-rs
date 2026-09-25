@@ -121,6 +121,9 @@ pub enum IggyMappingError {
 
     /// The wire record identity did not match the decoded message-id header.
     InvalidRecordId,
+
+    /// The wire record's Iggy messages-key did not match its ordering-key header.
+    InvalidRecordKey,
 }
 
 impl fmt::Display for IggyMappingError {
@@ -135,6 +138,7 @@ impl fmt::Display for IggyMappingError {
             Self::InvalidFrameworkValue => "Iggy record contains an invalid framework value",
             Self::InvalidOrderingKey => "Iggy ordering key exceeds the messages-key byte bound",
             Self::InvalidRecordId => "Iggy record id does not match its message-id header",
+            Self::InvalidRecordKey => "Iggy record key does not match its ordering-key header",
         })
     }
 }

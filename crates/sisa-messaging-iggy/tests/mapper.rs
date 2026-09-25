@@ -158,6 +158,54 @@ fn iggy_mapping_rejects_a_record_id_that_disagrees_with_the_message_id_header() 
 }
 
 #[test]
+fn iggy_mapping_rejects_a_record_key_that_disagrees_with_the_ordering_key_header() {
+    let mapper = IggyEnvelopeMapper;
+    let mut wire = mapper.encode(&envelope()).expect("fixture maps");
+    wire.key = Some(b"another-order".to_vec());
+
+    let result = mapper.decode(wire);
+
+    assert_eq!(result, Err(IggyMappingError::InvalidRecordKey));
+}
+
+#[test]
+fn iggy_mapping_rejects_a_record_key_with_no_ordering_key_header() {
+    let mapper = IggyEnvelopeMapper;
+    let mut wire = mapper.encode(&envelope()).expect("fixture maps");
+    wire.headers.retain(|header| header.name != "ordering-key");
+
+    let result = mapper.decode(wire);
+
+    assert_eq!(result, Err(IggyMappingError::InvalidRecordKey));
+}
+
+#[test]
+fn iggy_mapping_accepts_a_missing_record_key_when_the_ordering_key_header_is_present() {
+    let expected = envelope();
+    let mapper = IggyEnvelopeMapper;
+    let mut wire = mapper.encode(&expected).expect("fixture maps");
+    wire.key = None;
+
+    let decoded = mapper
+        .decode(wire)
+        .expect("a missing wire key is accepted when the header is present");
+
+    assert_eq!(decoded.ordering_key, expected.ordering_key);
+}
+
+#[test]
+fn iggy_mapping_accepts_a_record_key_that_matches_the_ordering_key_header() {
+    let mapper = IggyEnvelopeMapper;
+    let wire = mapper.encode(&envelope()).expect("fixture maps");
+
+    assert_eq!(wire.key.as_deref(), Some(b"order-7".as_slice()));
+
+    mapper
+        .decode(wire)
+        .expect("a record key equal to its ordering-key header must decode");
+}
+
+#[test]
 fn iggy_mapping_rejects_an_ordering_key_over_the_messages_key_bound() {
     let mapper = IggyEnvelopeMapper;
     let mut oversized = envelope();

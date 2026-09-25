@@ -30,6 +30,21 @@ pub(super) fn decode(wire: IggyRecord) -> Result<SerializedEnvelope, IggyMapping
         .transpose()
         .map_err(|_| IggyMappingError::InvalidFrameworkValue)?;
 
+    // Iggy does not return the messages-key on reads, so a record with no wire key is always
+    // accepted regardless of the header: the ordering key comes from the header alone in that
+    // case. A record that does carry a wire key must have that key match the ordering-key header
+    // exactly; a wire key with no header, or one that disagrees with the header, is an
+    // inconsistent record.
+    if let Some(key) = wire.key.as_deref() {
+        let matches_header = ordering_key
+            .as_ref()
+            .is_some_and(|value| value.as_str().as_bytes() == key);
+
+        if !matches_header {
+            return Err(IggyMappingError::InvalidRecordKey);
+        }
+    }
+
     let correlation_id = take_optional(&mut values, FrameworkHeader::CorrelationId)?
         .map(MetadataValue::new)
         .transpose()

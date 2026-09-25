@@ -25,7 +25,10 @@
 //!
 //! Partitioning uses the shared ordering key as an Iggy messages-key when present, and balanced
 //! (round-robin) partitioning otherwise. An ordering key longer than 255 bytes is a mapping error
-//! and is never truncated.
+//! and is never truncated. Because Iggy does not return the messages-key on reads, decoding
+//! accepts a record with no wire key regardless of its ordering-key header, but rejects one whose
+//! wire key disagrees with that header, or is present with no header at all, as
+//! [`IggyMappingError::InvalidRecordKey`].
 //!
 //! ## Wire limits
 //!
