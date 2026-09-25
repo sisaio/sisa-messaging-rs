@@ -226,6 +226,20 @@ gen_claude() {
         timeout=$(toml_value "$harness" "$table" timeout)
         require "$table.matcher" "$matcher" "$harness"
         require "$table.command" "$command" "$harness"
+        # toml_value keeps escapes as written and toml_escape adds its own, so a backslash
+        # (a basic-string escape) or a raw tab would not survive into valid, equal JSON.
+        case "$command" in
+          *\\* | *"$(printf '\t')"*)
+            echo "sync.sh: $table.command must not contain a backslash or tab in $harness" >&2
+            exit 1
+            ;;
+        esac
+        case "$timeout" in
+          *[!0-9]*)
+            echo "sync.sh: $table.timeout must be a whole number of seconds in $harness" >&2
+            exit 1
+            ;;
+        esac
         printf '    "%s": [\n      {\n' "$event"
         printf '        "matcher": "%s",\n' "$(toml_escape "$matcher")"
         printf '        "hooks": [\n          {\n            "type": "command",\n'
