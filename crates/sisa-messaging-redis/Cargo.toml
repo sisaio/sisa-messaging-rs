@@ -1,0 +1,35 @@
+[package]
+name = "sisa-messaging-redis"
+version = "0.1.0"
+description = "Redis Streams transport provider for Sisa messaging contracts"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+integration = []
+
+[dependencies]
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sisa-messaging = { workspace = true, features = ["serde"] }
+tokio = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+
+[dev-dependencies]
+criterion = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[bench]]
+name = "mapping"
+harness = false
+
+[[bench]]
+name = "provider"
+harness = false
+
+[lints]
+workspace = true
