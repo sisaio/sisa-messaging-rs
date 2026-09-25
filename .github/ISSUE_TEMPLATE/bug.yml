@@ -40,7 +40,7 @@ body:
     attributes:
       label: Version
       description: Crate version or commit SHA, plus the Rust toolchain and PostgreSQL or NATS version when relevant.
-      placeholder: "sisa-messaging 0.1.0, rustc 1.94, PostgreSQL 18.1"
+      placeholder: "sisa-messaging 0.1.0, rustc 1.95, PostgreSQL 18.1"
     validations:
       required: true
   - type: textarea
