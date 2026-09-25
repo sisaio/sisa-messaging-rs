@@ -148,6 +148,11 @@ impl IndividualSettlement for RabbitMqSettlement {
     /// A zero delay sends `basic.reject` with requeue and succeeds once the broker has processed
     /// it; the delivery returns to its queue for immediate redelivery. A nonzero delay is
     /// unsupported and takes no broker action.
+    ///
+    /// The provider enforces no delivery bound. A broker delivery limit, such as a quorum queue's
+    /// `delivery-limit` (20 by default on RabbitMQ 4.x), is application-owned queue policy: past
+    /// it the broker dead-letters or drops the delivery, so success does not guarantee
+    /// redelivery.
     #[tracing::instrument(
         name = "nack",
         target = "messaging.rabbitmq",

@@ -698,6 +698,14 @@ async fn unsupported_requirement_starts_no_consumer() {
     };
 
     assert_eq!(error, RabbitMqError::Settings);
+
+    assert!(matches!(
+        source
+            .open(IndividualSourceRequirements::new().requiring_heartbeat())
+            .await,
+        Err(IndividualSourceOpenError::Source(RabbitMqError::Settings))
+    ));
+
     assert_eq!(fixture.counts().await.1, 1);
 
     fixture.cleanup().await;
@@ -1081,6 +1089,15 @@ async fn open_after_close_is_rejected() {
     };
 
     assert_eq!(error, RabbitMqError::Settings);
+
+    // The closed state takes precedence over requirement validation.
+    assert!(matches!(
+        source
+            .open(IndividualSourceRequirements::new().requiring_delayed_retry())
+            .await,
+        Err(IndividualSourceOpenError::Source(RabbitMqError::Settings))
+    ));
+
     assert!(source.receive().await.unwrap().is_none());
     assert_eq!(fixture.counts().await.1, 0);
 

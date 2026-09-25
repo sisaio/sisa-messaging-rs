@@ -151,7 +151,8 @@ regression threshold.
 
 - Encode and decode the `small` (256 B, no custom headers), `typical` (4 KiB, eight custom
   headers, ordering key), and `large` (64 KiB, 32 custom headers, ordering key) fixtures.
-- Time the mapper independently of route resolution, channel construction, and broker I/O.
+- Time the mapper, including `TypeRouteResolver` routing-key formatting and the payload copy into
+  the wire value, independently of channel construction and broker I/O.
 
 The named `sisa-messaging-rabbitmq/benches/mapping.rs` benchmark is the provider's broker-free
 hot-path baseline. Initial local run (2026-09-25, macOS arm64 Darwin 25.5.0, rustc 1.98.0):
