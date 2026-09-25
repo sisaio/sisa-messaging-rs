@@ -32,6 +32,7 @@ fn record(scope: &str, id: u128) -> InboxRecord {
 fn test_scope(scope: &str) -> String {
     static RUN: OnceLock<String> = OnceLock::new();
     let run = RUN.get_or_init(|| Uuid::now_v7().simple().to_string());
+
     format!("{scope}-{run}")
 }
 
@@ -155,6 +156,7 @@ impl InboxFixture {
     async fn cleanup(self) {
         self.pool.close().await;
         let control = pool().await;
+
         // The generated identifier contains only a fixed prefix and UUID hex digits.
         sqlx::query(AssertSqlSafe(format!(
             "DROP SCHEMA {} CASCADE",
@@ -169,17 +171,20 @@ impl InboxFixture {
 async fn isolated_inbox_fixture() -> InboxFixture {
     let control = pool().await;
     let schema = format!("inbox_test_{}", Uuid::now_v7().simple());
+
     // PostgreSQL identifiers cannot be parameters; this UUID-derived schema name is safe.
     sqlx::query(AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
         .execute(&control)
         .await
         .unwrap_or_else(|_| panic!("inbox schema setup failed"));
+
     sqlx::query(AssertSqlSafe(format!(
         "CREATE TABLE {schema}.inbox_receipts (LIKE public.inbox_receipts INCLUDING ALL)"
     )))
     .execute(&control)
     .await
     .unwrap_or_else(|_| panic!("inbox table setup failed"));
+
     for (source, target) in [
         ("inbox_receipts_pkey", "pk_inbox_receipts"),
         (
@@ -199,11 +204,14 @@ async fn isolated_inbox_fixture() -> InboxFixture {
         .await
         .unwrap_or_else(|_| panic!("inbox index setup failed"));
     }
+
     let search_path = format!("{schema}, public");
+
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .after_connect(move |connection, _| {
             let search_path = search_path.clone();
+
             Box::pin(async move {
                 sqlx::query!(
                     r#"
@@ -220,6 +228,7 @@ async fn isolated_inbox_fixture() -> InboxFixture {
         .connect_with(crate::support::connect_options())
         .await
         .unwrap_or_else(|_| panic!("isolated inbox PostgreSQL connection failed"));
+
     InboxFixture { pool, schema }
 }
 
@@ -227,6 +236,7 @@ async fn isolated_inbox_fixture() -> InboxFixture {
 async fn inbox_dead_letter_cursor_rejects_an_out_of_range_system_time_before_sql() {
     let fixture = isolated_inbox_fixture().await;
     let store = store(fixture.pool.clone(), 2);
+
     let list = store
         .list(DeadLetterQuery {
             after: Some(DeadLetterCursor {
@@ -236,6 +246,7 @@ async fn inbox_dead_letter_cursor_rejects_an_out_of_range_system_time_before_sql
             limit: NonZeroU32::MIN,
         })
         .await;
+
     assert!(matches!(list, Err(PostgresError::InvalidData)));
     fixture.cleanup().await;
 }
@@ -246,6 +257,7 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
     let pool = fixture.pool.clone();
     let store = store(pool.clone(), 2);
     let effect_table = format!("inbox_effect_{}", Uuid::now_v7().simple());
+
     // Identifiers cannot be bound; this name is constrained to a fixed prefix and UUID hex.
     sqlx::query(AssertSqlSafe(format!(
         "CREATE TABLE {effect_table} (message_id uuid PRIMARY KEY)"
@@ -253,11 +265,14 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("effect table setup failed"));
+
     let completed = record("inbox-atomic-v4", 0x901);
+
     let mut transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     let receipt = match store
         .claim(&mut transaction, &completed)
         .await
@@ -266,6 +281,7 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         InboxClaimOutcome::Claimed(receipt) => receipt,
         outcome => panic!("unexpected claim outcome: {outcome:?}"),
     };
+
     sqlx::query(AssertSqlSafe(format!(
         "INSERT INTO {effect_table} VALUES ($1)"
     )))
@@ -273,14 +289,17 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
     .execute(&mut *transaction)
     .await
     .unwrap_or_else(|_| panic!("effect insert failed"));
+
     store
         .complete(&mut transaction, receipt)
         .await
         .unwrap_or_else(|_| panic!("complete failed"));
+
     store
         .commit(transaction)
         .await
         .unwrap_or_else(|_| panic!("commit failed"));
+
     assert_eq!(
         sqlx::query_scalar::<_, i64>(AssertSqlSafe(format!(
             "SELECT count(*) FROM {effect_table}"
@@ -290,10 +309,12 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         .unwrap_or_else(|_| panic!("effect read failed")),
         1
     );
+
     let mut transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     assert!(matches!(
         store
             .claim(&mut transaction, &completed)
@@ -301,19 +322,24 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
             .unwrap_or_else(|_| panic!("duplicate claim failed")),
         InboxClaimOutcome::CompletedDuplicate
     ));
+
     store
         .rollback(transaction)
         .await
         .unwrap_or_else(|_| panic!("rollback failed"));
+
     let rolled = record("inbox-atomic-v4", 0x902);
+
     let mut transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     let _ = store
         .claim(&mut transaction, &rolled)
         .await
         .unwrap_or_else(|_| panic!("claim failed"));
+
     sqlx::query(AssertSqlSafe(format!(
         "INSERT INTO {effect_table} VALUES ($1)"
     )))
@@ -321,10 +347,12 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
     .execute(&mut *transaction)
     .await
     .unwrap_or_else(|_| panic!("rollback effect insert failed"));
+
     store
         .rollback(transaction)
         .await
         .unwrap_or_else(|_| panic!("rollback failed"));
+
     assert_eq!(
         sqlx::query_scalar::<_, i64>(AssertSqlSafe(format!(
             "SELECT count(*) FROM {effect_table}"
@@ -334,10 +362,12 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
         .unwrap_or_else(|_| panic!("effect read failed")),
         1
     );
+
     let mut transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     assert!(matches!(
         store
             .claim(&mut transaction, &rolled)
@@ -345,6 +375,7 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
             .unwrap_or_else(|_| panic!("reclaim failed")),
         InboxClaimOutcome::Claimed(_)
     ));
+
     store
         .rollback(transaction)
         .await
@@ -353,10 +384,12 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
     // The first open transaction owns this key; a second transaction sees an immediate duplicate.
     let contested = record("inbox-lock-v3", 0x903);
     let distinct = record("inbox-lock-v3", 0x904);
+
     let mut holder = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     assert!(matches!(
         store
             .claim(&mut holder, &contested)
@@ -364,10 +397,12 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
             .unwrap_or_else(|_| panic!("holder claim failed")),
         InboxClaimOutcome::Claimed(_)
     ));
+
     let mut contender = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     assert!(matches!(
         store
             .claim(&mut contender, &contested)
@@ -375,6 +410,7 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
             .unwrap_or_else(|_| panic!("contended claim failed")),
         InboxClaimOutcome::InProgressDuplicate
     ));
+
     assert!(matches!(
         store
             .claim(&mut contender, &distinct)
@@ -382,18 +418,22 @@ async fn claim_complete_and_rollback_make_effects_atomic_and_terminal_duplicates
             .unwrap_or_else(|_| panic!("distinct claim failed")),
         InboxClaimOutcome::Claimed(_)
     ));
+
     store
         .rollback(contender)
         .await
         .unwrap_or_else(|_| panic!("rollback failed"));
+
     store
         .rollback(holder)
         .await
         .unwrap_or_else(|_| panic!("rollback failed"));
+
     sqlx::query(AssertSqlSafe(format!("DROP TABLE {effect_table}")))
         .execute(&pool)
         .await
         .unwrap_or_else(|_| panic!("effect table cleanup failed"));
+
     fixture.cleanup().await;
 }
 
@@ -403,6 +443,7 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
     let pool = fixture.pool.clone();
     let store = store(pool.clone(), 2);
     let retry = record("inbox-failures", 0x911);
+
     assert_eq!(
         store
             .fail(&retry, failure(FailureKind::Transient))
@@ -410,6 +451,7 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
             .unwrap_or_else(|_| panic!("retry failure failed")),
         InboxFailureOutcome::Retry { attempts: 1 }
     );
+
     assert_eq!(
         store
             .fail(&retry, failure(FailureKind::Transient))
@@ -420,13 +462,16 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
             reason: DeadReason::Exhausted
         }
     );
+
     let terminal_before = inbox_record(
         &pool,
         InboxLookupParams::by_identity(retry.scope.as_str(), retry.message_id.into_uuid()),
     )
     .await
     .unwrap_or_else(|| panic!("terminal receipt missing"));
+
     let terminal_snapshot = terminal_before;
+
     assert_eq!(
         store
             .fail(
@@ -440,17 +485,21 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
             reason: DeadReason::Exhausted
         }
     );
+
     let terminal_after = inbox_record(
         &pool,
         InboxLookupParams::by_identity(retry.scope.as_str(), retry.message_id.into_uuid()),
     )
     .await
     .unwrap_or_else(|| panic!("terminal receipt disappeared"));
+
     assert_eq!(
         terminal_after, terminal_snapshot,
         "a distinguishable repeated failure changed a durable terminal receipt column"
     );
+
     let permanent = record("inbox-failures", 0x912);
+
     assert_eq!(
         store
             .fail(&permanent, failure(FailureKind::Permanent))
@@ -461,6 +510,7 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
             reason: DeadReason::Permanent
         }
     );
+
     let page = store
         .list(DeadLetterQuery {
             after: None,
@@ -468,6 +518,7 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
         })
         .await
         .unwrap_or_else(|_| panic!("list failed"));
+
     assert_eq!(page.len(), 2);
     let first = &page[0];
     let second = &page[1];
@@ -476,17 +527,21 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
     assert_eq!(first.metadata, Some(Metadata::default()));
     assert_eq!(first.attempts, 2);
     assert_eq!(first.reason, DeadReason::Exhausted);
+
     assert_eq!(
         first.last_error,
         Some(ErrorSummary::from_safe_text("safe test failure"))
     );
+
     assert_eq!(second.scope, permanent.scope);
+
     let permanent_durable = inbox_record(
         &pool,
         InboxLookupParams::by_identity(permanent.scope.as_str(), permanent.message_id.into_uuid()),
     )
     .await
     .unwrap_or_else(|| panic!("permanent terminal receipt missing"));
+
     let expected_second = DeadLetterRecord {
         id: InboxId::from_uuid(permanent_durable.id),
         scope: permanent.scope.clone(),
@@ -505,14 +560,17 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
         reason: DeadReason::Permanent,
         last_error: Some(ErrorSummary::from_safe_text("safe test failure")),
     };
+
     assert_eq!(
         *second, expected_second,
         "initial dead-letter page did not return the complete permanent receipt"
     );
+
     let after = DeadLetterCursor {
         dead_at: first.dead_at,
         id: first.id,
     };
+
     let next_page = store
         .list(DeadLetterQuery {
             after: Some(after),
@@ -520,11 +578,13 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
         })
         .await
         .unwrap_or_else(|_| panic!("keyset failed"));
+
     assert_eq!(
         next_page,
         vec![expected_second],
         "exclusive keyset page did not return the complete second receipt"
     );
+
     assert_eq!(
         store
             .retry(DeadLetterBatch::new(&[first.id]).unwrap_or_else(|_| panic!("batch rejected")),)
@@ -532,6 +592,7 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
             .unwrap_or_else(|_| panic!("retry failed")),
         vec![first.id]
     );
+
     assert_eq!(
         store
             .delete(
@@ -542,6 +603,7 @@ async fn failures_transition_exactly_and_dead_letters_page_retry_and_delete() {
             .unwrap_or_else(|_| panic!("delete failed")),
         vec![second.id]
     );
+
     fixture.cleanup().await;
 }
 
@@ -550,12 +612,15 @@ async fn retention_is_terminal_only_and_bounded_per_phase() {
     let fixture = isolated_inbox_fixture().await;
     let pool = fixture.pool.clone();
     let store = store(pool.clone(), 2);
+
     for id in [0x921, 0x922] {
         let row = record("inbox-purge-v3", id);
+
         let mut tx = store
             .begin()
             .await
             .unwrap_or_else(|_| panic!("begin failed"));
+
         let receipt = match store
             .claim(&mut tx, &row)
             .await
@@ -564,27 +629,34 @@ async fn retention_is_terminal_only_and_bounded_per_phase() {
             InboxClaimOutcome::Claimed(r) => r,
             other => panic!("unexpected {other:?}"),
         };
+
         store
             .complete(&mut tx, receipt)
             .await
             .unwrap_or_else(|_| panic!("complete failed"));
+
         store
             .commit(tx)
             .await
             .unwrap_or_else(|_| panic!("commit failed"));
     }
+
     for id in [0x923, 0x924] {
         let row = record("inbox-purge-v3", id);
+
         let _ = store
             .fail(&row, failure(FailureKind::Permanent))
             .await
             .unwrap_or_else(|_| panic!("dead setup failed"));
     }
+
     let pending = record("inbox-purge-v3", 0x925);
+
     let mut pending_transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("pending setup begin failed"));
+
     assert!(matches!(
         store
             .claim(&mut pending_transaction, &pending)
@@ -592,11 +664,14 @@ async fn retention_is_terminal_only_and_bounded_per_phase() {
             .unwrap_or_else(|_| panic!("pending setup claim failed")),
         InboxClaimOutcome::Claimed(_)
     ));
+
     store
         .commit(pending_transaction)
         .await
         .unwrap_or_else(|_| panic!("pending setup commit failed"));
+
     let retrying = record("inbox-purge-v3", 0x926);
+
     assert_eq!(
         store
             .fail(&retrying, failure(FailureKind::Transient))
@@ -604,6 +679,7 @@ async fn retention_is_terminal_only_and_bounded_per_phase() {
             .unwrap_or_else(|_| panic!("retrying setup failed")),
         InboxFailureOutcome::Retry { attempts: 1 }
     );
+
     let report = store
         .purge(InboxPurgeRequest {
             completed_retention: Some(Duration::ZERO),
@@ -612,16 +688,20 @@ async fn retention_is_terminal_only_and_bounded_per_phase() {
         })
         .await
         .unwrap_or_else(|_| panic!("purge failed"));
+
     assert_eq!((report.completed_deleted, report.dead_deleted), (1, 1));
+
     let stats = store
         .stats()
         .await
         .unwrap_or_else(|_| panic!("stats failed"));
+
     assert_eq!(
         (stats.pending, stats.retrying, stats.completed, stats.dead),
         (1, 1, 1, 1),
         "zero-retention batch one must preserve pending and retrying receipts"
     );
+
     fixture.cleanup().await;
 }
 
@@ -631,6 +711,7 @@ async fn saturated_attempts_become_dead_without_overflow_and_poisoned_metadata_i
     let pool = fixture.pool.clone();
     let store = store(pool.clone(), 2_147_483_647);
     let row = record("inbox-boundaries-v2", 0x931);
+
     sqlx::query!(
         r#"
             -- A schema-valid maximum proves the failure transition saturates before incrementing.
@@ -652,6 +733,7 @@ async fn saturated_attempts_become_dead_without_overflow_and_poisoned_metadata_i
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("boundary fixture setup failed"));
+
     assert_eq!(
         store
             .fail(&row, failure(FailureKind::Transient))
@@ -662,6 +744,7 @@ async fn saturated_attempts_become_dead_without_overflow_and_poisoned_metadata_i
             reason: DeadReason::Exhausted
         }
     );
+
     let dead = store
         .list(DeadLetterQuery {
             after: None,
@@ -669,10 +752,12 @@ async fn saturated_attempts_become_dead_without_overflow_and_poisoned_metadata_i
         })
         .await
         .unwrap_or_else(|_| panic!("list failed"));
+
     assert!(
         dead.iter()
             .any(|entry| entry.scope == row.scope && entry.metadata.is_none())
     );
+
     fixture.cleanup().await;
 }
 
@@ -724,6 +809,7 @@ fn inbox_plan_nodes(plan: Option<serde_json::Value>) -> Vec<InboxPlanNode> {
                             .unwrap_or_default(),
                     });
                 }
+
                 for child in object.values() {
                     visit(child, nodes);
                 }
@@ -738,10 +824,12 @@ fn inbox_plan_nodes(plan: Option<serde_json::Value>) -> Vec<InboxPlanNode> {
     }
 
     let mut nodes = Vec::new();
+
     visit(
         &plan.unwrap_or_else(|| panic!("inbox plan payload was null")),
         &mut nodes,
     );
+
     nodes
 }
 
@@ -749,11 +837,14 @@ fn assert_inbox_bounded_node(node: &InboxPlanNode, description: &str) {
     let rows = node
         .actual_rows
         .unwrap_or_else(|| panic!("{description} has no Actual Rows: {node:?}"));
+
     let loops = node
         .actual_loops
         .unwrap_or_else(|| panic!("{description} has no Actual Loops: {node:?}"));
+
     assert!(rows <= 1.0, "{description} examined {rows} rows");
     assert!(loops <= 1.0, "{description} ran {loops} loops");
+
     if let Some(filtered) = node.rows_removed_by_filter {
         assert!(filtered <= 1.0, "{description} removed {filtered} rows");
     }
@@ -767,11 +858,13 @@ fn assert_inbox_named_index(nodes: &[InboxPlanNode], index: &str) {
                 && matches!(node.node_type.as_str(), "Index Scan" | "Index Only Scan")
         })
         .collect();
+
     assert_eq!(
         matches.len(),
         1,
         "expected one bounded index node for {index}: {nodes:?}"
     );
+
     assert_inbox_bounded_node(matches[0], index);
 }
 
@@ -780,13 +873,16 @@ fn assert_inbox_mutation(nodes: &[InboxPlanNode], locking: bool) {
         .iter()
         .filter(|node| node.node_type == "ModifyTable")
         .collect();
+
     assert_eq!(mutations.len(), 1, "missing ModifyTable: {nodes:?}");
     assert_inbox_bounded_node(mutations[0], "ModifyTable");
+
     if locking {
         let locks: Vec<_> = nodes
             .iter()
             .filter(|node| node.node_type == "LockRows")
             .collect();
+
         assert_eq!(locks.len(), 1, "missing LockRows: {nodes:?}");
         assert_inbox_bounded_node(locks[0], "LockRows");
     }
@@ -798,10 +894,12 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     let pool = fixture.pool.clone();
     let store = store(pool.clone(), 2);
     let completed = record("inbox-plan-completed", 0xa01);
+
     let mut transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("begin failed"));
+
     let completed_receipt = match store
         .claim(&mut transaction, &completed)
         .await
@@ -810,17 +908,21 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
         InboxClaimOutcome::Claimed(receipt) => receipt,
         outcome => panic!("unexpected completed plan setup outcome: {outcome:?}"),
     };
+
     let completed_id = completed_receipt.id().into_uuid();
+
     store
         .complete(&mut transaction, completed_receipt)
         .await
         .unwrap_or_else(|_| panic!("completed plan setup completion failed"));
+
     store
         .commit(transaction)
         .await
         .unwrap_or_else(|_| panic!("completed plan setup commit failed"));
 
     let dead = record("inbox-plan-dead", 0xa02);
+
     assert!(matches!(
         store
             .fail(&dead, failure(FailureKind::Permanent))
@@ -828,6 +930,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
             .unwrap_or_else(|_| panic!("dead plan setup failed")),
         InboxFailureOutcome::Dead { .. }
     ));
+
     let dead_id = inbox_record(
         &pool,
         InboxLookupParams::by_identity(dead.scope.as_str(), dead.message_id.into_uuid()),
@@ -839,6 +942,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     // Dead noise makes the partial cursor index preferable without unchecked fixture SQL.
     for sequence in 0..1024_u128 {
         let noise = record("inbox-plan-noise", 0xb000 + sequence);
+
         let _ = store
             .fail(&noise, failure(FailureKind::Permanent))
             .await
@@ -846,6 +950,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     }
 
     let retry = record("inbox-plan-retry", 0xa03);
+
     assert!(matches!(
         store
             .fail(&retry, failure(FailureKind::Permanent))
@@ -853,6 +958,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
             .unwrap_or_else(|_| panic!("retry plan setup failed")),
         InboxFailureOutcome::Dead { .. }
     ));
+
     let retry_id = inbox_record(
         &pool,
         InboxLookupParams::by_identity(retry.scope.as_str(), retry.message_id.into_uuid()),
@@ -860,16 +966,19 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     .await
     .unwrap_or_else(|| panic!("retry plan setup receipt missing"))
     .id;
+
     sqlx::query!("ANALYZE inbox_receipts")
         .execute(&pool)
         .await
         .unwrap_or_else(|_| panic!("inbox plan analyze failed"));
 
     let claim_record = record("inbox-plan-claim", 0xa04);
+
     let mut transaction = store
         .begin()
         .await
         .unwrap_or_else(|_| panic!("claim plan setup begin failed"));
+
     assert!(matches!(
         store
             .claim(&mut transaction, &claim_record)
@@ -877,6 +986,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
             .unwrap_or_else(|_| panic!("claim plan setup claim failed")),
         InboxClaimOutcome::Claimed(_)
     ));
+
     store
         .commit(transaction)
         .await
@@ -912,8 +1022,10 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("claim plan failed"));
+
     let claim_nodes = inbox_plan_nodes(claim);
     assert_inbox_mutation(&claim_nodes, false);
+
     assert!(
         claim_nodes.iter().any(|node| {
             node.conflict_arbiter_indexes
@@ -922,6 +1034,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
         }),
         "claim plan omitted ix_inbox_receipts_scope_message_id: {claim_nodes:?}"
     );
+
     let claim_persisted = inbox_record(
         &pool,
         InboxLookupParams::by_identity(
@@ -931,6 +1044,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     )
     .await
     .unwrap_or_else(|| panic!("claim plan receipt missing"));
+
     assert!(
         claim_persisted.scope == claim_record.scope.as_str()
             && claim_persisted.message_id == claim_record.message_id.into_uuid()
@@ -963,9 +1077,11 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("completed purge plan failed"));
+
     let completed_nodes = inbox_plan_nodes(completed_purge);
     assert_inbox_named_index(&completed_nodes, "ix_inbox_receipts_completed");
     assert_inbox_mutation(&completed_nodes, true);
+
     assert!(
         inbox_record(&pool, InboxLookupParams::by_id(completed_id))
             .await
@@ -994,9 +1110,11 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("dead purge plan failed"));
+
     let dead_nodes = inbox_plan_nodes(dead_purge);
     assert_inbox_named_index(&dead_nodes, "ix_inbox_receipts_dead");
     assert_inbox_mutation(&dead_nodes, true);
+
     assert!(
         inbox_record(&pool, InboxLookupParams::by_id(dead_id))
             .await
@@ -1037,6 +1155,7 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("dead cursor plan failed"));
+
     let cursor_nodes = inbox_plan_nodes(cursor);
     assert_inbox_named_index(&cursor_nodes, "ix_inbox_receipts_dead");
 
@@ -1060,12 +1179,15 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("retry plan failed"));
+
     let retry_nodes = inbox_plan_nodes(retry_plan);
     assert_inbox_named_index(&retry_nodes, "pk_inbox_receipts");
     assert_inbox_mutation(&retry_nodes, false);
+
     let retry_persisted = inbox_record(&pool, InboxLookupParams::by_id(retry_id))
         .await
         .unwrap_or_else(|| panic!("retry plan receipt missing"));
+
     assert!(
         retry_persisted.attempts == 0
             && retry_persisted.completed_at.is_none()
@@ -1074,5 +1196,6 @@ async fn postgres_18_inbox_query_shapes_use_bounded_named_index_access_paths() {
             && retry_persisted.last_error.is_none(),
         "retry plan did not persist its active transition"
     );
+
     fixture.cleanup().await;
 }

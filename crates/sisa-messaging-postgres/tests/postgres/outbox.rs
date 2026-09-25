@@ -30,6 +30,7 @@ use uuid::Uuid;
 #[tokio::test]
 async fn purge_expires_a_stale_crash_lease_and_clears_its_fence() {
     let pool = isolated_outbox_pool().await;
+
     let id = sqlx::query_scalar!(
         r#"
             -- A stale lease remains eligible for expiry even while its token remains persisted.
@@ -48,7 +49,9 @@ async fn purge_expires_a_stale_crash_lease_and_clears_its_fence() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("stale lease setup failed"));
+
     let store = PostgresOutboxStore::new(pool.clone(), ());
+
     let report = store
         .purge(OutboxPurgeRequest {
             published_retention: Duration::from_secs(86_400),
@@ -57,10 +60,13 @@ async fn purge_expires_a_stale_crash_lease_and_clears_its_fence() {
         })
         .await
         .unwrap_or_else(|_| panic!("stale lease purge failed"));
+
     assert_eq!(report.expired, 1);
+
     let row = outbox_record(&pool, OutboxLookupParams::by_id(id))
         .await
         .unwrap_or_else(|| panic!("stale lease lookup failed"));
+
     assert_eq!(row.dead_reason.as_deref(), Some("expired"));
     assert_eq!(row.claim_token, None);
     assert_eq!(row.locked_by, None);
@@ -72,6 +78,7 @@ async fn claim_returns_healthy_rows_and_marks_a_poison_row_dead() {
     insert_outbox_row(&pool, "postgres.healthy").await;
     let poison_id = insert_outbox_row(&pool, "").await;
     let store = PostgresOutboxStore::new(pool.clone(), ());
+
     let batch = store
         .claim(ClaimRequest {
             worker_id: "postgres-test".into(),
@@ -80,6 +87,7 @@ async fn claim_returns_healthy_rows_and_marks_a_poison_row_dead() {
         })
         .await
         .unwrap_or_else(|_| panic!("mixed claim failed"));
+
     assert_eq!(
         (
             batch.records.len(),
@@ -88,9 +96,11 @@ async fn claim_returns_healthy_rows_and_marks_a_poison_row_dead() {
         ),
         (1, 1, 1)
     );
+
     let dead = outbox_record(&pool, OutboxLookupParams::by_id(poison_id))
         .await
         .unwrap_or_else(|| panic!("poison lookup failed"));
+
     assert_eq!(dead.dead_reason.as_deref(), Some("undecodable"));
     assert!(dead.claim_token.is_none() && dead.locked_by.is_none());
 }
@@ -100,6 +110,7 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
     let pool = isolated_outbox_pool().await;
     insert_outbox_row(&pool, "postgres.healthy-after-poison-error").await;
     insert_outbox_row(&pool, "").await;
+
     sqlx::query!(
         r#"
             -- One temporary trigger makes only post-claim poison cleanup fail in this fixture.
@@ -123,7 +134,9 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("trigger setup failed"));
+
     let store = PostgresOutboxStore::new(pool, ());
+
     let batch = store
         .claim(ClaimRequest {
             worker_id: "postgres-test".into(),
@@ -132,6 +145,7 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
         })
         .await
         .unwrap_or_else(|_| panic!("claim should survive poison error"));
+
     assert_eq!(
         (
             batch.records.len(),
@@ -145,6 +159,7 @@ async fn claim_keeps_healthy_rows_when_the_poison_follow_up_fails() {
 #[tokio::test]
 async fn stats_excludes_a_due_successor_and_clamps_a_future_created_age() {
     let pool = isolated_outbox_pool().await;
+
     sqlx::query!(
         r#"
             -- An expired predecessor blocks its successor while the predecessor lease is current.
@@ -177,10 +192,12 @@ async fn stats_excludes_a_due_successor_and_clamps_a_future_created_age() {
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("ordering stats setup failed"));
+
     let stats = PostgresOutboxStore::new(pool, ())
         .stats()
         .await
         .unwrap_or_else(|_| panic!("stats failed"));
+
     assert_eq!((stats.pending, stats.expired), (2, 1));
     // A schema-valid clock-skewed row must not make maintenance fail.
     assert_eq!(stats.oldest_pending_age, Duration::ZERO);
@@ -189,6 +206,7 @@ async fn stats_excludes_a_due_successor_and_clamps_a_future_created_age() {
 #[tokio::test]
 async fn stats_rejects_a_non_finite_database_derived_age() {
     let pool = isolated_outbox_pool().await;
+
     sqlx::query!(
         r#"
             -- PostgreSQL permits infinity timestamps, but their derived age is not a Duration.
@@ -221,6 +239,7 @@ async fn stats_rejects_a_non_finite_database_derived_age() {
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("infinite age fixture setup failed"));
+
     let result = PostgresOutboxStore::new(pool, ()).stats().await;
     assert!(matches!(result, Err(PostgresError::InvalidData)));
 }
@@ -228,6 +247,7 @@ async fn stats_rejects_a_non_finite_database_derived_age() {
 #[tokio::test]
 async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states() {
     let pool = isolated_outbox_pool().await;
+
     sqlx::query!(
         r#"
             -- Two old rows per phase prove batch one leaves one matching row for every phase.
@@ -262,7 +282,9 @@ async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("maintenance fixture setup failed"));
+
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let report = store
         .purge(OutboxPurgeRequest {
             published_retention: Duration::from_secs(1),
@@ -271,6 +293,7 @@ async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states
         })
         .await
         .unwrap_or_else(|_| panic!("bounded maintenance failed"));
+
     assert_eq!(
         (
             report.expired,
@@ -279,10 +302,12 @@ async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states
         ),
         (1, 1, 1)
     );
+
     let stats = store
         .stats()
         .await
         .unwrap_or_else(|_| panic!("stats failed"));
+
     assert_eq!((stats.pending, stats.expired, stats.dead), (1, 1, 2));
     assert!(stats.oldest_pending_age >= Duration::from_secs(50));
 }
@@ -290,6 +315,7 @@ async fn purge_bounds_each_maintenance_phase_and_stats_observes_remaining_states
 #[tokio::test]
 async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_returns_dead_matches() {
     let pool = isolated_outbox_pool().await;
+
     sqlx::query!(
         r#"
             -- Fixed death order makes the exclusive cursor boundary observable.
@@ -316,11 +342,13 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("dead-letter fixture setup failed"));
+
     let first_id = Uuid::from_u128(0x201);
     let first_message_id = Uuid::from_u128(0x301);
     let second_id = Uuid::from_u128(0x202);
     let live_id = Uuid::from_u128(0x203);
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let first = store
         .list(DeadLetterQuery {
             after: None,
@@ -328,8 +356,10 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
         })
         .await
         .unwrap_or_else(|_| panic!("first dead-letter page failed"));
+
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].id.into_uuid(), first_id);
+
     let second = store
         .list(DeadLetterQuery {
             after: Some(DeadLetterCursor {
@@ -340,6 +370,7 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
         })
         .await
         .unwrap_or_else(|_| panic!("second dead-letter page failed"));
+
     assert_eq!(
         second
             .iter()
@@ -347,24 +378,31 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
             .collect::<Vec<_>>(),
         vec![second_id]
     );
+
     let retried = store
         .retry(
             DeadLetterBatch::new(&[first[0].id]).unwrap_or_else(|_| panic!("retry batch failed")),
         )
         .await
         .unwrap_or_else(|_| panic!("dead-letter retry failed"));
+
     assert_eq!(retried, vec![first[0].id]);
+
     let revived = outbox_record(&pool, OutboxLookupParams::by_id(first_id))
         .await
         .unwrap_or_else(|| panic!("revived dead-letter lookup failed"));
+
     assert_eq!(
         (revived.id, revived.message_id, revived.attempts),
         (first_id, first_message_id, 0)
     );
+
     assert!(
         revived.dead_at.is_none() && revived.dead_reason.is_none() && revived.last_error.is_none()
     );
+
     assert!(revived.claim_token.is_none() && revived.locked_by.is_none());
+
     let reclaimed = store
         .claim(ClaimRequest {
             worker_id: "postgres-retry-expired".into(),
@@ -373,13 +411,17 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
         })
         .await
         .unwrap_or_else(|_| panic!("expired dead-letter re-claim failed"));
+
     assert_eq!(reclaimed.records.len(), 1);
     assert_eq!(reclaimed.records[0].claim.id.into_uuid(), first_id);
+
     assert_eq!(
         reclaimed.records[0].envelope.message_id.into_uuid(),
         first_message_id
     );
+
     assert_eq!(reclaimed.records[0].envelope.metadata, Metadata::default());
+
     let deleted = store
         .delete(
             DeadLetterBatch::new(&[
@@ -390,6 +432,7 @@ async fn dead_letters_page_exclusively_retry_preserves_identity_and_delete_retur
         )
         .await
         .unwrap_or_else(|_| panic!("dead-letter delete failed"));
+
     assert_eq!(
         deleted,
         vec![sisa_messaging_outbox::OutboxId::from_uuid(second_id)]
@@ -438,13 +481,16 @@ fn postgres_error_redacts_database_diagnostics_but_retains_the_source() {
     let error = PostgresError::from(sqlx::Error::Database(Box::new(SentinelDatabaseError(
         "55P03",
     ))));
+
     assert_eq!(error.to_string(), "database operation failed");
     assert_eq!(format!("{error:?}"), "Database");
     assert!(!error.to_string().contains("postgres-secret-sentinel"));
     assert!(!format!("{error:?}").contains("postgres-secret-sentinel"));
+
     let source = std::error::Error::source(&error)
         .and_then(|source| source.downcast_ref::<sqlx::Error>())
         .unwrap_or_else(|| panic!("database error must retain the SQLx source"));
+
     assert_eq!(
         source
             .as_database_error()
@@ -452,6 +498,7 @@ fn postgres_error_redacts_database_diagnostics_but_retains_the_source() {
             .as_deref(),
         Some("55P03")
     );
+
     assert_eq!(error.classify(), FailureKind::Transient);
 }
 
@@ -472,10 +519,12 @@ fn postgres_error_classifies_sqlx_variants_without_message_parsing() {
     let transient_states = [
         "08006", "40001", "40P01", "53100", "55P03", "57014", "57P01",
     ];
+
     for state in transient_states {
         let error = PostgresError::from(sqlx::Error::Database(Box::new(SentinelDatabaseError(
             state,
         ))));
+
         assert!(matches!(error, PostgresError::Database { .. }));
         assert_eq!(error.classify(), FailureKind::Transient, "state {state}");
     }
@@ -500,6 +549,7 @@ fn postgres_error_classifies_sqlx_variants_without_message_parsing() {
         sqlx::Error::Protocol("protocol sentinel".into()),
         sqlx::Error::PoolClosed,
     ];
+
     for error in permanent_database {
         let error = PostgresError::from(error);
         assert!(matches!(error, PostgresError::Database { .. }));
@@ -527,6 +577,7 @@ fn postgres_error_classifies_sqlx_variants_without_message_parsing() {
         sqlx::Error::AnyDriverError(Box::new(std::io::Error::other("any sentinel"))),
         sqlx::Error::InvalidSavePointStatement,
     ];
+
     for error in permanent_structured {
         let error = PostgresError::from(error);
         assert!(matches!(error, PostgresError::Database { .. }));
@@ -550,16 +601,20 @@ async fn outbox_duration_bounds_fail_before_closed_pool_io() {
     let pool = PgPoolOptions::new().connect_lazy_with(crate::support::connect_options());
     pool.close().await;
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let inbox = PostgresInboxStore::new(
         pool,
         InboxSettings::new(NonZeroU32::MIN)
             .unwrap_or_else(|_| panic!("inbox duration settings rejected")),
     );
+
     let claim = Claim {
         id: sisa_messaging_outbox::OutboxId::from_uuid(Uuid::now_v7()),
         token: ClaimToken::from_uuid(Uuid::now_v7()),
     };
+
     let too_large = Duration::from_secs(i32::MAX as u64 + 1);
+
     for result in [
         store
             .claim(ClaimRequest {
@@ -590,7 +645,9 @@ async fn outbox_duration_bounds_fail_before_closed_pool_io() {
     ] {
         assert!(matches!(result, Err(PostgresError::InvalidData)));
     }
+
     let exact_limit = Duration::from_secs(i32::MAX as u64);
+
     let result = store
         .claim(ClaimRequest {
             worker_id: "closed-pool-exact-duration".into(),
@@ -598,6 +655,7 @@ async fn outbox_duration_bounds_fail_before_closed_pool_io() {
             lease: exact_limit,
         })
         .await;
+
     assert!(matches!(result, Err(PostgresError::Database { .. })));
     let duration_max = store.extend_lease(&[claim], Duration::MAX).await;
     assert!(matches!(duration_max, Err(PostgresError::InvalidData)));
@@ -619,6 +677,7 @@ async fn outbox_duration_bounds_fail_before_closed_pool_io() {
             Err(PostgresError::InvalidData)
         ));
     }
+
     let inbox_exact_limit = inbox
         .purge(InboxPurgeRequest {
             completed_retention: Some(exact_limit),
@@ -626,6 +685,7 @@ async fn outbox_duration_bounds_fail_before_closed_pool_io() {
             batch_size: NonZeroU32::MIN,
         })
         .await;
+
     assert!(matches!(
         inbox_exact_limit,
         Err(PostgresError::Database { .. })
@@ -637,10 +697,12 @@ async fn enqueue_commits_a_serialized_envelope() {
     let pool = isolated_outbox_pool().await;
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let message_id = MessageId::new();
+
     let mut transaction = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("enqueue transaction start failed"));
+
     let outbox_id = store
         .enqueue(
             &mut transaction,
@@ -649,13 +711,16 @@ async fn enqueue_commits_a_serialized_envelope() {
         )
         .await
         .unwrap_or_else(|_| panic!("enqueue failed"));
+
     transaction
         .commit()
         .await
         .unwrap_or_else(|_| panic!("enqueue transaction commit failed"));
+
     let row = outbox_record(&pool, OutboxLookupParams::by_id(outbox_id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("committed enqueue lookup failed"));
+
     assert_eq!(row.message_id, message_id.into_uuid());
     assert_eq!(row.message_type, TestMessage::TYPE);
 }
@@ -665,10 +730,12 @@ async fn enqueue_rollback_leaves_no_durable_row() {
     let pool = isolated_outbox_pool().await;
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let message_id = MessageId::new();
+
     let mut transaction = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("rollback transaction start failed"));
+
     store
         .enqueue(
             &mut transaction,
@@ -677,10 +744,12 @@ async fn enqueue_rollback_leaves_no_durable_row() {
         )
         .await
         .unwrap_or_else(|_| panic!("enqueue before rollback failed"));
+
     transaction
         .rollback()
         .await
         .unwrap_or_else(|_| panic!("enqueue transaction rollback failed"));
+
     assert!(
         outbox_record(
             &pool,
@@ -696,10 +765,12 @@ async fn outbox_rejects_out_of_range_system_times_before_running_sql() {
     let pool = isolated_outbox_pool().await;
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let out_of_range = out_of_chrono_range_system_time();
+
     let mut transaction = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("out-of-range enqueue transaction start failed"));
+
     let enqueue = store
         .enqueue(
             &mut transaction,
@@ -709,7 +780,9 @@ async fn outbox_rejects_out_of_range_system_times_before_running_sql() {
             },
         )
         .await;
+
     assert!(matches!(enqueue, Err(PostgresError::InvalidData)));
+
     transaction
         .rollback()
         .await
@@ -719,12 +792,14 @@ async fn outbox_rejects_out_of_range_system_times_before_running_sql() {
         dead_at: out_of_range,
         id: sisa_messaging_outbox::OutboxId::from_uuid(Uuid::nil()),
     };
+
     let list = store
         .list(DeadLetterQuery {
             after: Some(cursor),
             limit: NonZeroU32::MIN,
         })
         .await;
+
     assert!(matches!(list, Err(PostgresError::InvalidData)));
 }
 
@@ -741,33 +816,41 @@ async fn enqueue_duplicate_message_identity_aborts_and_maps_the_postgres_error()
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let message_id = MessageId::new();
     let envelope = test_envelope(message_id, Metadata::default());
+
     let mut first = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("first duplicate transaction start failed"));
+
     store
         .enqueue(&mut first, &envelope, EnqueueOptions::default())
         .await
         .unwrap_or_else(|_| panic!("first duplicate enqueue failed"));
+
     first
         .commit()
         .await
         .unwrap_or_else(|_| panic!("first duplicate transaction commit failed"));
+
     let mut duplicate = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("duplicate transaction start failed"));
+
     let error = store
         .enqueue(&mut duplicate, &envelope, EnqueueOptions::default())
         .await
         .expect_err("duplicate message identity must fail");
+
     assert!(matches!(error, PostgresError::DuplicateMessageId { .. }));
     assert_eq!(error.classify(), FailureKind::Permanent);
     assert_eq!(error.to_string(), "duplicate outbox message identity");
     assert_eq!(format!("{error:?}"), "DuplicateMessageId");
+
     let source = std::error::Error::source(&error)
         .and_then(|source| source.downcast_ref::<sqlx::Error>())
         .unwrap_or_else(|| panic!("duplicate error must retain the SQLx source"));
+
     assert_eq!(
         source
             .as_database_error()
@@ -775,6 +858,7 @@ async fn enqueue_duplicate_message_identity_aborts_and_maps_the_postgres_error()
             .as_deref(),
         Some("23505")
     );
+
     let aborted = sqlx::query_scalar!(
         r#"
             -- PostgreSQL rejects later work in the caller-owned transaction after the duplicate.
@@ -784,6 +868,7 @@ async fn enqueue_duplicate_message_identity_aborts_and_maps_the_postgres_error()
     .fetch_one(&mut *duplicate)
     .await
     .expect_err("duplicate enqueue must abort the caller-owned transaction");
+
     assert_eq!(
         aborted
             .as_database_error()
@@ -791,6 +876,7 @@ async fn enqueue_duplicate_message_identity_aborts_and_maps_the_postgres_error()
             .as_deref(),
         Some("25P02")
     );
+
     duplicate
         .rollback()
         .await
@@ -803,6 +889,7 @@ async fn claim_round_trips_envelope_metadata() {
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let message_id = MessageId::new();
     let mut headers = Headers::new();
+
     headers
         .insert(
             HeaderName::new("x-test-id").unwrap_or_else(|_| panic!("header name failed")),
@@ -810,6 +897,7 @@ async fn claim_round_trips_envelope_metadata() {
                 .unwrap_or_else(|_| panic!("header value failed")),
         )
         .unwrap_or_else(|_| panic!("header insert failed"));
+
     let metadata = Metadata {
         routing: RoutingMetadata {
             source: Some(
@@ -821,10 +909,12 @@ async fn claim_round_trips_envelope_metadata() {
         headers,
         ..Metadata::default()
     };
+
     let mut transaction = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("metadata transaction start failed"));
+
     store
         .enqueue(
             &mut transaction,
@@ -833,10 +923,12 @@ async fn claim_round_trips_envelope_metadata() {
         )
         .await
         .unwrap_or_else(|_| panic!("metadata enqueue failed"));
+
     transaction
         .commit()
         .await
         .unwrap_or_else(|_| panic!("metadata transaction commit failed"));
+
     let batch = store
         .claim(ClaimRequest {
             worker_id: "postgres-metadata-test".into(),
@@ -845,6 +937,7 @@ async fn claim_round_trips_envelope_metadata() {
         })
         .await
         .unwrap_or_else(|_| panic!("metadata claim failed"));
+
     assert_eq!(batch.poison.observed, 0);
     assert_eq!(batch.records.len(), 1);
     assert_eq!(batch.records[0].envelope.message_id, message_id);
@@ -854,6 +947,7 @@ async fn claim_round_trips_envelope_metadata() {
 #[tokio::test]
 async fn claim_marks_malformed_persisted_metadata_as_poison() {
     let pool = isolated_outbox_pool().await;
+
     let malformed_id = sqlx::query_scalar!(
         r#"
             -- This JSON object passes the table check, but headers must be a metadata map.
@@ -868,6 +962,7 @@ async fn claim_marks_malformed_persisted_metadata_as_poison() {
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("malformed metadata setup failed"));
+
     let batch = PostgresOutboxStore::new(pool.clone(), TestSerializer)
         .claim(ClaimRequest {
             worker_id: "postgres-metadata-poison-test".into(),
@@ -876,11 +971,14 @@ async fn claim_marks_malformed_persisted_metadata_as_poison() {
         })
         .await
         .unwrap_or_else(|_| panic!("malformed metadata claim failed"));
+
     assert!(batch.records.is_empty());
     assert_eq!((batch.poison.observed, batch.poison.marked_dead), (1, 1));
+
     let dead = outbox_record(&pool, OutboxLookupParams::by_id(malformed_id))
         .await
         .unwrap_or_else(|| panic!("malformed metadata poison lookup failed"));
+
     assert_eq!(dead.dead_reason.as_deref(), Some("undecodable"));
     assert!(dead.claim_token.is_none() && dead.locked_by.is_none());
 }
@@ -890,6 +988,7 @@ async fn concurrent_disjoint_unordered_claims_do_not_overlap() {
     let fixture = isolated_concurrent_outbox_pool().await;
     let pool = fixture.pool.clone();
     let marker = format!("postgres.concurrent-disjoint-{}", Uuid::now_v7());
+
     let ids = sqlx::query_scalar!(
         r#"
             -- Schema-isolated rows let separate connections exercise SKIP LOCKED concurrently.
@@ -906,11 +1005,14 @@ async fn concurrent_disjoint_unordered_claims_do_not_overlap() {
     .fetch_all(&pool)
     .await
     .unwrap_or_else(|_| panic!("concurrent claim setup failed"));
+
     let locked_id = ids[0];
+
     let mut lock_transaction = pool
         .begin()
         .await
         .unwrap_or_else(|_| panic!("concurrent lock transaction start failed"));
+
     sqlx::query!(
         r#"
             -- The held row lock forces both workers to traverse the SKIP LOCKED branch.
@@ -921,12 +1023,15 @@ async fn concurrent_disjoint_unordered_claims_do_not_overlap() {
     .fetch_one(&mut *lock_transaction)
     .await
     .unwrap_or_else(|_| panic!("concurrent lock acquisition failed"));
+
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
     let barrier = Arc::new(Barrier::new(3));
     let first_store = store.clone();
     let first_barrier = barrier.clone();
+
     let first = tokio::spawn(async move {
         first_barrier.wait().await;
+
         first_store
             .claim(ClaimRequest {
                 worker_id: "postgres-concurrent-first".into(),
@@ -935,10 +1040,13 @@ async fn concurrent_disjoint_unordered_claims_do_not_overlap() {
             })
             .await
     });
+
     let second_store = store.clone();
     let second_barrier = barrier.clone();
+
     let second = tokio::spawn(async move {
         second_barrier.wait().await;
+
         second_store
             .claim(ClaimRequest {
                 worker_id: "postgres-concurrent-second".into(),
@@ -947,39 +1055,50 @@ async fn concurrent_disjoint_unordered_claims_do_not_overlap() {
             })
             .await
     });
+
     barrier.wait().await;
+
     let first = first
         .await
         .unwrap_or_else(|_| panic!("first concurrent task failed"))
         .unwrap_or_else(|_| panic!("first concurrent claim failed"));
+
     let second = second
         .await
         .unwrap_or_else(|_| panic!("second concurrent task failed"))
         .unwrap_or_else(|_| panic!("second concurrent claim failed"));
+
     assert_eq!((first.records.len(), second.records.len()), (1, 1));
+
     let mut claimed = first
         .records
         .iter()
         .chain(&second.records)
         .map(|record| record.claim.id.into_uuid())
         .collect::<Vec<_>>();
+
     claimed.sort_unstable();
+
     let mut expected = ids
         .into_iter()
         .filter(|id| *id != locked_id)
         .collect::<Vec<_>>();
+
     expected.sort_unstable();
     assert_eq!(claimed, expected);
+
     lock_transaction
         .rollback()
         .await
         .unwrap_or_else(|_| panic!("concurrent lock transaction rollback failed"));
+
     fixture.cleanup().await;
 }
 
 #[tokio::test]
 async fn claim_serializes_an_ordering_key_head_while_progressing_a_distinct_key() {
     let pool = isolated_outbox_pool().await;
+
     sqlx::query!(
         r#"
             -- Fixed identities make the same-key predecessor relationship deterministic.
@@ -1001,6 +1120,7 @@ async fn claim_serializes_an_ordering_key_head_while_progressing_a_distinct_key(
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("ordering claim setup failed"));
+
     let batch = PostgresOutboxStore::new(pool, TestSerializer)
         .claim(ClaimRequest {
             worker_id: "postgres-ordering-test".into(),
@@ -1009,12 +1129,15 @@ async fn claim_serializes_an_ordering_key_head_while_progressing_a_distinct_key(
         })
         .await
         .unwrap_or_else(|_| panic!("ordering claim failed"));
+
     let mut types = batch
         .records
         .iter()
         .map(|record| record.envelope.message_type.as_str())
         .collect::<Vec<_>>();
+
     types.sort_unstable();
+
     assert_eq!(
         types,
         ["postgres.ordering-head", "postgres.ordering-independent"]
@@ -1026,6 +1149,7 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
     let pool = isolated_outbox_pool().await;
     let predecessor_id = Uuid::from_u128(0x21);
     let successor_id = Uuid::from_u128(0x22);
+
     sqlx::query!(
         r#"
             -- The expired predecessor's unexpired lease must still fence its same-key successor.
@@ -1079,7 +1203,9 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("expired leased ordering fixture setup failed"));
+
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let blocked = store
         .claim(ClaimRequest {
             worker_id: "postgres-expired-lease-ordering".into(),
@@ -1088,6 +1214,7 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
         })
         .await
         .unwrap_or_else(|_| panic!("blocked ordering claim failed"));
+
     assert!(blocked.records.is_empty());
 
     sqlx::query!(
@@ -1102,6 +1229,7 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("expired predecessor lease expiry setup failed"));
+
     let unblocked = store
         .claim(ClaimRequest {
             worker_id: "postgres-expired-lease-ordering".into(),
@@ -1110,6 +1238,7 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
         })
         .await
         .unwrap_or_else(|_| panic!("unblocked ordering claim failed"));
+
     assert_eq!(unblocked.records.len(), 1);
     assert_eq!(unblocked.records[0].claim.id.into_uuid(), successor_id);
 }
@@ -1117,6 +1246,7 @@ async fn claim_keeps_an_expired_currently_leased_predecessor_as_the_ordering_bar
 #[tokio::test]
 async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_selectively() {
     let pool = isolated_outbox_pool().await;
+
     for (message_type, attempts) in [
         ("postgres.outcome-complete", i32::MAX),
         ("postgres.outcome-fail", i32::MAX),
@@ -1125,7 +1255,9 @@ async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_sele
     ] {
         insert_outbox_row_with_attempts(&pool, message_type, attempts).await;
     }
+
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let batch = store
         .claim(ClaimRequest {
             worker_id: "postgres-outcome-test".into(),
@@ -1134,6 +1266,7 @@ async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_sele
         })
         .await
         .unwrap_or_else(|_| panic!("outcome claim failed"));
+
     let claim_for = |message_type| {
         batch
             .records
@@ -1142,19 +1275,24 @@ async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_sele
             .map(|record| record.claim)
             .unwrap_or_else(|| panic!("expected claimed fixture row"))
     };
+
     let complete = claim_for("postgres.outcome-complete");
     let fail = claim_for("postgres.outcome-fail");
     let release = claim_for("postgres.outcome-release");
     let renew = claim_for("postgres.outcome-renew");
+
     let stale = |claim: Claim| Claim {
         id: claim.id,
         token: ClaimToken::from_uuid(Uuid::now_v7()),
     };
+
     let confirmed = store
         .complete(&[complete, stale(fail)])
         .await
         .unwrap_or_else(|_| panic!("complete outcome failed"));
+
     assert_eq!(confirmed.confirmed, vec![complete]);
+
     let confirmed = store
         .fail(&[FailureRecord {
             claim: fail,
@@ -1166,54 +1304,71 @@ async fn fenced_outcomes_confirm_only_current_claims_and_increment_attempts_sele
         }])
         .await
         .unwrap_or_else(|_| panic!("fail outcome failed"));
+
     assert_eq!(confirmed.confirmed, vec![fail]);
+
     let confirmed = store
         .release(&[release, stale(renew)])
         .await
         .unwrap_or_else(|_| panic!("release outcome failed"));
+
     assert_eq!(confirmed.confirmed, vec![release]);
+
     let confirmed = store
         .extend_lease(&[renew, stale(complete)], Duration::from_secs(60))
         .await
         .unwrap_or_else(|_| panic!("lease renewal failed"));
+
     assert_eq!(confirmed.confirmed, vec![renew]);
+
     let complete_row = outbox_record(&pool, OutboxLookupParams::by_id(complete.id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("complete outcome lookup failed"));
+
     let fail_row = outbox_record(&pool, OutboxLookupParams::by_id(fail.id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("fail outcome lookup failed"));
+
     let release_row = outbox_record(&pool, OutboxLookupParams::by_id(release.id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("release outcome lookup failed"));
+
     let renew_row = outbox_record(&pool, OutboxLookupParams::by_id(renew.id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("renew outcome lookup failed"));
+
     assert_eq!(
         (complete_row.message_type.as_str(), complete_row.attempts),
         ("postgres.outcome-complete", i32::MAX)
     );
+
     assert!(complete_row.published_at.is_some());
+
     assert_eq!(
         (fail_row.message_type.as_str(), fail_row.attempts),
         ("postgres.outcome-fail", i32::MAX)
     );
+
     assert_eq!(fail_row.dead_reason.as_deref(), Some("permanent"));
     assert!(fail_row.dead_at.is_some());
+
     assert_eq!(
         (release_row.message_type.as_str(), release_row.attempts),
         ("postgres.outcome-release", 0)
     );
+
     assert_eq!(
         (renew_row.message_type.as_str(), renew_row.attempts),
         ("postgres.outcome-renew", 0)
     );
+
     assert!(renew_row.claim_token.is_some());
 }
 
 #[tokio::test]
 async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_reasons() {
     let pool = isolated_outbox_pool().await;
+
     for message_type in [
         "postgres.failure-retry",
         "postgres.failure-permanent",
@@ -1221,7 +1376,9 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
     ] {
         insert_outbox_row(&pool, message_type).await;
     }
+
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let batch = store
         .claim(ClaimRequest {
             worker_id: "postgres-failure-test".into(),
@@ -1230,6 +1387,7 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
         })
         .await
         .unwrap_or_else(|_| panic!("failure claim failed"));
+
     let claim_for = |message_type| {
         batch
             .records
@@ -1238,6 +1396,7 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
             .map(|record| record.claim)
             .unwrap_or_else(|| panic!("expected claimed failure row"))
     };
+
     let failures = [
         FailureRecord {
             claim: claim_for("postgres.failure-retry"),
@@ -1264,6 +1423,7 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
             },
         },
     ];
+
     let before_transition = outbox_record(
         &pool,
         OutboxLookupParams::by_id(failures[0].claim.id.into_uuid()),
@@ -1271,29 +1431,35 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
     .await
     .unwrap_or_else(|| panic!("pre-transition database time lookup failed"))
     .observed_at;
+
     let confirmed = store
         .fail(&failures)
         .await
         .unwrap_or_else(|_| panic!("failure transition failed"));
+
     assert_eq!(confirmed.confirmed.len(), 3);
+
     let retry = outbox_record(
         &pool,
         OutboxLookupParams::by_id(failures[0].claim.id.into_uuid()),
     )
     .await
     .unwrap_or_else(|| panic!("retry state lookup failed"));
+
     let permanent = outbox_record(
         &pool,
         OutboxLookupParams::by_id(failures[1].claim.id.into_uuid()),
     )
     .await
     .unwrap_or_else(|| panic!("permanent state lookup failed"));
+
     let exhausted = outbox_record(
         &pool,
         OutboxLookupParams::by_id(failures[2].claim.id.into_uuid()),
     )
     .await
     .unwrap_or_else(|| panic!("exhausted state lookup failed"));
+
     assert_eq!(
         (
             exhausted.message_type.as_str(),
@@ -1301,6 +1467,7 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
         ),
         ("postgres.failure-exhausted", Some("exhausted"))
     );
+
     assert_eq!(
         (
             permanent.message_type.as_str(),
@@ -1308,13 +1475,16 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
         ),
         ("postgres.failure-permanent", Some("permanent"))
     );
+
     assert_eq!(
         (retry.message_type.as_str(), retry.dead_reason.as_deref()),
         ("postgres.failure-retry", None)
     );
+
     let retry_delay = chrono::Duration::seconds(30);
     assert!(retry.claimable_at >= before_transition + retry_delay);
     assert!(retry.claimable_at <= retry.observed_at + retry_delay);
+
     assert_eq!(
         (retry.attempts, permanent.attempts, exhausted.attempts),
         (1, 1, 1)
@@ -1324,6 +1494,7 @@ async fn failure_actions_use_database_time_and_preserve_permanent_and_exhausted_
 #[tokio::test]
 async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
     let pool = isolated_outbox_pool().await;
+
     sqlx::query!(
         r#"
             -- Both fixtures begin with a future deadline before their expiry is forced.
@@ -1341,7 +1512,9 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("renewal expiry setup failed"));
+
     let store = PostgresOutboxStore::new(pool.clone(), TestSerializer);
+
     let batch = store
         .claim(ClaimRequest {
             worker_id: "postgres-renewal-test".into(),
@@ -1350,27 +1523,34 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
         })
         .await
         .unwrap_or_else(|_| panic!("renewal claim failed"));
+
     let current = batch
         .records
         .iter()
         .find(|record| record.envelope.message_type.as_str() == "postgres.renew-current")
         .map(|record| record.claim)
         .unwrap_or_else(|| panic!("current renewal claim missing"));
+
     let pre_renewal_deadline =
         outbox_record(&pool, OutboxLookupParams::by_id(current.id.into_uuid()))
             .await
             .unwrap_or_else(|| panic!("pre-renewal deadline lookup failed"))
             .claimable_at;
+
     let confirmed = store
         .extend_lease(&[current], Duration::from_secs(60))
         .await
         .unwrap_or_else(|_| panic!("current lease renewal failed"));
+
     assert_eq!(confirmed.confirmed, vec![current]);
+
     let renewed_deadline = outbox_record(&pool, OutboxLookupParams::by_id(current.id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("renewed deadline lookup failed"))
         .claimable_at;
+
     assert!(renewed_deadline > pre_renewal_deadline);
+
     sqlx::query!(
         r#"
             -- Database-time control makes one unrenewed lease stale without a process sleep.
@@ -1386,6 +1566,7 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("renewal expiry transition setup failed"));
+
     let report = store
         .purge(OutboxPurgeRequest {
             published_retention: Duration::from_secs(86_400),
@@ -1394,10 +1575,13 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
         })
         .await
         .unwrap_or_else(|_| panic!("renewal expiry purge failed"));
+
     assert_eq!(report.expired, 1);
+
     let current_row = outbox_record(&pool, OutboxLookupParams::by_id(current.id.into_uuid()))
         .await
         .unwrap_or_else(|| panic!("current renewal lookup failed"));
+
     let stale_row = outbox_record(
         &pool,
         OutboxLookupParams::by_message_id(
@@ -1413,6 +1597,7 @@ async fn renewal_keeps_a_current_lease_safe_while_a_stale_lease_expires() {
     )
     .await
     .unwrap_or_else(|| panic!("stale renewal lookup failed"));
+
     assert_eq!(current_row.message_type, "postgres.renew-current");
     assert_eq!(current_row.dead_reason, None);
     assert_eq!(current_row.claim_token, Some(current.token.into_uuid()));

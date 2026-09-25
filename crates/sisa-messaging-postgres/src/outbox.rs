@@ -69,7 +69,9 @@ where
                 .serializer
                 .serialize(source)
                 .map_err(|_| PostgresError::InvalidData)?;
+
             let metadata = crate::metadata::encode(&serialized.metadata)?;
+
             let params = enqueue::EnqueueParams {
                 message_id: serialized.message_id.into_uuid(),
                 message_type: serialized.message_type.as_str(),
@@ -84,7 +86,9 @@ where
                     .map(crate::metadata::system_time_to_utc)
                     .transpose()?,
             };
+
             let record = enqueue::enqueue(&mut **transaction, params).await?;
+
             Ok(sisa_messaging_outbox::OutboxId::from_uuid(record.id))
         }
     }
@@ -110,10 +114,12 @@ where
                 },
             )
             .await?;
+
             let mut records = Vec::with_capacity(rows.len());
             let mut poison = sisa_messaging_outbox::PoisonReport::default();
             let mut ids = Vec::new();
             let mut tokens = Vec::new();
+
             for row in rows {
                 match decode_envelope(
                     row.message_id,
@@ -139,6 +145,7 @@ where
                     }
                 }
             }
+
             if !ids.is_empty()
                 && let Ok(updated) = claim::poison(
                     &self.pool,
@@ -151,6 +158,7 @@ where
             {
                 poison.marked_dead = updated.min(u64::from(poison.observed)) as u32;
             }
+
             Ok(ClaimBatch { records, poison })
         }
     }
@@ -161,8 +169,10 @@ where
     ) -> impl std::future::Future<Output = Result<FencedClaims, Self::Error>> + Send {
         async move {
             let (ids, tokens) = claim_parts(requested);
+
             let records =
                 outcomes::complete(&self.pool, outcomes::CompleteParams { ids, tokens }).await?;
+
             Ok(fenced_claims(records))
         }
     }
@@ -180,6 +190,7 @@ where
                 reasons: Vec::with_capacity(requested.len()),
                 errors: Vec::with_capacity(requested.len()),
             };
+
             for failure in requested {
                 let (dead, delay_micros, reason) = match failure.action {
                     sisa_messaging_outbox::FailureAction::Retry { delay } => {
@@ -190,6 +201,7 @@ where
                     }
                     _ => return Err(PostgresError::InvalidData),
                 };
+
                 params.ids.push(failure.claim.id.into_uuid());
                 params.tokens.push(failure.claim.token.into_uuid());
                 params.dead.push(dead);
@@ -197,7 +209,9 @@ where
                 params.reasons.push(reason);
                 params.errors.push(failure.error.as_str());
             }
+
             let records = outcomes::fail(&self.pool, params).await?;
+
             Ok(fenced_claims(records))
         }
     }
@@ -208,8 +222,10 @@ where
     ) -> impl std::future::Future<Output = Result<FencedClaims, Self::Error>> + Send {
         async move {
             let (ids, tokens) = claim_parts(requested);
+
             let records =
                 outcomes::release(&self.pool, outcomes::ReleaseParams { ids, tokens }).await?;
+
             Ok(fenced_claims(records))
         }
     }
@@ -221,6 +237,7 @@ where
     ) -> impl std::future::Future<Output = Result<FencedClaims, Self::Error>> + Send {
         async move {
             let (ids, tokens) = claim_parts(requested);
+
             let records = outcomes::extend_lease(
                 &self.pool,
                 outcomes::ExtendLeaseParams {
@@ -230,6 +247,7 @@ where
                 },
             )
             .await?;
+
             Ok(fenced_claims(records))
         }
     }
@@ -238,10 +256,12 @@ where
 fn claim_parts(requested: &[Claim]) -> (Vec<uuid::Uuid>, Vec<uuid::Uuid>) {
     let mut ids = Vec::with_capacity(requested.len());
     let mut tokens = Vec::with_capacity(requested.len());
+
     for claim in requested {
         ids.push(claim.id.into_uuid());
         tokens.push(claim.token.into_uuid());
     }
+
     (ids, tokens)
 }
 
@@ -268,9 +288,11 @@ where
             let dead_retention = duration_micros(request.dead_retention)?;
             let batch_size = i64::from(request.batch_size.get());
             let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
+
             let expired =
                 maintenance::expire(&mut *transaction, maintenance::ExpireParams { batch_size })
                     .await?;
+
             let published_deleted = maintenance::purge_published(
                 &mut *transaction,
                 maintenance::PurgePublishedParams {
@@ -279,6 +301,7 @@ where
                 },
             )
             .await?;
+
             let dead_deleted = maintenance::purge_dead(
                 &mut *transaction,
                 maintenance::PurgeDeadParams {
@@ -287,6 +310,7 @@ where
                 },
             )
             .await?;
+
             transaction.commit().await.map_err(PostgresError::from)?;
 
             Ok(OutboxPurgeReport {
@@ -300,6 +324,7 @@ where
     fn stats(&self) -> impl std::future::Future<Output = Result<OutboxStats, Self::Error>> + Send {
         async move {
             let record = maintenance::stats(&self.pool, maintenance::StatsParams).await?;
+
             Ok(OutboxStats {
                 pending: count(record.pending)?,
                 expired: count(record.expired)?,
@@ -328,6 +353,7 @@ where
                 ),
                 None => (None, None),
             };
+
             let records = dead_letters::list(
                 &self.pool,
                 dead_letters::ListParams {
@@ -337,6 +363,7 @@ where
                 },
             )
             .await?;
+
             records.into_iter().map(dead_letter_record).collect()
         }
     }
@@ -356,6 +383,7 @@ where
                 },
             )
             .await?;
+
             Ok(records
                 .into_iter()
                 .map(|record| sisa_messaging_outbox::OutboxId::from_uuid(record.id))
@@ -378,6 +406,7 @@ where
                 },
             )
             .await?;
+
             Ok(records
                 .into_iter()
                 .map(|record| sisa_messaging_outbox::OutboxId::from_uuid(record.id))
@@ -418,9 +447,11 @@ fn dead_letter_record(
 fn duration_micros(duration: Duration) -> Result<i64, PostgresError> {
     const MAX_MICROS: u128 = (i32::MAX as u128) * 1_000_000;
     let micros = duration.as_micros();
+
     if micros > MAX_MICROS {
         return Err(PostgresError::InvalidData);
     }
+
     i64::try_from(micros).map_err(|_| PostgresError::InvalidData)
 }
 
@@ -428,9 +459,11 @@ fn duration_seconds(value: f64) -> Result<Duration, PostgresError> {
     if !value.is_finite() {
         return Err(PostgresError::InvalidData);
     }
+
     if value.is_sign_negative() {
         return Ok(Duration::ZERO);
     }
+
     Duration::try_from_secs_f64(value).map_err(|_| PostgresError::InvalidData)
 }
 
@@ -482,5 +515,6 @@ fn fenced_claims_from_rows(rows: impl IntoIterator<Item = (Uuid, Uuid)>) -> Fenc
             token: sisa_messaging_outbox::ClaimToken::from_uuid(claim_token),
         })
         .collect();
+
     FencedClaims { confirmed }
 }

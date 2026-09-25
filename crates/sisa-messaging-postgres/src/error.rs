@@ -42,6 +42,7 @@ impl fmt::Debug for PostgresError {
             Self::DuplicateMessageId { .. } => "DuplicateMessageId",
             Self::InvalidData => "InvalidData",
         };
+
         formatter.write_str(category)
     }
 }
@@ -56,6 +57,7 @@ impl From<sqlx::Error> for PostgresError {
     fn from(error: sqlx::Error) -> Self {
         let (sqlstate, constraint) = {
             let database = error.as_database_error();
+
             (
                 database
                     .as_ref()
@@ -67,11 +69,13 @@ impl From<sqlx::Error> for PostgresError {
                     .map(str::to_owned),
             )
         };
+
         if sqlstate.as_deref() == Some("23505")
             && constraint.as_deref() == Some("ix_outbox_messages_message_id")
         {
             return Self::DuplicateMessageId { source: error };
         }
+
         Self::Database {
             source: error,
             sqlstate,
@@ -84,6 +88,7 @@ impl ErrorClassifier for PostgresError {
         let Self::Database { .. } = self else {
             return FailureKind::Permanent;
         };
+
         if classify_sqlx_error(
             match self {
                 Self::Database { source, .. } => source,
