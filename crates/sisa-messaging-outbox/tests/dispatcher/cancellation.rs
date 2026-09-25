@@ -17,17 +17,21 @@ async fn cancellation_during_claim_waits_for_call_then_releases_unstarted_record
     let mut configured = settings(1);
     configured.store_timeout = Duration::from_millis(40);
     configured.lease = Duration::from_millis(120);
+
     let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
         .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+
     let run_cancel = cancellation.clone();
     let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
 
     wait_for(|| store.claim_entered.load(Ordering::SeqCst)).await;
     cancellation.cancel();
+
     let report = task
         .await
         .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
         .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+
     assert_eq!(publisher.calls.load(Ordering::SeqCst), 0);
     assert_eq!(report.released, 1);
 }
@@ -36,11 +40,13 @@ async fn cancellation_during_claim_waits_for_call_then_releases_unstarted_record
 async fn cancellation_does_not_drop_complete_fail_release_or_renew_store_calls() {
     async fn run_case(operation: &str) {
         let store = FakeStore::new(vec![record(1, 0)]);
+
         let behavior = match operation {
             "fail" => PUBLISH_TRANSIENT,
             "renew" => PUBLISH_GATE,
             _ => PUBLISH_SUCCESS,
         };
+
         if operation == "release" {
             store
                 .complete_mode
@@ -50,18 +56,22 @@ async fn cancellation_does_not_drop_complete_fail_release_or_renew_store_calls()
         let entered = match operation {
             "complete" => {
                 store.complete_delay_ms.store(25, Ordering::SeqCst);
+
                 Arc::clone(&store.complete_entered)
             }
             "fail" => {
                 store.fail_delay_ms.store(25, Ordering::SeqCst);
+
                 Arc::clone(&store.fail_entered)
             }
             "release" => {
                 store.release_delay_ms.store(25, Ordering::SeqCst);
+
                 Arc::clone(&store.release_entered)
             }
             "renew" => {
                 store.renew_delay_ms.store(5, Ordering::SeqCst);
+
                 Arc::clone(&store.renew_entered)
             }
             _ => unreachable!("test operation is a closed constant"),
@@ -72,21 +82,26 @@ async fn cancellation_does_not_drop_complete_fail_release_or_renew_store_calls()
         let mut configured = settings(1);
         configured.store_timeout = Duration::from_millis(35);
         configured.lease = Duration::from_millis(100);
+
         let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
             .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+
         let run_cancel = cancellation.clone();
         let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
 
         wait_for(|| entered.load(Ordering::SeqCst)).await;
         cancellation.cancel();
+
         if operation == "renew" {
             publisher.release();
         }
+
         task.await
             .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
             .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
 
         let state = store.lock();
+
         match operation {
             "complete" => assert_eq!(state.completes.len(), 1),
             "fail" => assert_eq!(state.failures.len(), 1),
@@ -118,11 +133,13 @@ async fn publisher_gate_releases_existing_and_late_waiters() {
         let envelope = record(0, 0).envelope;
         let waiting_publisher = publisher.clone();
         let waiting_envelope = envelope.clone();
+
         let waiting =
             tokio::spawn(async move { waiting_publisher.publish(&waiting_envelope).await });
 
         wait_for(|| publisher.gate_waiter_count() == 1).await;
         publisher.release();
+
         tokio::time::timeout(Duration::from_millis(50), waiting)
             .await
             .unwrap_or_else(|_| panic!("registered publisher missed persistent release"))
@@ -139,6 +156,7 @@ async fn publisher_gate_releases_existing_and_late_waiters() {
 fn assert_readiness_only(source: &str) {
     for body in select_bodies(source) {
         assert!(!body.contains("store."), "store call inside select body");
+
         assert!(
             !body.contains("publisher.publish"),
             "publisher call inside select body"
@@ -152,9 +170,11 @@ fn select_bodies(mut source: &str) -> Vec<&str> {
 
     while let Some(select_at) = source.find(SELECT) {
         let after_select = &source[select_at + SELECT.len()..];
+
         let open = after_select
             .find('{')
             .unwrap_or_else(|| panic!("select macro is missing its body"));
+
         let body_and_rest = &after_select[open + 1..];
         let mut depth = 1_usize;
         let mut close = None;
@@ -164,6 +184,7 @@ fn select_bodies(mut source: &str) -> Vec<&str> {
                 '{' => depth += 1,
                 '}' => {
                     depth -= 1;
+
                     if depth == 0 {
                         close = Some(offset);
                         break;

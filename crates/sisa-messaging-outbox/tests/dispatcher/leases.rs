@@ -12,18 +12,22 @@ async fn lease_shortfall_aborts_publish_and_retires_ownership() {
     store.renew_mode.store(RENEW_NONE, Ordering::SeqCst);
     let publisher = FakePublisher::new(PUBLISH_GATE);
     let cancellation = CancellationToken::new();
+
     let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), settings(1))
         .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+
     let run_cancel = cancellation.clone();
     let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
 
     wait_for(|| !store.lock().renewals.is_empty()).await;
     wait_for(|| publisher.active.load(Ordering::SeqCst) == 0).await;
     cancellation.cancel();
+
     let report = task
         .await
         .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
         .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+
     assert_eq!(report.fenced, 1);
     assert_eq!(report.aborted, 1);
     assert!(store.lock().releases.is_empty());
@@ -39,8 +43,10 @@ async fn successful_join_after_lease_retirement_is_benign() {
     let mut configured = settings(1);
     configured.store_timeout = Duration::from_millis(35);
     configured.lease = Duration::from_millis(100);
+
     let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
         .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+
     let run_cancel = cancellation.clone();
     let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
 
@@ -49,6 +55,7 @@ async fn successful_join_after_lease_retirement_is_benign() {
     wait_for(|| publisher.active.load(Ordering::SeqCst) == 0).await;
     wait_for(|| !store.lock().renewals.is_empty()).await;
     cancellation.cancel();
+
     let report = task
         .await
         .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
@@ -68,13 +75,16 @@ async fn slow_renewal_completion_schedules_a_future_wait_and_cancellation_stays_
     let mut configured = settings(2);
     configured.lease = Duration::from_millis(40);
     configured.store_timeout = Duration::from_millis(19);
+
     let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
         .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+
     let run_cancel = cancellation.clone();
     let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
 
     wait_for(|| publisher.active.load(Ordering::SeqCst) == 1).await;
     tokio::time::advance(Duration::from_millis(1)).await;
+
     wait_for(|| {
         store
             .lock()
@@ -85,9 +95,11 @@ async fn slow_renewal_completion_schedules_a_future_wait_and_cancellation_stays_
             == 1
     })
     .await;
+
     tokio::time::advance(Duration::from_millis(18)).await;
     wait_for(|| store.lock().renewals.len() == 1).await;
     tokio::task::yield_now().await;
+
     assert_eq!(
         store
             .lock()
@@ -100,6 +112,7 @@ async fn slow_renewal_completion_schedules_a_future_wait_and_cancellation_stays_
     );
 
     tokio::time::advance(Duration::from_millis(1)).await;
+
     wait_for(|| {
         store
             .lock()
@@ -110,9 +123,11 @@ async fn slow_renewal_completion_schedules_a_future_wait_and_cancellation_stays_
             == 2
     })
     .await;
+
     cancellation.cancel();
     publisher.release();
     tokio::time::advance(Duration::from_millis(18)).await;
+
     let report = task
         .await
         .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
@@ -131,8 +146,10 @@ async fn full_capacity_ignores_elapsed_claim_timer_after_slow_renewal() {
     let mut configured = settings(1);
     configured.lease = Duration::from_millis(40);
     configured.store_timeout = Duration::from_millis(19);
+
     let dispatcher = OutboxDispatcher::new(store.clone(), publisher.clone(), configured)
         .unwrap_or_else(|error| panic!("settings rejected: {error}"));
+
     let run_cancel = cancellation.clone();
     let task = tokio::spawn(async move { dispatcher.run(run_cancel).await });
 
@@ -144,6 +161,7 @@ async fn full_capacity_ignores_elapsed_claim_timer_after_slow_renewal() {
     tokio::task::yield_now().await;
 
     assert_eq!(store.claim_calls.load(Ordering::SeqCst), 1);
+
     assert_eq!(
         store
             .lock()
@@ -157,10 +175,12 @@ async fn full_capacity_ignores_elapsed_claim_timer_after_slow_renewal() {
 
     publisher.release();
     cancellation.cancel();
+
     let report = task
         .await
         .unwrap_or_else(|error| panic!("dispatcher task failed: {error}"))
         .unwrap_or_else(|error| panic!("dispatcher failed: {error}"));
+
     assert_eq!(report.completed, 1);
     assert_eq!(report.aborted, 0);
 }

@@ -29,32 +29,54 @@ pub(crate) const RELEASE_NONE: u8 = 3;
 #[derive(Default)]
 pub(crate) struct StoreState {
     pub(crate) records: VecDeque<ClaimedRecord>,
+
     pub(crate) poison: PoisonReport,
+
     pub(crate) completes: Vec<Vec<Claim>>,
+
     pub(crate) failures: Vec<Vec<FailureRecord>>,
+
     pub(crate) releases: Vec<Vec<Claim>>,
+
     pub(crate) renewals: Vec<Vec<Claim>>,
+
     pub(crate) operations: Vec<&'static str>,
 }
 
 #[derive(Clone)]
 pub(crate) struct FakeStore {
     state: Arc<Mutex<StoreState>>,
+
     pub(crate) claim_calls: Arc<AtomicUsize>,
+
     pub(crate) claim_entered: Arc<AtomicBool>,
+
     pub(crate) claim_delay_ms: Arc<AtomicUsize>,
+
     pub(crate) claim_limit_extra: Arc<AtomicUsize>,
+
     pub(crate) complete_entered: Arc<AtomicBool>,
+
     pub(crate) complete_delay_ms: Arc<AtomicUsize>,
+
     pub(crate) fail_entered: Arc<AtomicBool>,
+
     pub(crate) fail_delay_ms: Arc<AtomicUsize>,
+
     pub(crate) release_entered: Arc<AtomicBool>,
+
     pub(crate) release_delay_ms: Arc<AtomicUsize>,
+
     pub(crate) renew_entered: Arc<AtomicBool>,
+
     pub(crate) renew_delay_ms: Arc<AtomicUsize>,
+
     pub(crate) complete_mode: Arc<AtomicU8>,
+
     pub(crate) fail_mode: Arc<AtomicU8>,
+
     pub(crate) renew_mode: Arc<AtomicU8>,
+
     pub(crate) release_mode: Arc<AtomicU8>,
 }
 
@@ -99,16 +121,21 @@ impl OutboxStore for FakeStore {
         self.claim_entered.store(true, Ordering::SeqCst);
         self.lock().operations.push("claim");
         let delay = self.claim_delay_ms.load(Ordering::SeqCst);
+
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         }
+
         let mut state = self.lock();
+
         let count = usize::try_from(request.limit.get())
             .unwrap_or(usize::MAX)
             .saturating_add(self.claim_limit_extra.load(Ordering::SeqCst))
             .min(state.records.len());
+
         let records = state.records.drain(..count).collect();
         let poison = std::mem::take(&mut state.poison);
+
         Ok(ClaimBatch { records, poison })
     }
 
@@ -116,27 +143,34 @@ impl OutboxStore for FakeStore {
         self.complete_entered.store(true, Ordering::SeqCst);
         self.lock().operations.push("complete");
         let delay = self.complete_delay_ms.load(Ordering::SeqCst);
+
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         }
+
         self.lock().completes.push(claims.to_vec());
         let mode = self.complete_mode.load(Ordering::SeqCst);
+
         if mode == COMPLETE_TRANSIENT_ONCE {
             self.complete_mode.store(COMPLETE_ALL, Ordering::SeqCst);
+
             return Err(ProtocolError {
                 kind: FailureKind::Transient,
             });
         }
+
         if mode == COMPLETE_PERMANENT {
             return Err(ProtocolError {
                 kind: FailureKind::Permanent,
             });
         }
+
         let confirmed = match mode {
             COMPLETE_FIRST => claims.first().copied().into_iter().collect(),
             COMPLETE_NONE => Vec::new(),
             _ => claims.to_vec(),
         };
+
         Ok(FencedClaims { confirmed })
     }
 
@@ -144,10 +178,13 @@ impl OutboxStore for FakeStore {
         self.fail_entered.store(true, Ordering::SeqCst);
         self.lock().operations.push("fail");
         let delay = self.fail_delay_ms.load(Ordering::SeqCst);
+
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         }
+
         self.lock().failures.push(failures.to_vec());
+
         match self.fail_mode.load(Ordering::SeqCst) {
             FAIL_TRANSIENT => Err(ProtocolError {
                 kind: FailureKind::Transient,
@@ -165,10 +202,13 @@ impl OutboxStore for FakeStore {
         self.release_entered.store(true, Ordering::SeqCst);
         self.lock().operations.push("release");
         let delay = self.release_delay_ms.load(Ordering::SeqCst);
+
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         }
+
         self.lock().releases.push(claims.to_vec());
+
         match self.release_mode.load(Ordering::SeqCst) {
             RELEASE_TRANSIENT => {
                 return Err(ProtocolError {
@@ -187,6 +227,7 @@ impl OutboxStore for FakeStore {
             }
             _ => {}
         }
+
         Ok(FencedClaims {
             confirmed: claims.to_vec(),
         })
@@ -200,15 +241,19 @@ impl OutboxStore for FakeStore {
         self.renew_entered.store(true, Ordering::SeqCst);
         self.lock().operations.push("renew");
         let delay = self.renew_delay_ms.load(Ordering::SeqCst);
+
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         }
+
         self.lock().renewals.push(claims.to_vec());
+
         let confirmed = if self.renew_mode.load(Ordering::SeqCst) == RENEW_NONE {
             Vec::new()
         } else {
             claims.to_vec()
         };
+
         Ok(FencedClaims { confirmed })
     }
 }
