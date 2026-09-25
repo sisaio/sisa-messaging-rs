@@ -1,0 +1,20 @@
+[package]
+name = "sisa-messaging-xtask"
+version = "0.0.0"
+description = "Repository maintenance tasks, including the blank-line checker and fixer"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# Line numbers for the blank-line checker come from span locations.
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+
+# `printing` provides `syn::spanned::Spanned` to measure node extents; it adds
+# only the `quote` edge, which the lockfile already contains.
+syn = { workspace = true, features = ["printing"] }
+
+[lints]
+workspace = true

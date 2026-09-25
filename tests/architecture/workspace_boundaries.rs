@@ -384,6 +384,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-kafka",
         "sisa-messaging-iggy",
         "sisa-messaging-architecture-tests",
+        "sisa-messaging-xtask",
     ]);
     let actual_packages: BTreeSet<String> = packages
         .iter()
