@@ -45,6 +45,7 @@ async fn broker_accepts_commit_for_revoked_partition_from_current_member_generat
         let _ = new_generation.poll(std::time::Duration::from_millis(50));
         let old_assignment = old_generation.assignment();
         let new_assignment = new_generation.assignment();
+
         if old_assignment.is_ok_and(|set| set.count() == 0)
             && new_assignment.is_ok_and(|set| set.count() > 0)
         {
@@ -70,6 +71,7 @@ async fn broker_accepts_commit_for_revoked_partition_from_current_member_generat
         revoked_commit_result.is_ok(),
         "expected the broker to accept an explicit offset commit from the member after it lost partition ownership",
     );
+
     assert_eq!(
         committed_offset(&new_generation, &topic, partition),
         Offset::Offset(offset + 1),

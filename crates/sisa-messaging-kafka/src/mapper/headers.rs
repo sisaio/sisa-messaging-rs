@@ -33,13 +33,16 @@ pub(super) fn normalize_headers(
     for header in headers {
         let value = header.value.ok_or(KafkaMappingError::InvalidHeader)?;
         let lowercase_name = header.name.to_ascii_lowercase();
+
         let is_framework = FrameworkHeader::ALL
             .iter()
             .any(|known| known.name() == lowercase_name);
+
         let name = if is_framework {
             if header.name != lowercase_name {
                 return Err(KafkaMappingError::InvalidHeader);
             }
+
             lowercase_name
         } else {
             let validated =
