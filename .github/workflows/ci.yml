@@ -32,6 +32,8 @@ jobs:
       PGUSER: postgres
       PGDATABASE: postgres
       NATS_URL: nats://127.0.0.1:4222
+      RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/%2f
+      RABBITMQ_CONTAINER: ci-rabbitmq
     services:
       postgres:
         image: postgres:18
@@ -136,6 +138,27 @@ jobs:
           fi
       - name: Run NATS JetStream integration tests
         run: cargo test -p sisa-messaging-nats --test jetstream --all-features --locked -- --ignored
+      - name: Start RabbitMQ
+        run: |
+          docker run --detach --name "${RABBITMQ_CONTAINER}" \
+            --publish 127.0.0.1:5672:5672 \
+            rabbitmq:4.1.8-alpine
+          health_status=unavailable
+          health_attempt=0
+          while [ "${health_status}" != healthy ] && [ "${health_attempt}" -lt 30 ]; do
+            if docker exec "${RABBITMQ_CONTAINER}" rabbitmq-diagnostics -q check_port_connectivity >/dev/null 2>&1; then
+              health_status=healthy
+              break
+            fi
+            health_attempt=$((health_attempt + 1))
+            sleep 1
+          done
+          if [ "${health_status}" != healthy ]; then
+            docker logs "${RABBITMQ_CONTAINER}"
+            exit 1
+          fi
+      - name: Run RabbitMQ integration tests
+        run: cargo test -p sisa-messaging-rabbitmq --test rabbitmq --all-features --locked -- --ignored
       - run: cargo test --workspace --no-default-features --locked
       - run: cargo doc --workspace --no-deps --all-features --locked
 
