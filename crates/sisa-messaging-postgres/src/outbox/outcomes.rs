@@ -104,6 +104,7 @@ where
     // SQLx's checked PostgreSQL `text[]` binding requires owned strings at the query boundary.
     let reasons: Vec<String> = params.reasons.into_iter().map(str::to_owned).collect();
     let errors: Vec<String> = params.errors.into_iter().map(str::to_owned).collect();
+
     sqlx::query_as!(
         FencedClaimRecord,
         r#"

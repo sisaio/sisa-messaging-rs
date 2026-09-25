@@ -18,17 +18,21 @@ fn assert_bounded_plan_node(node: &PlanNode, description: &str) {
     let actual_rows = node
         .actual_rows
         .unwrap_or_else(|| panic!("{description} has no Actual Rows: {node:?}"));
+
     let actual_loops = node
         .actual_loops
         .unwrap_or_else(|| panic!("{description} has no Actual Loops: {node:?}"));
+
     assert!(
         actual_rows <= 1.0,
         "{description} examined {actual_rows} rows"
     );
+
     assert!(
         actual_loops <= 1.0,
         "{description} ran {actual_loops} loops"
     );
+
     if let Some(rows_removed_by_filter) = node.rows_removed_by_filter {
         assert!(
             rows_removed_by_filter <= 1.0,
@@ -64,6 +68,7 @@ fn assert_bounded_index_plan(
                             .and_then(serde_json::Value::as_f64),
                     });
                 }
+
                 for value in object.values() {
                     visit(value, nodes);
                 }
@@ -76,9 +81,11 @@ fn assert_bounded_index_plan(
             _ => {}
         }
     }
+
     let plan = plan.unwrap_or_else(|| panic!("plan payload was null"));
     let mut nodes = Vec::new();
     visit(&plan, &mut nodes);
+
     for index in indexes {
         let matching_nodes: Vec<_> = nodes
             .iter()
@@ -87,26 +94,32 @@ fn assert_bounded_index_plan(
                     && matches!(node.node_type.as_str(), "Index Scan" | "Index Only Scan")
             })
             .collect();
+
         assert!(
             !matching_nodes.is_empty(),
             "missing bounded index scan for {index} in {nodes:?}"
         );
+
         for node in matching_nodes {
             assert_bounded_plan_node(node, index);
         }
     }
+
     if mutation {
         let mutation_node = nodes
             .iter()
             .find(|node| node.node_type == "ModifyTable")
             .unwrap_or_else(|| panic!("missing ModifyTable: {nodes:?}"));
+
         assert_bounded_plan_node(mutation_node, "ModifyTable");
     }
+
     if locking_candidate {
         let candidate_node = nodes
             .iter()
             .find(|node| node.node_type == "LockRows")
             .unwrap_or_else(|| panic!("missing LockRows candidate: {nodes:?}"));
+
         assert_bounded_plan_node(candidate_node, "LockRows candidate");
     }
 }
@@ -123,6 +136,7 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     let expiry_id = Uuid::from_u128(0x404);
     let published_id = Uuid::from_u128(0x405);
     let dead_id = Uuid::from_u128(0x406);
+
     sqlx::query!(
         r#"
             -- Noise plus matching rows make every final query shape selective in this setup.
@@ -176,6 +190,7 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("plan fixture setup failed"));
+
     sqlx::query!("ANALYZE outbox_messages")
         .execute(&pool)
         .await
@@ -235,6 +250,7 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("stats plan failed"));
+
     assert_bounded_index_plan(stats, &["ix_outbox_messages_ordering_key"], false, false);
 
     let claim = sqlx::query_scalar!(
@@ -313,6 +329,7 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("claim plan failed"));
+
     assert_bounded_index_plan(
         claim,
         &[
@@ -322,9 +339,11 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
         true,
         true,
     );
+
     let claim_persisted = outbox_record(&pool, OutboxLookupParams::by_id(claim_id))
         .await
         .unwrap_or_else(|| panic!("claim plan fixture row was deleted"));
+
     assert!(
         claim_persisted.id == claim_id
             && claim_persisted.message_type == "postgres.plan-claim"
@@ -366,10 +385,13 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("poison plan failed"));
+
     assert_bounded_index_plan(poison, &["outbox_messages_pkey"], true, false);
+
     let poison_persisted = outbox_record(&pool, OutboxLookupParams::by_id(poison_id))
         .await
         .unwrap_or_else(|| panic!("poison plan fixture row was deleted"));
+
     assert!(
         poison_persisted.id == poison_id
             && poison_persisted.message_type == "postgres.plan-poison"
@@ -413,10 +435,13 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("expiry plan failed"));
+
     assert_bounded_index_plan(expiry, &["ix_outbox_messages_expires"], true, true);
+
     let expiry_persisted = outbox_record(&pool, OutboxLookupParams::by_id(expiry_id))
         .await
         .unwrap_or_else(|| panic!("expiry plan fixture row was deleted"));
+
     assert!(
         expiry_persisted.id == expiry_id
             && expiry_persisted.message_type == "postgres.plan-expire"
@@ -451,7 +476,9 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("published plan failed"));
+
     assert_bounded_index_plan(published, &["ix_outbox_messages_published"], true, true);
+
     assert!(
         outbox_record(&pool, OutboxLookupParams::by_id(published_id))
             .await
@@ -480,7 +507,9 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("dead retention plan failed"));
+
     assert_bounded_index_plan(dead, &["ix_outbox_messages_dead_cursor"], true, true);
+
     assert!(
         outbox_record(&pool, OutboxLookupParams::by_id(dead_id))
             .await
@@ -522,6 +551,7 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("dead cursor plan failed"));
+
     assert_bounded_index_plan(cursor, &["ix_outbox_messages_dead_cursor"], false, false);
 
     let outcome = sqlx::query_scalar!(
@@ -551,10 +581,13 @@ async fn postgres_18_outbox_query_shapes_use_bounded_named_index_access_paths() 
     .fetch_one(&pool)
     .await
     .unwrap_or_else(|_| panic!("outcome plan failed"));
+
     assert_bounded_index_plan(outcome, &["outbox_messages_pkey"], true, false);
+
     let outcome_persisted = outbox_record(&pool, OutboxLookupParams::by_id(outcome_id))
         .await
         .unwrap_or_else(|| panic!("outcome plan fixture row was deleted"));
+
     assert!(
         outcome_persisted.id == outcome_id
             && outcome_persisted.message_type == "postgres.plan-outcome"

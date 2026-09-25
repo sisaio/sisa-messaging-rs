@@ -91,6 +91,7 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
             }
 
             let encoded_metadata = metadata::encode(&record.metadata)?;
+
             let row = claim::claim(
                 &mut **transaction,
                 claim::ClaimParams {
@@ -107,6 +108,7 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
             if row.completed_at.is_some() {
                 return Ok(InboxClaimOutcome::CompletedDuplicate);
             }
+
             if row.dead_at.is_some() {
                 return Ok(InboxClaimOutcome::DeadDuplicate {
                     reason: dead_reason(row.dead_reason.as_deref())?,
@@ -133,6 +135,7 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
                 },
             )
             .await?;
+
             if updated == 1 {
                 Ok(())
             } else {
@@ -148,6 +151,7 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
     ) -> impl std::future::Future<Output = Result<InboxFailureOutcome, Self::Error>> + Send {
         async move {
             let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
+
             outcomes::blocking_lock(
                 &mut *transaction,
                 claim::LockParams {
@@ -158,6 +162,7 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
             .await?;
 
             let encoded_metadata = metadata::encode(&record.metadata)?;
+
             let row = outcomes::fail(
                 &mut *transaction,
                 outcomes::FailParams {
@@ -176,9 +181,11 @@ impl InboxStore<PostgresInboxTransaction> for PostgresInboxStore {
                 },
             )
             .await?;
+
             transaction.commit().await.map_err(PostgresError::from)?;
 
             let attempts = u32_value(row.attempts)?;
+
             if row.completed_at.is_some() {
                 Ok(InboxFailureOutcome::CompletedDuplicate)
             } else if row.dead_at.is_some() {
@@ -230,6 +237,7 @@ impl InboxMaintenance for PostgresInboxStore {
             let dead_retention = request.dead_retention.map(micros).transpose()?;
             let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
             let batch_size = i64::from(request.batch_size.get());
+
             let completed_deleted = match completed_retention {
                 Some(retention_micros) => {
                     maintenance::purge_completed(
@@ -243,6 +251,7 @@ impl InboxMaintenance for PostgresInboxStore {
                 }
                 None => 0,
             };
+
             let dead_deleted = match dead_retention {
                 Some(retention_micros) => {
                     maintenance::purge_dead(
@@ -256,7 +265,9 @@ impl InboxMaintenance for PostgresInboxStore {
                 }
                 None => 0,
             };
+
             transaction.commit().await.map_err(PostgresError::from)?;
+
             Ok(InboxPurgeReport {
                 completed_deleted,
                 dead_deleted,
@@ -267,6 +278,7 @@ impl InboxMaintenance for PostgresInboxStore {
     fn stats(&self) -> impl std::future::Future<Output = Result<InboxStats, Self::Error>> + Send {
         async move {
             let record = maintenance::stats(&self.pool, maintenance::StatsParams).await?;
+
             Ok(InboxStats {
                 pending: count(record.pending)?,
                 retrying: count(record.retrying)?,
@@ -292,6 +304,7 @@ impl InboxDeadLetters for PostgresInboxStore {
                 ),
                 None => (None, None),
             };
+
             dead_letters::list(
                 &self.pool,
                 dead_letters::ListParams {
@@ -313,8 +326,10 @@ impl InboxDeadLetters for PostgresInboxStore {
     ) -> impl std::future::Future<Output = Result<Vec<InboxId>, Self::Error>> + Send {
         async move {
             let ids: Vec<_> = batch.ids().iter().map(|id| id.into_uuid()).collect();
+
             let records =
                 dead_letters::retry(&self.pool, dead_letters::RetryParams { ids: &ids }).await?;
+
             Ok(records
                 .into_iter()
                 .map(|record| InboxId::from_uuid(record.id))
@@ -328,8 +343,10 @@ impl InboxDeadLetters for PostgresInboxStore {
     ) -> impl std::future::Future<Output = Result<Vec<InboxId>, Self::Error>> + Send {
         async move {
             let ids: Vec<_> = batch.ids().iter().map(|id| id.into_uuid()).collect();
+
             let records =
                 dead_letters::delete(&self.pool, dead_letters::DeleteParams { ids: &ids }).await?;
+
             Ok(records
                 .into_iter()
                 .map(|record| InboxId::from_uuid(record.id))
@@ -349,9 +366,11 @@ fn count(value: i64) -> Result<u64, PostgresError> {
 fn micros(duration: Duration) -> Result<i64, PostgresError> {
     const MAX_MICROS: u128 = (i32::MAX as u128) * 1_000_000;
     let micros = duration.as_micros();
+
     if micros > MAX_MICROS {
         return Err(PostgresError::InvalidData);
     }
+
     i64::try_from(micros).map_err(|_| PostgresError::InvalidData)
 }
 

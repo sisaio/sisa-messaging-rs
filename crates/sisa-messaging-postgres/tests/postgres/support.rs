@@ -76,13 +76,16 @@ pub(super) fn connect_options() -> PgConnectOptions {
             .unwrap_or_else(|_| panic!("PostgreSQL integration connection configuration failed")),
         Err(std::env::VarError::NotPresent) => {
             let host = required_postgres_component("PGHOST");
+
             let port = required_postgres_component("PGPORT")
                 .parse::<u16>()
                 .unwrap_or_else(|_| {
                     panic!("PostgreSQL integration connection configuration failed")
                 });
+
             let user = required_postgres_component("PGUSER");
             let database = required_postgres_component("PGDATABASE");
+
             PgConnectOptions::new()
                 .host(&host)
                 .port(port)
@@ -118,6 +121,7 @@ pub(super) async fn isolated_outbox_pool() -> PgPool {
         .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("PostgreSQL integration connection failed"));
+
     sqlx::query!(
         r#"
             -- Copy production semantics and restore generated index names for isolated plans.
@@ -144,6 +148,7 @@ pub(super) async fn isolated_outbox_pool() -> PgPool {
     .execute(&pool)
     .await
     .unwrap_or_else(|_| panic!("outbox index setup failed"));
+
     pool
 }
 
@@ -159,6 +164,7 @@ impl ConcurrentOutboxFixture {
         let control = pool().await;
         // The generated identifier contains only a fixed prefix and UUID hex digits.
         let statement = format!("DROP SCHEMA {} CASCADE", self.schema);
+
         sqlx::query(AssertSqlSafe(statement))
             .execute(&control)
             .await
@@ -172,19 +178,24 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
     // PostgreSQL identifiers cannot be query parameters. The name is generated locally from UUID
     // hex, so this fixture's only dynamic DDL is injection-safe and cannot reuse stale shape.
     let create_schema = format!("CREATE SCHEMA {schema}");
+
     sqlx::query(AssertSqlSafe(create_schema))
         .execute(&control)
         .await
         .unwrap_or_else(|_| panic!("concurrent outbox schema setup failed"));
+
     // The table shares the generated schema across all connections in this one fixture.
     let create_table = format!(
         "CREATE TABLE {schema}.outbox_messages (LIKE public.outbox_messages INCLUDING ALL)"
     );
+
     sqlx::query(AssertSqlSafe(create_table))
         .execute(&control)
         .await
         .unwrap_or_else(|_| panic!("concurrent outbox table setup failed"));
+
     let search_path = format!("{schema}, public");
+
     let pool = PgPoolOptions::new()
         .min_connections(1)
         .max_connections(3)
@@ -192,6 +203,7 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
         .max_lifetime(None)
         .after_connect(move |connection, _| {
             let search_path = search_path.clone();
+
             Box::pin(async move {
                 sqlx::query!(
                     r#"
@@ -208,6 +220,7 @@ pub(super) async fn isolated_concurrent_outbox_pool() -> ConcurrentOutboxFixture
         .connect_with(connect_options())
         .await
         .unwrap_or_else(|_| panic!("concurrent PostgreSQL integration connection failed"));
+
     ConcurrentOutboxFixture { pool, schema }
 }
 

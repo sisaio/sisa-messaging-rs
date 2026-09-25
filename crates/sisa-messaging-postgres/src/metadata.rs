@@ -17,6 +17,7 @@ pub(crate) fn decode(value: serde_json::Value) -> Result<Metadata, PostgresError
 /// to panic at the PostgreSQL boundary.
 pub(crate) fn system_time_to_utc(value: SystemTime) -> Result<DateTime<Utc>, PostgresError> {
     let unix_epoch = SystemTime::UNIX_EPOCH;
+
     let (seconds, nanos) = match value.duration_since(unix_epoch) {
         Ok(duration) => (
             i64::try_from(duration.as_secs()).map_err(|_| PostgresError::InvalidData)?,
@@ -24,8 +25,10 @@ pub(crate) fn system_time_to_utc(value: SystemTime) -> Result<DateTime<Utc>, Pos
         ),
         Err(error) => {
             let duration = error.duration();
+
             let seconds =
                 i64::try_from(duration.as_secs()).map_err(|_| PostgresError::InvalidData)?;
+
             if duration.subsec_nanos() == 0 {
                 (-seconds, 0)
             } else {
@@ -33,5 +36,6 @@ pub(crate) fn system_time_to_utc(value: SystemTime) -> Result<DateTime<Utc>, Pos
             }
         }
     };
+
     DateTime::<Utc>::from_timestamp(seconds, nanos).ok_or(PostgresError::InvalidData)
 }
