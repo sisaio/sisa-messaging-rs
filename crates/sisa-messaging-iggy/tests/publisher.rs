@@ -155,16 +155,20 @@ fn client_settings_debug_never_leaks_credentials_address_or_tls_paths() {
         username: "iggy".to_owned(),
         password: SENSITIVE_PASSWORD.to_owned(),
     };
+
     let tls = IggyTlsSettings::new(SENSITIVE_DOMAIN).with_ca_file(SENSITIVE_CA_FILE);
+
     let settings =
         IggyClientSettings::new(SENSITIVE_ADDRESS, credentials.clone()).with_tls(tls.clone());
 
     let settings_debug = format!("{settings:?}");
     let credentials_debug = format!("{credentials:?}");
+
     let token_debug = format!(
         "{:?}",
         IggyCredentials::PersonalAccessToken(SENSITIVE_TOKEN.to_owned())
     );
+
     let tls_debug = format!("{tls:?}");
 
     for haystack in [
@@ -177,18 +181,22 @@ fn client_settings_debug_never_leaks_credentials_address_or_tls_paths() {
             !haystack.contains(SENSITIVE_ADDRESS),
             "server address leaked in: {haystack}"
         );
+
         assert!(
             !haystack.contains(SENSITIVE_PASSWORD),
             "password leaked in: {haystack}"
         );
+
         assert!(
             !haystack.contains(SENSITIVE_TOKEN),
             "token leaked in: {haystack}"
         );
+
         assert!(
             !haystack.contains(SENSITIVE_DOMAIN),
             "TLS domain leaked in: {haystack}"
         );
+
         assert!(
             !haystack.contains(SENSITIVE_CA_FILE),
             "TLS CA file path leaked in: {haystack}"
@@ -366,6 +374,7 @@ fn iggy_publish_error_from_covers_every_known_arm() {
         let classified = IggyPublishError::from(error);
         assert_eq!(classified.kind(), expected_kind);
         assert_eq!(classified.classify(), expected_failure);
+
         assert_ne!(
             classified.kind(),
             IggyPublishErrorKind::ClientDisconnected,
@@ -401,9 +410,11 @@ fn routing_resolver_accepts_numeric_and_named_stream_topic_pairs() {
     resolver
         .resolve(&envelope_with_destination(Some("1/2")))
         .expect("numeric stream and topic must resolve");
+
     resolver
         .resolve(&envelope_with_destination(Some("orders/created")))
         .expect("named stream and topic must resolve");
+
     resolver
         .resolve(&envelope_with_destination(Some("1/created")))
         .expect("mixed numeric and named identifiers must resolve");
@@ -416,26 +427,31 @@ fn routing_resolver_rejects_missing_or_malformed_destinations_permanently() {
     let missing = resolver
         .resolve(&envelope_with_destination(None))
         .expect_err("missing destination must be rejected");
+
     assert_eq!(missing.classify(), FailureKind::Permanent);
     assert!(StdError::source(&missing).is_none());
 
     let no_separator = resolver
         .resolve(&envelope_with_destination(Some("orders-created")))
         .expect_err("destination without a separator must be rejected");
+
     assert_eq!(no_separator.classify(), FailureKind::Permanent);
 
     let extra_segment = resolver
         .resolve(&envelope_with_destination(Some("orders/created/extra")))
         .expect_err("destination with more than one separator must be rejected");
+
     assert_eq!(extra_segment.classify(), FailureKind::Permanent);
 
     let empty_stream = resolver
         .resolve(&envelope_with_destination(Some("/created")))
         .expect_err("an empty stream segment must be rejected");
+
     assert_eq!(empty_stream.classify(), FailureKind::Permanent);
 
     let empty_topic = resolver
         .resolve(&envelope_with_destination(Some("orders/")))
         .expect_err("an empty topic segment must be rejected");
+
     assert_eq!(empty_topic.classify(), FailureKind::Permanent);
 }

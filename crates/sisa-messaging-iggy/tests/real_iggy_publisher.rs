@@ -47,6 +47,7 @@ async fn publisher_returns_after_successful_server_reply() {
     support::provision_stream_and_topic(&provisioning_client, &stream, &topic).await;
 
     let client = new_iggy_client().await;
+
     let publisher = IggyPublisher::new(
         client,
         RoutingDestinationResolver,
@@ -54,8 +55,10 @@ async fn publisher_returns_after_successful_server_reply() {
     );
 
     let marker = MessageId::new().to_string();
+
     let destination = MetadataValue::new(format!("{stream}/{topic}"))
         .expect("test destination is valid metadata");
+
     let envelope = publisher_envelope(destination, marker.clone().into_bytes());
 
     let result = publisher.publish(&envelope).await;
@@ -86,6 +89,7 @@ async fn unknown_topic_publish_is_classified_permanently() {
     let stream = test_stream();
 
     let client = new_iggy_client().await;
+
     let publisher = IggyPublisher::new(
         client,
         RoutingDestinationResolver,
@@ -94,6 +98,7 @@ async fn unknown_topic_publish_is_classified_permanently() {
 
     let destination = MetadataValue::new(format!("{stream}/sisa-iggy-missing-topic"))
         .expect("test destination is valid metadata");
+
     let envelope = publisher_envelope(destination, b"unknown-topic-probe".to_vec());
 
     let error = publisher
@@ -142,6 +147,7 @@ async fn publish_after_shutdown_fails_as_client_disconnected_without_sending() {
 
     let destination = MetadataValue::new(format!("{stream}/{topic}"))
         .expect("test destination is valid metadata");
+
     let error = publisher
         .publish(&publisher_envelope(
             destination,
@@ -152,6 +158,7 @@ async fn publish_after_shutdown_fails_as_client_disconnected_without_sending() {
 
     assert_eq!(error.kind(), IggyPublishErrorKind::ClientDisconnected);
     assert_eq!(error.classify(), FailureKind::Transient);
+
     assert_eq!(
         error.to_string(),
         "Iggy client session is closed; the request was not sent"

@@ -21,16 +21,19 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
         FrameworkHeader::MessageId,
         Some(envelope.message_id.to_string()),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::MessageType,
         Some(envelope.message_type.as_str()),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::MessageVersion,
         Some(envelope.message_version.to_string()),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::ContentType,
@@ -67,6 +70,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .as_ref()
             .map(MetadataValue::as_str),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::ConversationId,
@@ -77,6 +81,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .map(ToString::to_string)
             .as_deref(),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::CausationId,
@@ -87,6 +92,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .map(ToString::to_string)
             .as_deref(),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::RequestId,
@@ -97,11 +103,13 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .map(ToString::to_string)
             .as_deref(),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::Source,
         metadata.routing.source.as_ref().map(MetadataValue::as_str),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::Destination,
@@ -111,6 +119,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .as_ref()
             .map(MetadataValue::as_str),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::ReplyTo,
@@ -120,6 +129,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .as_ref()
             .map(MetadataValue::as_str),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::SentAtMs,
@@ -129,6 +139,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .map(|value| value.to_string())
             .as_deref(),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::DeduplicationId,
@@ -138,16 +149,19 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<IggyRecord, IggyMa
             .as_ref()
             .map(MetadataValue::as_str),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::TenantId,
         metadata.tenant_id.as_ref().map(MetadataValue::as_str),
     )?;
+
     push_header(
         &mut headers,
         FrameworkHeader::Traceparent,
         metadata.trace.traceparent.as_ref().map(HeaderValue::as_str),
     )?;
+
     // `tracestate` may legitimately exceed the Iggy header-value bound (the shared contract
     // allows up to 8,192 bytes; Iggy caps each header value at 255). W3C Trace Context permits a
     // participant to drop `tracestate` under vendor size constraints, so an oversized value is
