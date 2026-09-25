@@ -113,7 +113,7 @@ reviews:
       instructions: >-
         Apply docs/architecture.md and docs/implementation-plan.md. Enforce crate dependency
         direction, no provider-to-provider edges, one workspace version per shared dependency,
-        Rust 1.94 MSRV, minimal features, direct dependency ownership, and no runtime migration,
+        Rust 1.95 MSRV, minimal features, direct dependency ownership, and no runtime migration,
         telemetry SDK/exporter, async-trait, or application configuration dependencies in library
         crates. New dependencies need a concrete justification and cargo-deny review.
 
@@ -122,7 +122,7 @@ reviews:
         CI is the mechanical quality authority. Check least-privilege permissions, immutable or
         deliberately pinned actions/tool versions, no credential persistence in untrusted build
         jobs, safe interpolation of pull-request data, explicit failure propagation, dependency and
-        secret scanning, Rust 1.94 MSRV, feature matrices, real PostgreSQL/NATS suites, Atlas clean
+        secret scanning, Rust 1.95 MSRV, feature matrices, real PostgreSQL/NATS suites, Atlas clean
         replay, and release ordering. Require a PR-scope job that rejects commits above 20 changed
         paths and PRs at 100 or more; the 99-path task/PR ceiling preserves CodeRabbit's strict
         less-than-100 reviewability boundary. CodeRabbit path filters do not change the GitHub
