@@ -159,6 +159,7 @@ hot-path baseline. Initial local run (2026-09-25, macOS arm64 Darwin 25.5.0, rus
 `cargo bench -p sisa-messaging-rabbitmq --bench mapping`. Encode measured about 614 ns, 1.86 µs,
 and 6.02 µs; decode about 264 ns, 1.20 µs, and 4.88 µs for small, typical, and large. This is a
 starting measurement, not a release regression threshold.
+
 ### Redis Streams mapping and provider
 
 - Encode and decode a deterministic envelope independently of Redis I/O.
