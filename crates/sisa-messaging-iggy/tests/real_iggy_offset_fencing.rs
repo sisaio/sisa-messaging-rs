@@ -46,6 +46,7 @@ async fn broker_accepts_an_offset_store_from_a_member_that_does_not_own_the_part
         .join_consumer_group(&stream_id, &topic_id, &group_id)
         .await
         .unwrap_or_else(|error| panic!("first Iggy test member failed to join: {error}"));
+
     member_b
         .join_consumer_group(&stream_id, &topic_id, &group_id)
         .await
@@ -61,6 +62,7 @@ async fn broker_accepts_an_offset_store_from_a_member_that_does_not_own_the_part
             panic!("first Iggy test member failed to read its own client id: {error}")
         })
         .client_id;
+
     let member_b_client_id = member_b
         .get_me()
         .await
@@ -91,6 +93,7 @@ async fn broker_accepts_an_offset_store_from_a_member_that_does_not_own_the_part
 
     let a_owns = owns_partition_zero(member_a_client_id);
     let b_owns = owns_partition_zero(member_b_client_id);
+
     assert_ne!(
         a_owns, b_owns,
         "expected exactly one member to own the single partition"
@@ -101,6 +104,7 @@ async fn broker_accepts_an_offset_store_from_a_member_that_does_not_own_the_part
     } else {
         (&member_a, member_a_client_id)
     };
+
     assert!(
         !owns_partition_zero(non_owner_client_id),
         "the selected member must provably not own partition 0"
@@ -133,6 +137,7 @@ async fn broker_accepts_an_offset_store_from_a_member_that_does_not_own_the_part
     let _ = provisioning_client
         .delete_consumer_group(&stream_id, &topic_id, &group_id)
         .await;
+
     let _ = provisioning_client
         .delete_topic(&stream_id, &topic_id)
         .await;

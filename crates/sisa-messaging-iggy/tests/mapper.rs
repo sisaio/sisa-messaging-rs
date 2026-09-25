@@ -7,6 +7,7 @@ use sisa_messaging_iggy::{IggyEnvelopeMapper, IggyHeader, IggyMappingError, Iggy
 
 fn envelope() -> SerializedEnvelope {
     let mut headers = Headers::new();
+
     headers
         .insert(
             HeaderName::new("x-request-zone").expect("valid fixture name"),
@@ -114,6 +115,7 @@ fn iggy_mapping_uses_stable_wire_headers_and_decodes_an_independent_record() {
         headers: expected_headers(),
         key: Some(b"order-7".to_vec()),
     };
+
     let decoded = mapper
         .decode(hand_built_record)
         .expect("hand-built record decodes");
@@ -133,6 +135,7 @@ fn iggy_mapping_rejects_duplicate_and_empty_headers_permanently() {
     };
 
     assert_eq!(error, IggyMappingError::DuplicateHeader);
+
     assert_eq!(
         sisa_messaging::ErrorClassifier::classify(&error),
         sisa_messaging::FailureKind::Permanent
@@ -209,6 +212,7 @@ fn iggy_mapping_accepts_a_record_key_that_matches_the_ordering_key_header() {
 fn iggy_mapping_rejects_an_ordering_key_over_the_messages_key_bound() {
     let mapper = IggyEnvelopeMapper;
     let mut oversized = envelope();
+
     oversized.ordering_key =
         Some(sisa_messaging::OrderingKey::new("x".repeat(256)).expect("fixture key is valid"));
 
@@ -244,6 +248,7 @@ fn iggy_mapping_rejects_a_custom_header_value_over_the_iggy_bound_at_encode() {
     let mapper = IggyEnvelopeMapper;
     let mut oversized = envelope();
     let mut headers = Headers::new();
+
     headers
         .insert(
             HeaderName::new("x-oversized").expect("valid fixture name"),
@@ -251,6 +256,7 @@ fn iggy_mapping_rejects_a_custom_header_value_over_the_iggy_bound_at_encode() {
                 .expect("fixture value fits the shared 8192-byte bound"),
         )
         .expect("fixture header fits the shared collection bound");
+
     oversized.metadata.headers = headers;
 
     let result = mapper.encode(&oversized);
@@ -262,6 +268,7 @@ fn iggy_mapping_rejects_a_custom_header_value_over_the_iggy_bound_at_encode() {
 fn iggy_mapping_omits_an_oversized_tracestate_and_keeps_traceparent_required() {
     let mapper = IggyEnvelopeMapper;
     let mut long_tracestate = envelope();
+
     long_tracestate.metadata.trace.tracestate =
         Some(HeaderValue::new("v".repeat(300)).expect("fixture tracestate fits the shared bound"));
 
@@ -276,6 +283,7 @@ fn iggy_mapping_omits_an_oversized_tracestate_and_keeps_traceparent_required() {
             .any(|header| header.name == "tracestate"),
         "an oversized tracestate must not be written to the wire record"
     );
+
     assert!(
         encoded
             .headers
@@ -316,10 +324,12 @@ fn iggy_mapping_rejects_a_non_numeric_message_version_permanently() {
     let expected = envelope();
     let mapper = IggyEnvelopeMapper;
     let mut headers = expected_headers();
+
     let version = headers
         .iter_mut()
         .find(|header| header.name == "message-version")
         .expect("fixture carries a message-version header");
+
     version.value = b"not-a-number".to_vec();
 
     let wire = IggyRecord {
@@ -338,10 +348,12 @@ fn iggy_mapping_rejects_a_non_numeric_message_version_permanently() {
 fn iggy_mapping_rejects_a_malformed_message_id_permanently() {
     let mapper = IggyEnvelopeMapper;
     let mut headers = expected_headers();
+
     let message_id = headers
         .iter_mut()
         .find(|header| header.name == "message-id")
         .expect("fixture carries a message-id header");
+
     message_id.value = b"not-a-uuid".to_vec();
 
     let wire = IggyRecord {
@@ -359,6 +371,7 @@ fn iggy_mapping_rejects_a_malformed_message_id_permanently() {
 #[test]
 fn iggy_mapping_rejects_more_than_the_combined_header_count_bound() {
     let mapper = IggyEnvelopeMapper;
+
     let headers: Vec<IggyHeader> = (0..85)
         .map(|index| IggyHeader {
             name: format!("x-bulk-{index}"),
@@ -381,6 +394,7 @@ fn iggy_mapping_rejects_more_than_the_combined_header_count_bound() {
 #[test]
 fn iggy_mapping_rejects_custom_headers_exceeding_the_aggregate_byte_bound() {
     let mapper = IggyEnvelopeMapper;
+
     let headers: Vec<IggyHeader> = (0..40)
         .map(|index| IggyHeader {
             name: format!("x-big-{index}"),
@@ -404,10 +418,12 @@ fn iggy_mapping_rejects_custom_headers_exceeding_the_aggregate_byte_bound() {
 fn iggy_mapping_rejects_an_uppercase_framework_header_name() {
     let mapper = IggyEnvelopeMapper;
     let mut headers = expected_headers();
+
     let message_type = headers
         .iter_mut()
         .find(|header| header.name == "message-type")
         .expect("fixture carries a message-type header");
+
     message_type.name = "Message-Type".to_owned();
 
     let wire = IggyRecord {
@@ -426,10 +442,12 @@ fn iggy_mapping_rejects_an_uppercase_framework_header_name() {
 fn iggy_mapping_rejects_case_insensitive_duplicate_custom_headers() {
     let mapper = IggyEnvelopeMapper;
     let mut headers = expected_headers();
+
     headers.push(IggyHeader {
         name: "X-A".to_owned(),
         value: b"first".to_vec(),
     });
+
     headers.push(IggyHeader {
         name: "x-a".to_owned(),
         value: b"second".to_vec(),

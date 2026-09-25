@@ -60,6 +60,7 @@ impl IggyTlsSettings {
     #[must_use]
     pub fn with_ca_file(mut self, ca_file: impl Into<String>) -> Self {
         self.ca_file = Some(ca_file.into());
+
         self
     }
 }
@@ -108,6 +109,7 @@ impl IggyClientSettings {
     #[must_use]
     pub fn with_tls(mut self, tls: IggyTlsSettings) -> Self {
         self.tls = Some(tls);
+
         self
     }
 
@@ -115,6 +117,7 @@ impl IggyClientSettings {
     #[must_use]
     pub const fn with_connect_timeout(mut self, connect_timeout: Duration) -> Self {
         self.connect_timeout = connect_timeout;
+
         self
     }
 
@@ -122,6 +125,7 @@ impl IggyClientSettings {
     #[must_use]
     pub const fn with_heartbeat_interval(mut self, heartbeat_interval: Duration) -> Self {
         self.heartbeat_interval = heartbeat_interval;
+
         self
     }
 }

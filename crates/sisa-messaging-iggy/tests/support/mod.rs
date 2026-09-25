@@ -91,6 +91,7 @@ pub async fn new_raw_client() -> RawIggyClient {
 
     let tcp_client = TcpClient::create(Arc::new(config))
         .unwrap_or_else(|error| panic!("Iggy raw test client configuration is invalid: {error}"));
+
     let client = RawIggyClient::create(ClientWrapper::Tcp(tcp_client), None, None);
 
     Client::connect(&client)
@@ -169,6 +170,7 @@ pub async fn poll_for_marker(
             Ok(polled) if !polled.messages.is_empty() => {
                 for message in &polled.messages {
                     offset = offset.max(message.header.offset + 1);
+
                     if message.payload.as_ref() == marker {
                         return true;
                     }
