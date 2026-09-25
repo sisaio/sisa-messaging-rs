@@ -3129,6 +3129,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sisa-messaging-xtask"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
