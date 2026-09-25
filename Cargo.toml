@@ -16,6 +16,10 @@ criterion = { version = "0.8.2", default-features = false }
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7.19", default-features = false, features = ["rt"] }
 
+# NATS JetStream client and cancel-safe stream utilities.
+async-nats = { version = "0.50.0", default-features = false, features = ["jetstream"] }
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+
 # Kafka transport client; applications select authentication and protocol features.
 rdkafka = { version = "=0.39.0", default-features = false, features = ["tokio"] }
 

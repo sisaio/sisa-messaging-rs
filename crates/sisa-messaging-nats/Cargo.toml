@@ -9,7 +9,24 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+async-nats = { workspace = true }
+futures-util = { workspace = true }
+opentelemetry = { workspace = true }
 sisa-messaging = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[bench]]
+name = "mapping"
+harness = false
+
+[[bench]]
+name = "provider"
+harness = false
 
 [lints]
 workspace = true
