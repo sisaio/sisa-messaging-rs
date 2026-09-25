@@ -7,8 +7,8 @@ number:
 
 1. Did a local algorithm or representation regress?
 2. How do PostgreSQL queries scale with realistic table state?
-3. What throughput and latency do NATS, Kafka, and Iggy publication and consumption achieve
-   independently?
+3. What throughput and latency do NATS, Kafka, Iggy, and Redis Streams publication and
+   consumption achieve independently?
 4. What does the complete enqueue → dispatch → broker → consume → commit path cost?
 
 Correctness tests remain separate. A fast result is invalid if rows are lost, acknowledged before
@@ -37,6 +37,9 @@ crates/
 │   └── mapping.rs
 ├── sisa-messaging-iggy/benches/
 │   └── mapping.rs
+├── sisa-messaging-redis/benches/
+│   ├── mapping.rs
+│   └── provider.rs
 └── sisa-messaging-consumer/benches/
     └── processing.rs
 benchmarks/
@@ -140,6 +143,44 @@ Iggy features): `cargo bench -p sisa-messaging-iggy --bench mapping -- --warm-up
 ordering-key fixture, Criterion estimated about 1.46 µs for encode (interval 1.4254–1.5134 µs)
 and about 2.92 µs for decode (2.9025–2.9458 µs). This is a starting measurement, not a release
 regression threshold.
+
+### Redis Streams mapping and provider
+
+- Encode and decode a deterministic envelope independently of Redis I/O.
+- Measure append/read/ack, pending reclaim/ack, and cancellation of a blocking read against a real
+  Redis server. Keep the idle wait and block timeout explicit in the report.
+- Record the image or server version, exact command, host, toolchain, feature set, and measured
+  results. Provider measurements do not represent a cross-server durability guarantee.
+
+Initial local smoke run (2026-09-25, MacBook Pro Mac16,8, Apple M4 Pro (12 CPU cores), macOS
+26.5.2, 48 GB RAM, `aarch64-apple-darwin`, rustc 1.98.0 `88d9e12ae` (2026-08-18), local Docker
+Redis 6.2.24 on port 16379, default provider features): `rtk cargo bench --offline -p
+sisa-messaging-redis --bench mapping -- --quick` and `rtk env
+SISA_REDIS_URL=redis://127.0.0.1:16379/ cargo bench --offline -p sisa-messaging-redis --bench
+provider -- --quick`. With a 256-byte body and default metadata, Criterion `--quick` median point
+estimates (reported low–high median intervals) were 245.54 ns (243.57–246.03 ns) for
+`redis_mapper_encode_256b`, 355.31 ns (353.27–355.82 ns) for `redis_mapper_decode_256b`, 444.56
+µs (425.61–449.30 µs) for `redis_append_read_ack_256b`, 4.3850 ms (4.2954–4.4074 ms) for
+`redis_pending_reclaim_ack_256b` (including its 2 ms idle wait), and 2.1823 ms (2.1773–2.2023 ms)
+for `redis_cancel_blocking_read` (with a 1 ms timeout). This local smoke run is a starting
+measurement, not a release regression threshold or evidence of compatibility with the other server
+families.
+
+Additional local `--quick` provider runs on the same host and toolchain (2026-09-25, default
+features) used `rtk env SISA_REDIS_URL=redis://127.0.0.1:<port>/ cargo bench --offline -p
+sisa-messaging-redis --bench provider -- --quick`. Median point estimates follow; the reclaim
+measurement includes a 2 ms idle wait, and cancellation uses a 1 ms timeout.
+
+| Server image | Port | Append/read/ack | Pending reclaim/ack | Cancel blocking read |
+| --- | ---: | ---: | ---: | ---: |
+| `redis:7` | 16380 | 317.93 µs | 6.4787 ms | 2.4574 ms |
+| `valkey/valkey:8` | 16381 | 297.67 µs | 4.4771 ms | 2.5118 ms |
+| `docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0` | 16382 | 297.53 µs | 4.6036 ms | 2.5798 ms |
+
+The tested `ghcr.io/microsoft/garnet` image at digest
+`sha256:880565c0c4186d0127846511174c732e60ba6dcb56f5bd8ac81fe78f1f34d753`
+(Garnet 2.1.8) returns `ERR unknown command` for plain `XADD`. Its provider benchmark cannot run,
+and no latency value is reported for that server image.
 
 ## 5. PostgreSQL benchmarks
 

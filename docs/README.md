@@ -7,8 +7,10 @@ performance program, and engineering rules for the repository. They are normativ
 and public documentation must agree with them.
 
 The project is a set of Rust libraries for durable message publication, transactional consumer
-deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, and
-Kafka and Apache Iggy publication. It is not a service and does not own application startup,
+deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, Kafka
+and Apache Iggy publication, and Redis Streams publication and individual delivery for servers
+with the required stream commands. Redis 7, Valkey 8, and Dragonfly 2.0.0 pass the provider suite;
+the tested Garnet 2.1.8 image lacks `XADD`. It is not a service and does not own application startup,
 configuration loading, database pools, broker connection lifecycles, telemetry exporters, or
 process shutdown.
 
@@ -28,8 +30,8 @@ process shutdown.
    IDs, async traits, and module rules.
 7. [Observability](observability.md) — tracing, logging, direct OpenTelemetry metrics, names,
    attributes, and ownership.
-8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, Iggy, consumer, and
-   full-pipeline performance measurement.
+8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, Iggy, Redis Streams,
+   consumer, and full-pipeline performance measurement.
 9. [Implementation plan](implementation-plan.md) — repository layout, build order, test strategy,
    dependency policy, and completion gates.
 10. [`0001_messaging.sql`](../migrations/0001_messaging.sql) — the executable PostgreSQL 18+
