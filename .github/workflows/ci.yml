@@ -146,7 +146,7 @@ jobs:
           health_status=unavailable
           health_attempt=0
           while [ "${health_status}" != healthy ] && [ "${health_attempt}" -lt 30 ]; do
-            if docker exec "${RABBITMQ_CONTAINER}" rabbitmq-diagnostics -q check_port_connectivity >/dev/null 2>&1; then
+            if docker exec --user rabbitmq "${RABBITMQ_CONTAINER}" rabbitmq-diagnostics -q check_port_connectivity >/dev/null 2>&1; then
               health_status=healthy
               break
             fi
