@@ -65,9 +65,11 @@ impl<R: RetryPolicy> DispatcherSettings<R> {
         validate_duration("drain_timeout", self.drain_timeout)?;
 
         let half_lease = self.lease / 2;
+
         if self.store_timeout >= half_lease {
             return Err(SettingsError::StoreTimeoutNotBelowHalfLease);
         }
+
         if self.max_in_flight.get() > u32::MAX as usize {
             return Err(SettingsError::CapacityNotRepresentable);
         }
@@ -99,6 +101,7 @@ fn validate_worker_id(worker_id: &str) -> Result<(), SettingsError> {
     if worker_id.is_empty() {
         return Err(SettingsError::InvalidWorkerId);
     }
+
     if worker_id.len() > MAX_WORKER_ID_BYTES
         || worker_id
             .as_bytes()

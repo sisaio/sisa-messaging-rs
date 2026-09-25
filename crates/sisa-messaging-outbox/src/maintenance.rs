@@ -67,6 +67,7 @@ impl OutboxStats {
     /// background task, or installs a provider, preventing duplicate application-owned observers.
     pub fn record_metrics(&self) {
         let snapshot = metric_snapshot(self);
+
         crate::telemetry::record_stats(
             snapshot.message_counts,
             snapshot.oldest_pending_age_seconds,
@@ -77,6 +78,7 @@ impl OutboxStats {
 #[derive(Debug, PartialEq)]
 struct MetricSnapshot {
     message_counts: [(&'static str, u64); 3],
+
     oldest_pending_age_seconds: f64,
 }
 
@@ -124,6 +126,7 @@ mod tests {
             dead: 7,
             oldest_pending_age: Duration::from_millis(1_250),
         };
+
         assert_eq!(
             metric_snapshot(&populated),
             MetricSnapshot {
@@ -137,6 +140,7 @@ mod tests {
             oldest_pending_age: Duration::from_secs(99),
             ..populated
         };
+
         assert_eq!(
             metric_snapshot(&inconsistent_empty),
             MetricSnapshot {

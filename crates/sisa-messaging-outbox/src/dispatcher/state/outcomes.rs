@@ -11,7 +11,9 @@ pub(crate) enum ResolvedOutcome {
     Complete,
     Failure {
         kind: FailureKind,
+
         summary: ErrorSummary,
+
         action: FailureAction,
     },
 }
