@@ -36,6 +36,7 @@ not used.
 | `sisa-messaging-nats` | NATS JetStream mapping, subject resolution, publication, and inbound delivery |
 | `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, and outbound publication |
 | `sisa-messaging-iggy` | Apache Iggy envelope mapping, stream/topic resolution, and outbound publication |
+| `sisa-messaging-redis` | Redis Streams envelope mapping, publication, and individual inbound delivery |
 
 Rust import names follow Cargo's hyphen-to-underscore conversion, for example
 `sisa_messaging_outbox`.
@@ -76,6 +77,11 @@ Rules:
   to 255 bytes: a custom header value over that bound is a permanent mapping error, and an
   oversized `tracestate` is omitted under the W3C Trace Context allowance while an oversized
   `traceparent` is rejected as a permanent mapping error.
+- Redis depends only on messaging. It maps envelopes, publishes to a configured stream, and
+  receives individual deliveries from a caller-provisioned consumer group. Its source descriptor
+  advertises no delayed retry, terminal discard, or heartbeat; unsupported settlement operations
+  return `Unsupported`. Cancellation leaves an unacknowledged entry pending for later bounded
+  reclaim.
 - Provider crates never depend on one another.
 - Only applications and system tests name concrete provider combinations.
 
@@ -89,6 +95,7 @@ Rules:
 | Transport authentication, TLS, connection initiation/lifecycle, and returned handle | Application |
 | SDK client construction behind a provider handle, when supported | Transport provider |
 | NATS stream and consumer provisioning | Application |
+| Redis stream and consumer-group provisioning | Application |
 | Configuration source and deserialization | Application |
 | Envelope and transport-independent metadata | `sisa-messaging` |
 | Retry decision and worker lifecycle | `sisa-messaging-outbox` |
@@ -171,6 +178,10 @@ One consumer handles one message type/version by default. See
 - `NatsPublisher<R>` implements `Publisher` and awaits the JetStream acknowledgement.
 - `NatsDeliverySource`, `NatsDelivery`, and `NatsSettlement` implement inbound receive and
   settlement contracts.
+- The Redis Streams publisher and delivery source implement outbound publication, envelope
+  mapping, and individual inbound delivery on servers that implement the required stream commands.
+  The tested Garnet 2.1.8 image returns `ERR unknown command` for `XADD`, so it cannot run this
+  delivery path.
 
 ## 6. Canonical construction
 
@@ -302,19 +313,26 @@ crates/
 │           ├── outcomes.rs
 │           ├── maintenance.rs
 │           └── dead_letters.rs
-└── sisa-messaging-nats/
+├── sisa-messaging-nats/
+│   └── src/
+│       ├── lib.rs
+│       ├── publisher.rs        # NatsPublisher façade and Publisher implementation
+│       ├── publisher/          # created only when publisher.rs has distinct concerns
+│       │   ├── request.rs
+│       │   └── acknowledgement.rs
+│       ├── delivery_source.rs
+│       ├── delivery.rs
+│       ├── mapper.rs
+│       ├── headers.rs
+│       ├── subject.rs
+│       ├── settings.rs
+│       └── error.rs
+└── sisa-messaging-redis/
     └── src/
         ├── lib.rs
-        ├── publisher.rs        # NatsPublisher façade and Publisher implementation
-        ├── publisher/          # created only when publisher.rs has distinct concerns
-        │   ├── request.rs
-        │   └── acknowledgement.rs
-        ├── delivery_source.rs
-        ├── delivery.rs
+        ├── publisher.rs        # Redis Streams publisher
+        ├── source.rs           # IndividualDeliverySource and bounded pending recovery
         ├── mapper.rs
-        ├── headers.rs
-        ├── subject.rs
-        ├── settings.rs
         └── error.rs
 ```
 
