@@ -30,6 +30,26 @@
 //! wire key disagrees with that header, or is present with no header at all, as
 //! [`IggyMappingError::InvalidRecordKey`].
 //!
+//! ## Supervision
+//!
+//! Reconnect supervision is application-owned. A supervisor follows one cycle per session:
+//!
+//! 1. Start: [`IggyClient::start`] connects and logs in, then build an [`IggyPublisher`] around
+//!    the client (clones of the client share its one session).
+//! 2. Publish: each [`Publisher::publish`](sisa_messaging::Publisher::publish) call sends one
+//!    message on that session.
+//! 3. Observe: [`IggyClient::is_connected`] returning `false`, or a publish failing with
+//!    [`IggyPublishErrorKind::ClientDisconnected`], means the session is closed and will not
+//!    recover; the request was not sent. Retrying through the same client cannot succeed.
+//! 4. Shut down: [`IggyClient::shutdown`] closes the session deterministically (it succeeds if the
+//!    session is already closed), which also stops publishing through every clone.
+//! 5. Rebuild: start a new [`IggyClient`] and a new [`IggyPublisher`], then resume publishing.
+//!    Messages that failed with `ClientDisconnected` can succeed on the rebuilt client.
+//!
+//! A publish that fails with [`IggyPublishErrorKind::OutcomeUnknown`] may already have been
+//! sent; that kind alone does not mean the session is closed, so check
+//! [`IggyClient::is_connected`] before deciding to rebuild.
+//!
 //! ## Wire limits
 //!
 //! Each Iggy header name and value is limited to 255 bytes, well under the shared envelope
@@ -46,11 +66,15 @@
 //! including the configured username during sign-in and raw I/O error text on connection
 //! failures; applications that filter or redact log output should suppress or scrub that target.
 //!
+//! ## Scope
+//!
 //! This crate ships the publisher only. The inbound partitioned-log delivery source described by
 //! the shared consumer contracts is out of scope: Iggy's consumer-group offset store carries no
 //! membership generation, so a fencing-correct implementation of that profile is not possible with
-//! the current server. See the crate's `tests/real_iggy_offset_fencing.rs` for the real-broker
-//! feasibility proof and <https://github.com/sisaio/sisa-messaging-rs/issues/60> for tracking.
+//! the current server, as recorded in <https://github.com/sisaio/sisa-messaging-rs/issues/60>. The
+//! crate's `tests/real_iggy_offset_fencing.rs` is an authored, opt-in test of that gap; its
+//! execution against a real broker is tracked in
+//! <https://github.com/sisaio/sisa-messaging-rs/issues/63>, and its finding is recorded in #60.
 
 #![forbid(unsafe_code)]
 

@@ -203,6 +203,14 @@ pub enum IggyPublishErrorKind {
     /// The server refused admission before the write; safe to retry.
     ServerTransient,
 
+    /// The client's session was already disconnected or shut down, so the request was not sent.
+    ///
+    /// The message can succeed on a rebuilt client, so this is transient, but retrying through
+    /// the same client cannot succeed: reconnection is disabled. A supervisor that observes this
+    /// kind, or [`IggyClient::is_connected`](crate::IggyClient::is_connected) returning `false`,
+    /// must build a new [`IggyClient`](crate::IggyClient) and publisher.
+    ClientDisconnected,
+
     /// The server's reply for this request was not observed, or the connection was lost after
     /// the request may have reached the server. The outcome is unknown: the message may already
     /// be committed. See the crate documentation for how a retry can observe this.
@@ -238,6 +246,9 @@ impl fmt::Display for IggyPublishError {
             IggyPublishErrorKind::ServerTransient => {
                 "Iggy server refused admission before the write"
             }
+            IggyPublishErrorKind::ClientDisconnected => {
+                "Iggy client session is closed; the request was not sent"
+            }
             IggyPublishErrorKind::OutcomeUnknown => "Iggy publish outcome is unknown",
         })
     }
@@ -254,6 +265,13 @@ impl ErrorClassifier for IggyPublishError {
 /// Classifies an SDK error from `send_messages` into this crate's publish failure taxonomy. This
 /// is the crate's single mapping from SDK error to [`IggyPublishErrorKind`]; the publish path
 /// uses it directly rather than duplicating the match.
+///
+/// No SDK error maps to [`IggyPublishErrorKind::ClientDisconnected`]. With reconnection disabled,
+/// the SDK reports a request it refused before writing (its own session was already closed) with
+/// the same `Disconnected` error it uses for a request lost after writing, so an SDK error never
+/// proves the request was unsent. The publisher instead reads the session state before sending
+/// and reports a known-closed session as `ClientDisconnected` without calling the SDK; every
+/// connection error the SDK does return stays [`IggyPublishErrorKind::OutcomeUnknown`].
 ///
 /// `IggyError::RequestAlreadyApplied` falls through to the general `OutcomeUnknown` arm here, but
 /// the publish path never actually constructs this variant from it: it intercepts

@@ -1,13 +1,14 @@
-//! Opt-in negative feasibility test: the consumer-offset store accepts a write from a group
-//! member that provably does not own the partition.
+//! Authored, opt-in negative feasibility test: it checks whether the consumer-offset store
+//! accepts a write from a group member that provably does not own the partition.
 //!
-//! Finding for issue #23's deferred inbound slice, tracked by
+//! The finding for issue #23's deferred inbound slice is recorded in
 //! <https://github.com/sisaio/sisa-messaging-rs/issues/60>: Iggy's consumer-offset store carries
-//! no membership generation. A member's offset store for a partition it does not own is accepted
-//! the same way as one from the owning member, with no rejection tied to group membership,
-//! generation, or partition ownership. A fencing-correct implementation of the shared
-//! partitioned-log delivery source profile is therefore not possible against the current server,
-//! which is why this crate ships publisher-only.
+//! no membership generation, so a member's offset store for a partition it does not own is
+//! expected to be accepted the same way as one from the owning member. A fencing-correct
+//! implementation of the shared partitioned-log delivery source profile is therefore not possible
+//! against the current server, which is why this crate ships publisher-only. No recorded run of
+//! this test exists yet; its execution against a real broker is tracked in
+//! <https://github.com/sisaio/sisa-messaging-rs/issues/63>.
 
 mod support;
 
