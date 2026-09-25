@@ -35,6 +35,7 @@ not used.
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox |
 | `sisa-messaging-nats` | NATS JetStream mapping, subject resolution, publication, and inbound delivery |
 | `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, and outbound publication |
+| `sisa-messaging-iggy` | Apache Iggy envelope mapping, stream/topic resolution, and outbound publication |
 
 Rust import names follow Cargo's hyphen-to-underscore conversion, for example
 `sisa_messaging_outbox`.
@@ -52,6 +53,7 @@ sisa-messaging-consumer ──────▶ sisa-messaging + sisa-messaging-in
 sisa-messaging-postgres ──────▶ sisa-messaging + outbox + inbox
 sisa-messaging-nats ──────────▶ sisa-messaging
 sisa-messaging-kafka ─────────▶ sisa-messaging
+sisa-messaging-iggy ──────────▶ sisa-messaging
 
 application / system tests compose postgres + outbox + consumer + a transport provider
 ```
@@ -68,6 +70,12 @@ Rules:
   contracts, and does not know an outbox or inbox exists.
 - Kafka depends only on messaging. It maps envelopes and implements outbound publication without
   depending on the outbox or inbox.
+- Iggy depends only on messaging. It maps envelopes and implements outbound publication over the
+  Iggy TCP protocol; its partitioned-log delivery source is deferred until Iggy can fence
+  consumer-group offset stores by membership generation. Iggy limits each header name and value
+  to 255 bytes: a custom header value over that bound is a permanent mapping error, and an
+  oversized `tracestate` is omitted under the W3C Trace Context allowance while `traceparent`
+  stays required.
 - Provider crates never depend on one another.
 - Only applications and system tests name concrete provider combinations.
 
