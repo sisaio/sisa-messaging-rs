@@ -40,12 +40,15 @@ fn push_identity(h: &mut HeaderMap, envelope: &SerializedEnvelope) {
 
     push_header(h, NATS_MSG_ID, Some(&dedup_id));
     push_header(h, MESSAGE_TYPE, Some(envelope.message_type.as_str()));
+
     push_header(
         h,
         MESSAGE_VERSION,
         Some(envelope.message_version.to_string()),
     );
+
     push_header(h, CONTENT_TYPE, Some(envelope.content_type.as_str()));
+
     push_header(
         h,
         ORDERING_KEY,
@@ -59,6 +62,7 @@ fn push_correlation(h: &mut HeaderMap, m: &Metadata) {
         CORRELATION_ID,
         m.correlation.correlation_id.as_ref().map(|v| v.as_str()),
     );
+
     push_header(
         h,
         CONVERSATION_ID,
@@ -68,6 +72,7 @@ fn push_correlation(h: &mut HeaderMap, m: &Metadata) {
             .map(|v| v.to_string())
             .as_deref(),
     );
+
     push_header(
         h,
         CAUSATION_ID,
@@ -77,6 +82,7 @@ fn push_correlation(h: &mut HeaderMap, m: &Metadata) {
             .map(|v| v.to_string())
             .as_deref(),
     );
+
     push_header(
         h,
         REQUEST_ID,
@@ -90,11 +96,13 @@ fn push_correlation(h: &mut HeaderMap, m: &Metadata) {
 
 fn push_routing(h: &mut HeaderMap, m: &Metadata) {
     push_header(h, SOURCE, m.routing.source.as_ref().map(|v| v.as_str()));
+
     push_header(
         h,
         DESTINATION,
         m.routing.destination.as_ref().map(|v| v.as_str()),
     );
+
     push_header(h, REPLY_TO, m.routing.reply_to.as_ref().map(|v| v.as_str()));
 }
 
@@ -104,17 +112,21 @@ fn push_delivery_and_custom(h: &mut HeaderMap, m: &Metadata) {
         SENT_AT_MS,
         m.delivery.sent_at_ms.map(|v| v.to_string()).as_deref(),
     );
+
     push_header(
         h,
         DEDUPLICATION_ID,
         m.delivery.deduplication_id.as_ref().map(|v| v.as_str()),
     );
+
     push_header(h, TENANT_ID, m.tenant_id.as_ref().map(|v| v.as_str()));
+
     push_header(
         h,
         TRACEPARENT,
         m.trace.traceparent.as_ref().map(HeaderValue::as_str),
     );
+
     push_header(
         h,
         TRACESTATE,

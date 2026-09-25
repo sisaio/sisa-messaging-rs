@@ -16,6 +16,7 @@ impl NatsPublisherSettings {
         if self.publish_timeout.is_zero() {
             return Err(NatsError::Settings);
         }
+
         Ok(self)
     }
 }

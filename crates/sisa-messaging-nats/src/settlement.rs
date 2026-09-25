@@ -32,40 +32,49 @@ impl IndividualSettlement for NatsSettlement {
     )]
     async fn heartbeat(&mut self) -> Result<(), IndividualSettlementError<Self::Error>> {
         let started = Instant::now();
+
         let result = self
             .message
             .double_ack_with(AckKind::Progress)
             .await
             .map_err(|_| IndividualSettlementError::Operation(NatsError::Settlement));
+
         telemetry::finished(
             "heartbeat",
             started.elapsed(),
             settlement_telemetry(&result),
         );
+
         result
     }
 
     #[tracing::instrument(name = "ack", target = "messaging.nats", level = "debug", skip_all)]
     async fn ack(self) -> Result<(), IndividualSettlementError<Self::Error>> {
         let started = Instant::now();
+
         let result = self
             .message
             .double_ack()
             .await
             .map_err(|_| IndividualSettlementError::Operation(NatsError::Settlement));
+
         telemetry::finished("ack", started.elapsed(), settlement_telemetry(&result));
+
         result
     }
 
     #[tracing::instrument(name = "nack", target = "messaging.nats", level = "debug", skip_all)]
     async fn nak(self, delay: Duration) -> Result<(), IndividualSettlementError<Self::Error>> {
         let started = Instant::now();
+
         let result = self
             .message
             .double_ack_with(AckKind::Nak(Some(delay)))
             .await
             .map_err(|_| IndividualSettlementError::Operation(NatsError::Settlement));
+
         telemetry::finished("nack", started.elapsed(), settlement_telemetry(&result));
+
         result
     }
 
@@ -77,16 +86,19 @@ impl IndividualSettlement for NatsSettlement {
     )]
     async fn terminate(self) -> Result<(), IndividualSettlementError<Self::Error>> {
         let started = Instant::now();
+
         let result = self
             .message
             .double_ack_with(AckKind::Term)
             .await
             .map_err(|_| IndividualSettlementError::Operation(NatsError::Settlement));
+
         telemetry::finished(
             "terminate",
             started.elapsed(),
             settlement_telemetry(&result),
         );
+
         result
     }
 }

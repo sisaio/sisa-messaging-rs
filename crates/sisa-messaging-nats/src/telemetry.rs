@@ -11,7 +11,9 @@ use crate::NatsError;
 
 struct Instruments {
     sent: Counter<u64>,
+
     consumed: Counter<u64>,
+
     duration: Histogram<f64>,
 }
 
@@ -22,6 +24,7 @@ fn instruments() -> &'static Instruments {
         let scope = InstrumentationScope::builder("messaging.nats")
             .with_schema_url("https://opentelemetry.io/schemas/1.42.0")
             .build();
+
         let meter = opentelemetry::global::meter_with_scope(scope);
 
         Instruments {
@@ -46,6 +49,7 @@ fn attributes(operation: &'static str, error: Option<NatsError>) -> Vec<KeyValue
         KeyValue::new("messaging.system", "nats"),
         KeyValue::new("messaging.operation.name", operation),
     ];
+
     if let Some(error) = error {
         let kind = match error {
             NatsError::Settings => "settings",
@@ -56,8 +60,10 @@ fn attributes(operation: &'static str, error: Option<NatsError>) -> Vec<KeyValue
             NatsError::Source => "source",
             NatsError::Settlement => "settlement",
         };
+
         attributes.push(KeyValue::new("error.type", kind));
     }
+
     attributes
 }
 
