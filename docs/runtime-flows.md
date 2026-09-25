@@ -104,12 +104,13 @@ the topic's replication and `min.insync.replicas` settings. With `acks=0`, the o
 published even if Kafka never received it. Use `acks=all` with suitable topic settings when durable
 broker-confirmed completion is required. Apache Iggy waits for the server's reply to a direct send
 request: in a cluster the reply follows quorum commit, and on a single node disk durability follows
-the server's fsync configuration. Any timeout leaves the outcome unknown, because the SDK's
-detached transport task still sends a queued request, so the outbox retry may duplicate that
-message unless the topic has message deduplication enabled. Each Iggy header name and value is
-limited to 255 bytes, well under the shared 8,192-byte header-value bound: a custom header value
-over 255 bytes is a permanent mapping error, while an oversized `tracestate` is omitted from the
-wire record under the W3C Trace Context allowance and `traceparent` stays required.
+the topic's durability policy and the server's storage configuration. Any timeout leaves the
+outcome unknown, because the SDK's detached transport task still sends a queued request, so the
+outbox retry may duplicate that message unless server-level message deduplication is enabled. Each
+Iggy header name and value is limited to 255 bytes, well under the shared 8,192-byte header-value
+bound: a custom header value over 255 bytes is a permanent mapping error, while an oversized
+`tracestate` is omitted from the wire record under the W3C Trace Context allowance and an
+oversized `traceparent` is rejected.
 
 - Successful publish: `complete` increments `attempts`, sets `published_at`, and clears the
   claim.

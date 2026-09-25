@@ -254,8 +254,8 @@ impl ErrorClassifier for IggyPublishError {
 /// `IggyError::RequestAlreadyApplied` falls through to the general `OutcomeUnknown` arm here, but
 /// the publish path never actually constructs this variant from it: it intercepts
 /// `RequestAlreadyApplied` beforehand and reports success, since the server's own
-/// deduplication confirms the request already committed. That interception is exercised by the
-/// opt-in real-broker test, not by a unit test, since it requires an actual duplicate request.
+/// deduplication confirms the request already committed. No test currently exercises this path;
+/// a deterministic fake-reply test is tracked in #63.
 impl From<IggyError> for IggyPublishError {
     fn from(error: IggyError) -> Self {
         let (kind, failure_kind) = match error {
