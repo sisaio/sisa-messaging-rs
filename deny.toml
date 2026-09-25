@@ -6,7 +6,9 @@ ignore = []
 
 [licenses]
 version = 2
-allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib"]
+# CDLA-Permissive-2.0 covers webpki-roots 1.0.9, webpki-roots 0.26.11, and webpki-root-certs 1.0.9,
+# pulled in transitively by the iggy 0.11.0 SDK added for #53.
+allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "Unicode-3.0", "Zlib"]
 confidence-threshold = 0.8
 
 [bans]

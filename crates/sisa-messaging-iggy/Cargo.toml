@@ -1,0 +1,32 @@
+[package]
+name = "sisa-messaging-iggy"
+version = "0.1.0"
+description = "Apache Iggy transport provider for Sisa messaging contracts"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# Apache Iggy wire client configured by the application.
+iggy = { workspace = true }
+
+# Transport-independent envelope and publisher contracts.
+sisa-messaging = { workspace = true }
+
+# Bounds the connect-and-login and per-publish server round trips with an explicit timeout; the
+# SDK's TCP client offers no built-in call timeout of its own.
+tokio = { workspace = true }
+
+[dev-dependencies]
+# Statistical microbenchmark harness.
+criterion = { workspace = true }
+
+[[bench]]
+# Shared-envelope Iggy message projection benchmark.
+name = "mapping"
+harness = false
+
+[lints]
+workspace = true
