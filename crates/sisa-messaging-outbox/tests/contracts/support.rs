@@ -137,6 +137,7 @@ impl OutboxDeadLetters for CompileCapabilities {
         let mut confirmed = batch.ids().to_vec();
         confirmed.sort_unstable();
         confirmed.dedup();
+
         Ok(confirmed)
     }
 
