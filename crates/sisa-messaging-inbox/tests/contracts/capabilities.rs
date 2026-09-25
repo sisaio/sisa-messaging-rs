@@ -28,6 +28,7 @@ fn run_ready<T>(future: impl Future<Output = T>) -> T {
 #[test]
 fn native_async_capabilities_are_send_and_use_static_dispatch() {
     let capabilities = CompileCapabilities;
+
     let record = InboxRecord {
         scope: InboxScope::new("compile").unwrap_or_else(|error| panic!("scope rejected: {error}")),
         message_id: MessageId::from_uuid(Uuid::from_u128(1)),
@@ -36,13 +37,17 @@ fn native_async_capabilities_are_send_and_use_static_dispatch() {
         version: 1,
         metadata: Metadata::default(),
     };
+
     let failure = InboxFailure {
         kind: sisa_messaging::FailureKind::Transient,
         error: ErrorSummary::from_safe_text("safe"),
     };
+
     let ids = [sisa_messaging_inbox::InboxId::from_uuid(Uuid::from_u128(3))];
+
     let batch =
         DeadLetterBatch::new(&ids).unwrap_or_else(|error| panic!("batch rejected: {error}"));
+
     let mut transaction = ();
 
     assert_send_future(capabilities.begin());
@@ -55,13 +60,17 @@ fn native_async_capabilities_are_send_and_use_static_dispatch() {
 
     let outcome = run_ready(capabilities.claim(&mut transaction, &record))
         .unwrap_or_else(|error| panic!("compile claim failed: {error}"));
+
     let receipt = match outcome {
         InboxClaimOutcome::Claimed(receipt) => receipt,
         _ => panic!("compile claim did not return its provider receipt"),
     };
+
     assert_eq!(receipt.recorded_failures(), 2);
     assert_eq!(receipt.id().into_uuid(), Uuid::from_u128(1));
+
     run_ready(capabilities.complete(&mut transaction, receipt))
         .unwrap_or_else(|error| panic!("compile completion failed: {error}"));
+
     assert_send(capabilities);
 }

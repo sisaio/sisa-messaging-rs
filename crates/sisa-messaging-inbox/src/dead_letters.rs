@@ -43,6 +43,7 @@ impl<'a> DeadLetterBatch<'a> {
         if ids.is_empty() {
             return Err(DeadLetterBatchError::Empty);
         }
+
         if ids.len() > MAX_DEAD_LETTER_BATCH_SIZE {
             return Err(DeadLetterBatchError::TooLarge);
         }

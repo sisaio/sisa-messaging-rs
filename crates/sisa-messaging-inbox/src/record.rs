@@ -28,9 +28,11 @@ impl InboxScope {
         if value.is_empty() {
             return Err(InboxScopeError::Empty);
         }
+
         if value.len() > MAX_INBOX_SCOPE_BYTES {
             return Err(InboxScopeError::TooLong);
         }
+
         if value
             .as_bytes()
             .iter()
