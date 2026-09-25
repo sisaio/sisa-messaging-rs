@@ -47,7 +47,7 @@ process shutdown.
   publication is still possible; expiry, permanent failure, or exhausted retry policy can instead
   make a row dead. Apache Iggy publication succeeds only when the server answers the send request;
   in a cluster that reply follows quorum commit, and on a single node disk durability follows the
-  server's fsync configuration.
+  topic's durability policy and the server's storage configuration.
 - The durable and direct paths remain visibly different: the store enqueues; the transport
   publishes.
 - The application owns pools, broker connection initiation and lifecycle, broker resources,
