@@ -30,8 +30,8 @@ allow = [
 # edited file, so edits in a git worktree of the project are fixed with that worktree's tool;
 # files in any other repository and paths with `.` or `..` segments are ignored. The separate
 # target directory avoids waiting on the build lock held by a concurrent workspace build; the
-# hook always exits 0.
+# hook always exits 0, and rustfmt skips child modules so both tools touch only the edited file.
 [settings.hooks.PostToolUse]
 matcher = "Edit|Write"
 timeout = 120
-command = '{ f=$(jq -r ".tool_input.file_path // empty"); case "$f" in */./* | */../*) exit 0 ;; /*.rs) ;; *) exit 0 ;; esac; [ -n "$CLAUDE_PROJECT_DIR" ] && [ -f "$f" ] || exit 0; root=$(git -C "${f%/*}" rev-parse --show-toplevel) || exit 0; case "$f" in "$root"/*) ;; *) exit 0 ;; esac; common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir) || exit 0; [ "$common" = "$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir)" ] || exit 0; cd "$root" && rustfmt --edition 2024 "$f" && CARGO_TARGET_DIR=target/blank-lines-hook cargo xtask blank-lines --fix "$f"; } >/dev/null 2>&1; exit 0'
+command = '{ f=$(jq -r ".tool_input.file_path // empty"); case "$f" in */./* | */../*) exit 0 ;; /*.rs) ;; *) exit 0 ;; esac; [ -n "$CLAUDE_PROJECT_DIR" ] && [ -f "$f" ] || exit 0; root=$(git -C "${f%/*}" rev-parse --show-toplevel) || exit 0; case "$f" in "$root"/*) ;; *) exit 0 ;; esac; common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir) || exit 0; [ "$common" = "$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir)" ] || exit 0; cd "$root" && rustfmt --edition 2024 --config skip_children=true "$f" && CARGO_TARGET_DIR=target/blank-lines-hook cargo xtask blank-lines --fix "$f"; } >/dev/null 2>&1; exit 0'
