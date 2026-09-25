@@ -280,13 +280,39 @@ async fn acknowledged_publish_dedup_limit_and_settlement() {
     let (wire, mut settlement) = delivery.into_parts();
     assert_eq!(wire.subject.as_str(), subject);
     assert_eq!(wire.payload, b"one");
-    settlement.heartbeat().await.unwrap();
+
+    let heartbeat_started = Instant::now();
+
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_millis(220)).await;
+        settlement.heartbeat().await.unwrap();
+    }
+
+    assert!(heartbeat_started.elapsed() > Duration::from_millis(500));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), source.receive())
+            .await
+            .is_err(),
+        "confirmed progress must keep the original delivery active"
+    );
+    settlement.ack().await.unwrap();
+
+    publisher
+        .publish(&envelope(MessageId::new(), b"delayed-nak".to_vec()))
+        .await
+        .unwrap();
+    let settlement = source.receive().await.unwrap().unwrap().into_parts().1;
     settlement.nak(Duration::from_millis(100)).await.unwrap();
     let redelivery = source.receive().await.unwrap().unwrap();
     redelivery.into_parts().1.ack().await.unwrap();
 
     let too_large = envelope(MessageId::new(), vec![0; context.client().max_payload()]);
-    assert!(publisher.publish(&too_large).await.is_err());
+    let messages_before = stream.info().await.unwrap().state.messages;
+    assert_eq!(
+        publisher.publish(&too_large).await,
+        Err(NatsError::PayloadTooLarge)
+    );
+    assert_eq!(stream.info().await.unwrap().state.messages, messages_before);
 
     publisher
         .publish(&envelope(MessageId::new(), b"poison".to_vec()))

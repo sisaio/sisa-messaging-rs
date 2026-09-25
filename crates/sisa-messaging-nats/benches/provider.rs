@@ -17,6 +17,24 @@ use sisa_messaging_nats::{
     SubjectResolver,
 };
 
+struct StreamCleanup<'a> {
+    runtime: &'a tokio::runtime::Runtime,
+    context: jetstream::Context,
+    stream_name: String,
+}
+
+impl Drop for StreamCleanup<'_> {
+    fn drop(&mut self) {
+        let _ = self.runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                self.context.delete_stream(&self.stream_name),
+            )
+            .await
+        });
+    }
+}
+
 #[derive(Clone)]
 struct BenchResolver {
     prefix: Subject,
@@ -79,7 +97,7 @@ fn provider(c: &mut Criterion) {
     let stream = runtime.block_on(async {
         context
             .create_stream(stream::Config {
-                name: stream_name,
+                name: stream_name.clone(),
                 subjects: vec![format!("{}.>", prefix.as_str())],
                 max_messages: 2_000,
                 ..Default::default()
@@ -87,6 +105,12 @@ fn provider(c: &mut Criterion) {
             .await
             .unwrap()
     });
+    let _cleanup = StreamCleanup {
+        runtime: &runtime,
+        context: context.clone(),
+        stream_name: stream_name.clone(),
+    };
+
     let consumer = runtime.block_on(async {
         stream
             .create_consumer(pull::Config {

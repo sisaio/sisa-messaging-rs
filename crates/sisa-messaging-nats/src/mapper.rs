@@ -15,7 +15,11 @@ mod headers;
 pub struct Subject(String);
 
 impl Subject {
-    /// Validates and owns a publish subject.
+    /// Validates and owns a concrete publish subject.
+    ///
+    /// Subjects are at most 1024 bytes and consist of nonempty dot-separated
+    /// ASCII tokens containing only letters, digits, `_`, or `-`. Wildcards,
+    /// whitespace, and empty tokens are rejected.
     pub fn new(value: impl Into<String>) -> Result<Self, MappingError> {
         let value = value.into();
 

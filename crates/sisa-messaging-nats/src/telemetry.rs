@@ -3,7 +3,7 @@
 use std::{sync::OnceLock, time::Duration};
 
 use opentelemetry::{
-    KeyValue,
+    InstrumentationScope, KeyValue,
     metrics::{Counter, Histogram},
 };
 
@@ -19,7 +19,11 @@ static INSTRUMENTS: OnceLock<Instruments> = OnceLock::new();
 
 fn instruments() -> &'static Instruments {
     INSTRUMENTS.get_or_init(|| {
-        let meter = opentelemetry::global::meter("messaging.nats");
+        let scope = InstrumentationScope::builder("messaging.nats")
+            .with_schema_url("https://opentelemetry.io/schemas/1.42.0")
+            .build();
+        let meter = opentelemetry::global::meter_with_scope(scope);
+
         Instruments {
             sent: meter
                 .u64_counter("messaging.client.sent.messages")
@@ -61,14 +65,22 @@ pub(crate) fn finished(operation: &'static str, elapsed: Duration, result: Resul
     let instruments = instruments();
     let succeeded = result.is_ok();
     let attributes = attributes(operation, result.err());
+
     instruments
         .duration
         .record(elapsed.as_secs_f64(), &attributes);
-    if succeeded {
-        match operation {
-            "publish" => instruments.sent.add(1, &attributes),
-            "receive" => instruments.consumed.add(1, &attributes),
-            _ => {}
-        }
+
+    if succeeded && operation == "receive" {
+        instruments.consumed.add(1, &attributes);
     }
+}
+
+pub(crate) fn sent_attempted() {
+    instruments().sent.add(1, &attributes("publish", None));
+}
+
+pub(crate) fn receive_closed(elapsed: Duration) {
+    instruments()
+        .duration
+        .record(elapsed.as_secs_f64(), &attributes("receive", None));
 }

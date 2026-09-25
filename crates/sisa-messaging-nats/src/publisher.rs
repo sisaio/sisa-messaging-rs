@@ -19,6 +19,10 @@ pub struct NatsPublisher<R> {
 
 impl<R> NatsPublisher<R> {
     /// Creates a publisher without network I/O.
+    ///
+    /// A zero publish timeout is rejected as [`NatsError::Settings`].
+    /// Publishing rejects invalid mapping and oversized frames before sending;
+    /// SDK failures and timeouts can leave the broker outcome unknown.
     pub fn new(
         context: jetstream::Context,
         resolver: R,
@@ -68,6 +72,8 @@ impl<R: SubjectResolver> Publisher for NatsPublisher<R> {
             }
 
             let operation = async {
+                telemetry::sent_attempted();
+
                 let ack = self
                     .context
                     .publish_with_headers(wire.subject, wire.headers, wire.payload.into())

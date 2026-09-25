@@ -31,6 +31,7 @@ jobs:
       PGPORT: "5432"
       PGUSER: postgres
       PGDATABASE: postgres
+      NATS_URL: nats://127.0.0.1:4222
     services:
       postgres:
         image: postgres:18
@@ -110,6 +111,30 @@ jobs:
       - run: cargo check --workspace --all-targets --all-features --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: cargo test --workspace --all-features --locked
+      - name: Start NATS JetStream
+        run: |
+          docker run --detach --name ci-nats \
+            --publish 4222:4222 \
+            --health-cmd='wget -q -O /dev/null http://127.0.0.1:8222/healthz' \
+            --health-interval=2s --health-timeout=2s --health-retries=15 \
+            nats:2.11.8-alpine -js -m 8222
+          health_status=starting
+          health_attempt=0
+          while [ "${health_status}" != healthy ] && [ "${health_attempt}" -lt 30 ]; do
+            health_status="$(docker inspect --format='{{.State.Health.Status}}' ci-nats)"
+            if [ "${health_status}" = unhealthy ]; then
+              docker logs ci-nats
+              exit 1
+            fi
+            health_attempt=$((health_attempt + 1))
+            sleep 1
+          done
+          if [ "${health_status}" != healthy ]; then
+            docker logs ci-nats
+            exit 1
+          fi
+      - name: Run NATS JetStream integration tests
+        run: cargo test -p sisa-messaging-nats --test jetstream --all-features --locked -- --ignored
       - run: cargo test --workspace --no-default-features --locked
       - run: cargo doc --workspace --no-deps --all-features --locked
 
