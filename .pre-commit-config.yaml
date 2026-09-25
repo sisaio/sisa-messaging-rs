@@ -159,6 +159,14 @@ repos:
         files: '(^|/)(Cargo\.toml|Cargo\.lock|[^/]+\.rs)$'
         entry: bash -c 'if [ -f Cargo.toml ]; then cargo fmt --all -- --check; fi'
 
+      - id: cargo-blank-lines
+        name: cargo xtask blank-lines
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: '(^|/)[^/]+\.rs$'
+        entry: bash -c 'if [ -f Cargo.toml ]; then cargo xtask blank-lines --check; fi'
+
       - id: cargo-clippy
         name: cargo clippy
         language: system
