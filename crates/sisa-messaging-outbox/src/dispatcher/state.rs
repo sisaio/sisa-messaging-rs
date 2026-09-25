@@ -101,6 +101,7 @@ impl State {
                 duplicates = duplicates.saturating_add(1);
                 continue;
             }
+
             if self.available() == 0 {
                 if self.rejected.len() < self.capacity {
                     self.rejected_set.insert(record.claim);
@@ -109,11 +110,13 @@ impl State {
                 } else {
                     dropped_to_expiry = dropped_to_expiry.saturating_add(1);
                 }
+
                 continue;
             }
 
             let claim = record.claim;
             self.envelopes.insert(claim, record.envelope);
+
             self.claims.insert(
                 claim,
                 OwnedClaim {
@@ -123,6 +126,7 @@ impl State {
                     phase: Phase::Pending,
                 },
             );
+
             self.pending_order.push_back(claim);
             inserted = inserted.saturating_add(1);
         }
@@ -140,10 +144,13 @@ impl State {
             let Some(owned) = self.claims.get_mut(&claim) else {
                 continue;
             };
+
             if !matches!(owned.phase, Phase::Pending) {
                 continue;
             }
+
             owned.phase = Phase::Release;
+
             let Some(envelope) = self.envelopes.remove(&claim) else {
                 continue;
             };
@@ -180,9 +187,11 @@ impl State {
     pub(crate) fn finish_retiring_cancelled(&mut self, task_id: Id) -> Option<Claim> {
         let claim = self.tasks.get(&task_id).copied()?;
         let owned = self.claims.get_mut(&claim)?;
+
         if !matches!(owned.phase, Phase::Retiring { task_id: retiring } if retiring == task_id) {
             return None;
         }
+
         self.tasks.remove(&task_id);
         owned.phase = Phase::Release;
 
@@ -199,6 +208,7 @@ impl State {
 
     pub(crate) fn mark_release(&mut self, claims: &[Claim]) -> usize {
         let mut retired_publishers = 0;
+
         for claim in claims {
             if let Some(owned) = self.claims.get_mut(claim) {
                 match &owned.phase {
@@ -213,35 +223,44 @@ impl State {
                     }
                     Phase::Pending | Phase::Resolved(_) | Phase::Release => {}
                 }
+
                 owned.phase = Phase::Release;
             }
         }
+
         retired_publishers
     }
 
     pub(crate) fn retire_publishers(&mut self, claims: &[Claim]) -> usize {
         let mut retiring = 0;
+
         for claim in claims {
             let Some(owned) = self.claims.get_mut(claim) else {
                 continue;
             };
+
             let task_id = match &owned.phase {
                 Phase::Publishing { task_id, abort } => {
                     abort.abort();
+
                     *task_id
                 }
                 _ => continue,
             };
+
             owned.phase = Phase::Retiring { task_id };
             retiring += 1;
         }
+
         retiring
     }
 
     pub(crate) fn remove(&mut self, claims: &[Claim]) -> usize {
         let mut retired_publishers = 0;
+
         for claim in claims {
             self.envelopes.remove(claim);
+
             if let Some(owned) = self.claims.remove(claim) {
                 match owned.phase {
                     Phase::Publishing { task_id, abort } => {
@@ -257,6 +276,7 @@ impl State {
                 }
             }
         }
+
         retired_publishers
     }
 
@@ -307,6 +327,7 @@ impl State {
             let Some(claim) = self.rejected.pop_front() else {
                 break;
             };
+
             self.rejected_set.remove(&claim);
         }
     }

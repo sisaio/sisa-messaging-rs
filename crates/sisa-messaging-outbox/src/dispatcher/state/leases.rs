@@ -11,6 +11,7 @@ use super::{Phase, State};
 
 pub(crate) struct RenewalLoss {
     pub(crate) total: usize,
+
     pub(crate) retired_publishers: usize,
 }
 
@@ -56,6 +57,7 @@ impl State {
 
         let total = lost.len();
         let retired_publishers = self.remove(&lost);
+
         RenewalLoss {
             total,
             retired_publishers,
@@ -69,7 +71,9 @@ impl State {
                 if !matches!(owned.phase, Phase::Publishing { .. }) {
                     return None;
                 }
+
                 let safe = has_store_headroom(now, timeout, owned.lease_safe_until);
+
                 (!safe).then_some(*claim)
             })
             .collect()
@@ -91,6 +95,7 @@ mod tests {
         let now = Instant::now();
         let timeout = Duration::from_millis(19);
         let boundary = now.checked_add(timeout.saturating_mul(2)).unwrap_or(now);
+
         let just_inside = boundary
             .checked_add(Duration::from_nanos(1))
             .unwrap_or(boundary);

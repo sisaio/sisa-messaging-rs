@@ -32,6 +32,7 @@ where
     state.mark_release(&unstarted);
 
     let deadline = Instant::now() + settings.drain_timeout;
+
     loop {
         while let Some(joined) = tasks.try_join_next_with_id() {
             if let Some(error) = resolve_join(joined, settings, state, report) {
@@ -44,9 +45,11 @@ where
         }
 
         let due = state.due_renewals(Instant::now());
+
         if !due.is_empty() {
             let (started, result) =
                 leases::extend(store, &due, settings.lease, settings.store_timeout).await;
+
             if let RenewalOutcome::Failed {
                 permanent_error: Some(error),
             } = leases::finish(
@@ -61,6 +64,7 @@ where
             {
                 permanent_error = Some(error);
             }
+
             continue;
         }
 
@@ -73,6 +77,7 @@ where
                     if permanent_error.is_none() {
                         permanent_error = Some(error);
                     }
+
                     continue;
                 }
                 StoreSafety::Renewed(_) => continue,
@@ -82,6 +87,7 @@ where
         if persist_one(store, settings, state, report, &mut permanent_error).await {
             continue;
         }
+
         if persist_rejected_one(
             store,
             settings.store_timeout,
@@ -93,6 +99,7 @@ where
         {
             continue;
         }
+
         if !state.has_tasks() {
             break;
         }
@@ -100,6 +107,7 @@ where
         let wake_at = state
             .next_renewal()
             .map_or(deadline, |renewal| renewal.min(deadline));
+
         tokio::select! {
             joined = tasks.join_next_with_id() => {
                 if let Some(joined) = joined
@@ -113,6 +121,7 @@ where
     }
 
     let unresolved = state.unresolved_claims();
+
     if !unresolved.is_empty() {
         tracing::warn!(
             target: "messaging.outbox",
@@ -123,6 +132,7 @@ where
 
     state.retire_publishers(&unresolved);
     tasks.abort_all();
+
     while let Some(joined) = tasks.join_next_with_id().await {
         if let Some(error) = resolve_join(joined, settings, state, report) {
             publisher_error.get_or_insert(error);
@@ -130,6 +140,7 @@ where
     }
 
     while persist_one(store, settings, state, report, &mut permanent_error).await {}
+
     while persist_rejected_one(
         store,
         settings.store_timeout,
@@ -143,6 +154,7 @@ where
     if let Some(error) = publisher_error {
         return Err(DispatcherError::PublisherTask(error));
     }
+
     permanent_error.map_or(Ok(()), |error| Err(DispatcherError::Store(error)))
 }
 
@@ -157,12 +169,14 @@ pub(crate) async fn cleanup_after_fatal<S: OutboxStore>(
     report.aborted += state.unresolved_claims().len() as u64;
     state.mark_release(&claims);
     tasks.abort_all();
+
     while tasks.join_next().await.is_some() {}
 
     match outcomes::release(store, &claims, timeout).await {
         StoreCall::Completed(matches) => {
             report.released += matches.confirmed.len() as u64;
             report.fenced += claims.len().saturating_sub(matches.confirmed.len()) as u64;
+
             super::outcomes::accounting::warn_fencing_shortfall(
                 "cleanup_release",
                 claims.len(),
@@ -171,15 +185,18 @@ pub(crate) async fn cleanup_after_fatal<S: OutboxStore>(
         }
         StoreCall::Failed(error) => {
             report.store_failures += 1;
+
             let category = if sisa_messaging::ErrorClassifier::classify(&error).is_retryable() {
                 "transient_failure"
             } else {
                 "permanent_failure"
             };
+
             super::outcomes::accounting::warn_suppressed("cleanup_release", category, claims.len());
         }
         StoreCall::TimedOut => {
             report.store_failures += 1;
+
             super::outcomes::accounting::warn_suppressed(
                 "cleanup_release",
                 "timeout",
@@ -187,6 +204,7 @@ pub(crate) async fn cleanup_after_fatal<S: OutboxStore>(
             );
         }
     }
+
     state.remove(&claims);
 
     while state.has_rejected() {
@@ -209,6 +227,7 @@ pub(crate) async fn store_failure<S: OutboxStore>(
     error: S::Error,
 ) -> DispatcherError<S::Error> {
     cleanup_after_fatal(store, state, tasks, report, timeout).await;
+
     DispatcherError::Store(error)
 }
 
@@ -221,6 +240,7 @@ pub(crate) async fn publisher_failure<S: OutboxStore>(
     error: tokio::task::JoinError,
 ) -> DispatcherError<S::Error> {
     cleanup_after_fatal(store, state, tasks, report, timeout).await;
+
     DispatcherError::PublisherTask(error)
 }
 
@@ -234,12 +254,14 @@ fn resolve_join<R: RetryPolicy>(
         Ok(JoinOutcome::Finished) => None,
         Ok(JoinOutcome::Retired) => {
             report.aborted += 1;
+
             None
         }
         Err(error) => {
             if state.publisher_task_failed(error.id()).is_some() {
                 report.aborted += 1;
             }
+
             Some(error)
         }
     }

@@ -87,6 +87,7 @@ where
         target: "messaging.outbox",
         "outbox.publish"
     ));
+
     let handle = tasks.spawn(task);
     let id = handle.id();
 
@@ -110,6 +111,7 @@ pub(crate) fn resolve<R: RetryPolicy>(result: &PublishResult, retry: &R) -> Reso
 
     let attempt = result.attempts.saturating_add(1);
     let attempt = std::num::NonZeroU32::new(attempt).unwrap_or(std::num::NonZeroU32::MAX);
+
     let action = match failure.kind {
         FailureKind::Permanent => FailureAction::Dead {
             reason: DeadReason::Permanent,
@@ -158,11 +160,13 @@ where
     R: RetryPolicy,
 {
     start_pending(publisher, publish_timeout, state, tasks);
+
     while let Some(joined) = tasks.try_join_next_with_id() {
         if matches!(finish_join(joined, retry, state)?, JoinOutcome::Retired) {
             report.aborted += 1;
         }
     }
+
     Ok(())
 }
 
@@ -175,11 +179,14 @@ pub(crate) fn finish_join<R: RetryPolicy>(
         Ok((task_id, result)) => {
             let error_type = result.failure.as_ref().map(|failure| failure.error_type);
             crate::telemetry::publish_finished(result.elapsed, error_type);
+
             let Some(active_claim) = state.task_claim(task_id) else {
                 return Ok(JoinOutcome::Finished);
             };
+
             debug_assert_eq!(active_claim, result.claim);
             state.resolve(task_id, resolve(&result, retry));
+
             Ok(JoinOutcome::Finished)
         }
         Err(error)
@@ -192,6 +199,7 @@ pub(crate) fn finish_join<R: RetryPolicy>(
         }
         Err(error) => {
             crate::telemetry::publish_finished(Duration::ZERO, Some("publisher.panic"));
+
             Err(error)
         }
     }
@@ -234,23 +242,28 @@ mod tests {
         let claimed = record();
         let claim = claimed.claim;
         state.insert_claimed(vec![claimed], now, now);
+
         let _work = state
             .next_publish()
             .unwrap_or_else(|| panic!("record was not queued for publication"));
+
         let mut tasks = JoinSet::new();
         let abort = tasks.spawn(async { future::pending::<PublishResult>().await });
         let task_id = abort.id();
         let control = abort.clone();
         state.publishing(claim, task_id, abort);
+
         if retiring {
             assert_eq!(state.retire_publishers(&[claim]), 1);
         } else {
             control.abort();
         }
+
         let joined = tasks
             .join_next_with_id()
             .await
             .unwrap_or_else(|| panic!("cancelled task was not joined"));
+
         let retry = ExponentialBackoff::new(
             Duration::from_millis(1),
             Duration::from_millis(1),
@@ -266,6 +279,7 @@ mod tests {
         let retired = cancelled_join(true)
             .await
             .unwrap_or_else(|error| panic!("retiring cancellation was terminal: {error}"));
+
         assert!(matches!(retired, JoinOutcome::Retired));
 
         let active = cancelled_join(false).await;
