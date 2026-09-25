@@ -126,11 +126,13 @@ mod tests {
             NonZeroU32::new(2).unwrap_or(NonZeroU32::MIN),
             NonZeroU32::new(u32::MAX).unwrap_or(NonZeroU32::MIN),
         ];
+
         let kinds = [FailureKind::Transient, FailureKind::Permanent];
 
         for limit in limits {
             for kind in kinds {
                 let completed = ReceiptState::Completed;
+
                 assert_eq!(
                     reduce_failure(completed, kind, limit),
                     (completed, InboxFailureOutcome::CompletedDuplicate)
@@ -140,6 +142,7 @@ mod tests {
                     attempts: 7,
                     reason: DeadReason::Permanent,
                 };
+
                 assert_eq!(
                     reduce_failure(dead, kind, limit),
                     (
@@ -176,6 +179,7 @@ mod tests {
                     } else {
                         Some(DeadReason::Permanent)
                     };
+
                     let expected = match expected_reason {
                         Some(reason) => (
                             ReceiptState::Dead { attempts, reason },
