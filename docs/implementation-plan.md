@@ -205,11 +205,15 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
 - Defer the partitioned-log delivery source and settlement. Iggy offset stores carry no
   consumer-group membership generation, ownership is checked only when a write is admitted, and
   offset reads may come from a lagging follower, so the #23 fencing and reconciliation rules cannot
-  be met. A real-broker negative feasibility test records the gap; the inbound slice follows in a
+  be met. An authored, opt-in real-broker test targets that gap; the inbound slice follows in a
   separately approved issue once the fencing decision is made.
 - Exercise deterministic mapping, settings, resolver, and error-classification tests plus real
   Iggy publish confirmation and offset-fencing tests. Record the Iggy mapping benchmark and its
-  measured environment and result before provider review completes.
+  measured environment and result before provider review completes. Open gate: the two opt-in
+  real-broker tests are authored but have no recorded run, because the pinned server image does
+  not start under Docker Desktop on macOS and CI has no Iggy broker job yet; the
+  success-after-reply guarantee and the fencing gap remain unproven against a live broker until a
+  Linux run or CI job records them.
 
 ### Phase 7 — consumer runtime
 
