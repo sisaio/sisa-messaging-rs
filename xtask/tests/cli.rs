@@ -2,7 +2,7 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 /// Returns a temporary path unique to this process and the given per-test name.
@@ -80,6 +80,49 @@ fn xtask<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
         .args(arguments)
         .output()
         .expect("xtask binary must run")
+}
+
+/// The variables `git rev-parse --local-env-vars` lists; a hook or parent git process may set
+/// them, redirecting git to another repository.
+const GIT_LOCAL_ENVIRONMENT: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+/// Clears the repository-locating variables and ignores user and system git configuration, so
+/// git, including the git that xtask runs, sees only the command's current directory.
+fn isolate_git(command: &mut Command) -> &mut Command {
+    for name in GIT_LOCAL_ENVIRONMENT {
+        command.env_remove(name);
+    }
+
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+    command
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", null_device)
+}
+
+/// Runs `git` in `directory`, isolated from the environment's repository and configuration.
+fn git(directory: &Path, arguments: &[&str]) {
+    let status = isolate_git(Command::new("git").args(arguments).current_dir(directory))
+        .status()
+        .expect("git must run");
+
+    assert!(status.success(), "git {arguments:?} must succeed");
 }
 
 /// Returns the process exit code.
@@ -200,4 +243,37 @@ fn directories_are_walked_skipping_target_hidden_and_symlinks() {
             inner.display()
         )
     );
+}
+
+#[test]
+fn default_mode_skips_tracked_files_deleted_from_the_working_tree() {
+    let directory = TempDirectory::new("deleted");
+    let violation = "fn run() -> u32 {\n    let a = 1;\n    a\n}\n";
+
+    directory.write("src/kept.rs", violation);
+    directory.write("src/deleted.rs", violation);
+
+    git(&directory.path, &["init", "--quiet"]);
+    git(&directory.path, &["add", "--", "src"]);
+
+    fs::remove_file(directory.path.join("src/deleted.rs"))
+        .expect("tracked temporary file must be removable");
+
+    let output = isolate_git(
+        Command::new(env!("CARGO_BIN_EXE_sisa-messaging-xtask"))
+            .args(["blank-lines", "--check"])
+            .current_dir(&directory.path),
+    )
+    .output()
+    .expect("xtask binary must run");
+
+    // Only the kept file of the temporary repository is checked; the deleted one is no error.
+    assert_eq!(code(&output), Some(1));
+
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "src/kept.rs:3: missing blank line before tail expression\n"
+    );
+
+    assert!(output.stderr.is_empty());
 }
