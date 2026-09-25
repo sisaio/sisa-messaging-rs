@@ -7,7 +7,7 @@ use proc_macro2::{TokenStream, TokenTree};
 use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, ExprCall, Ident, ItemUse, Macro, Path as SynPath, UseTree};
 
-const LIBRARY_CRATES: [&str; 9] = [
+const LIBRARY_CRATES: [&str; 10] = [
     "sisa-messaging",
     "sisa-messaging-outbox",
     "sisa-messaging-inbox",
@@ -16,6 +16,7 @@ const LIBRARY_CRATES: [&str; 9] = [
     "sisa-messaging-nats",
     "sisa-messaging-kafka",
     "sisa-messaging-iggy",
+    "sisa-messaging-rabbitmq",
     "sisa-messaging-redis",
 ];
 
@@ -435,6 +436,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-nats",
         "sisa-messaging-kafka",
         "sisa-messaging-iggy",
+        "sisa-messaging-rabbitmq",
         "sisa-messaging-redis",
         "sisa-messaging-architecture-tests",
         "sisa-messaging-xtask",
@@ -752,6 +754,7 @@ fn documented_runtime_dependency_graph_is_exact() {
         ("sisa-messaging-nats", set(&["sisa-messaging"])),
         ("sisa-messaging-kafka", set(&["sisa-messaging"])),
         ("sisa-messaging-iggy", set(&["sisa-messaging"])),
+        ("sisa-messaging-rabbitmq", set(&["sisa-messaging"])),
         ("sisa-messaging-redis", set(&["sisa-messaging"])),
     ]);
 

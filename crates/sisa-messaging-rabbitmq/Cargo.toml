@@ -1,0 +1,48 @@
+[package]
+name = "sisa-messaging-rabbitmq"
+version = "0.1.0"
+description = "RabbitMQ AMQP 0-9-1 transport provider for Sisa messaging contracts"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# AMQP 0-9-1 channels, publisher confirms, consumers, and field tables over an application-owned
+# connection; the library enables no runtime or TLS feature.
+lapin = { workspace = true }
+
+# Cancel-safe polling of the broker consumer stream.
+futures-util = { workspace = true }
+
+# Transport-independent envelope, publisher, and individual-delivery contracts.
+sisa-messaging = { workspace = true }
+
+# Bounds each publish, including its broker confirm, with the configured timeout.
+tokio = { workspace = true }
+
+# Library-owned metric instruments and instrumented spans without exporter policy.
+opentelemetry = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+
+[dev-dependencies]
+# Statistical microbenchmark harness.
+criterion = { workspace = true }
+
+# Real-broker tests and benchmarks drive lapin's I/O on a multi-threaded Tokio runtime.
+lapin = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[bench]]
+# Broker-free AMQP envelope projection benchmark.
+name = "mapping"
+harness = false
+
+[[bench]]
+# Real-broker publish-confirm and settlement benchmark; requires `RABBITMQ_URL`.
+name = "provider"
+harness = false
+
+[lints]
+workspace = true

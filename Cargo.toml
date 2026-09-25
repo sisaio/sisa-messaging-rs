@@ -37,6 +37,11 @@ iggy = { version = "=0.11.0", default-features = false }
 # Shared Iggy SDK types such as `ClientState`; same exact pin as `iggy`.
 iggy_common = { version = "=0.11.0", default-features = false }
 
+# RabbitMQ AMQP 0-9-1 client. Default features are disabled, so the library selects no TLS
+# backend and no async runtime; the application enables its runtime and TLS features on its own
+# lapin dependency when it opens the connection and channels it hands to the provider.
+lapin = { version = "=4.12.0", default-features = false }
+
 # Error and diagnostics support without subscriber, SDK, or exporter policy.
 opentelemetry = { version = "0.32.0", default-features = false, features = ["metrics"] }
 thiserror = { version = "2.0.20", default-features = false }
@@ -62,6 +67,7 @@ sisa-messaging-kafka = { version = "=0.1.0", path = "crates/sisa-messaging-kafka
 sisa-messaging-nats = { version = "=0.1.0", path = "crates/sisa-messaging-nats" }
 sisa-messaging-outbox = { version = "=0.1.0", path = "crates/sisa-messaging-outbox" }
 sisa-messaging-postgres = { version = "=0.1.0", path = "crates/sisa-messaging-postgres" }
+sisa-messaging-rabbitmq = { version = "=0.1.0", path = "crates/sisa-messaging-rabbitmq" }
 sisa-messaging-redis = { version = "=0.1.0", path = "crates/sisa-messaging-redis" }
 
 # Identifier primitives.
