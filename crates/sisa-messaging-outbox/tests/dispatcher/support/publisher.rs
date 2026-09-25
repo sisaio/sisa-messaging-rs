@@ -58,9 +58,13 @@ impl Drop for ActiveGuard {
 #[derive(Clone)]
 pub(crate) struct FakePublisher {
     behavior: Arc<AtomicU8>,
+
     pub(crate) calls: Arc<AtomicUsize>,
+
     pub(crate) active: Arc<AtomicUsize>,
+
     pub(crate) maximum: Arc<AtomicUsize>,
+
     gate: Arc<watch::Sender<bool>>,
 }
 
@@ -85,6 +89,7 @@ impl FakePublisher {
 
     async fn wait_until_released(&self) {
         let mut gate = self.gate.subscribe();
+
         while !*gate.borrow() {
             if gate.changed().await.is_err() {
                 return;
@@ -100,6 +105,7 @@ impl Publisher for FakePublisher {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.maximum.fetch_max(active, Ordering::SeqCst);
+
         let _guard = ActiveGuard {
             active: Arc::clone(&self.active),
         };
@@ -114,11 +120,13 @@ impl Publisher for FakePublisher {
             }),
             PUBLISH_GATE => {
                 self.wait_until_released().await;
+
                 Ok(())
             }
             PUBLISH_PANIC => panic!("intentional publisher panic"),
             PUBLISH_MIXED_GATE => {
                 self.wait_until_released().await;
+
                 match envelope.payload.first().copied().unwrap_or_default() {
                     0 => Ok(()),
                     1 => Err(ProtocolError {

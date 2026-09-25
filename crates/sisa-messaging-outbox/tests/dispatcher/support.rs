@@ -51,6 +51,7 @@ impl io::Write for SharedWriteGuard {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .extend_from_slice(bytes);
+
         Ok(bytes.len())
     }
 
