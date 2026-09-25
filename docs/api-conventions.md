@@ -252,10 +252,12 @@ declaration group is either a comment, documentation, and attributes together wi
 they describe, or consecutive declarations that serve one purpose. Put one blank line between
 declaration groups; do not separate documentation or attributes from their declaration.
 
-Treat each struct field as its own declaration group, including private fields. Keep a field's
-documentation and attributes attached to that field, and put one blank line before the next field.
-Apply the same rule to individually documented enum variants. This makes each property boundary
-visible even when adjacent fields or variants have related roles:
+Treat each named field of a struct, struct variant, or union as its own declaration group, including
+private fields. Keep a field's documentation and attributes attached to that field, and put one
+blank line before the next field. Apply the same rule to enum variants when any variant of that enum
+is documented. Fields of tuple structs and tuple variants are exempt, because rustfmt owns their
+layout. This makes each property boundary visible even when adjacent fields or variants have related
+roles:
 
 ```rust,ignore
 pub struct DeliveryContext {
@@ -283,13 +285,47 @@ let envelope = Envelope::new(message_id, ExampleMessage, metadata)?;
 assert_eq!(envelope.message_id(), message_id);
 ```
 
+In every block that spans more than one line, these statement boundaries are mandatory:
+
+- A statement that spans more than one line, such as a call chain wrapped across lines, has one
+  blank line before and after it.
+- An `if`, `match`, `for`, `while`, `loop`, or `return` statement has one blank line before and
+  after it, even when it fits on one line.
+- The block's tail expression or final `return` has one blank line before it.
+
+A line comment or block comment directly above a field, variant, or statement belongs to it, so the
+blank line goes above the comment. No blank line is added after an opening brace or before a
+closing brace. Consecutive single-line statements are not separated by these rules:
+
+```rust,ignore
+let mut values = headers.into_values();
+
+let message_version = take_required(&mut values, FrameworkHeader::MessageVersion)?
+    .parse::<u32>()
+    .map_err(|_| IggyMappingError::InvalidFrameworkValue)?;
+
+let content_type = ContentType::new(take_required(&mut values, FrameworkHeader::ContentType)?)
+    .map_err(|_| IggyMappingError::InvalidFrameworkValue)?;
+
+if values.is_empty() {
+    return Err(IggyMappingError::UnexpectedFrameworkHeader);
+}
+
+Ok(FrameworkHeaders::new(message_version, content_type))
+```
+
 Tests use visibly distinct arrange, act, and assert/result phases. Benchmarks use the equivalent
 fixture/setup, measurement, and result phases. Keep repeated fixtures and measurement scaffolding
 in consistent groups; comments are useful only when spacing and names do not already explain a
 phase.
 
-Apply these rules by semantic review. Do not add an automated blank-line or source-shape rule unless
-it can distinguish semantic groups without noisy false positives.
+`cargo xtask blank-lines --check` reports the missing field, variant, and statement boundaries
+above, and `cargo xtask blank-lines --fix` inserts them. Run it after `cargo fmt`, because rustfmt
+can split a one-line block or variant into a shape that needs new boundaries. The tool only inserts
+blank lines and never removes them. It cannot see inside macro invocations such as `tokio::select!`,
+so boundaries there remain semantic review, as do grouping of consecutive single-line declarations
+and the phases of tests and benchmarks, because they depend on intent that source shape cannot
+express.
 
 ### Rust documentation
 
