@@ -26,8 +26,10 @@ pub trait Delivery: Send + 'static {
 pub enum IndividualCapability {
     /// Redelivery after a caller-selected delay.
     DelayedRetry,
+
     /// Terminally discarding a delivery.
     TerminalDiscard,
+
     /// Extending the delivery deadline while processing continues.
     Heartbeat,
 }
@@ -38,12 +40,16 @@ pub enum IndividualCapability {
 pub enum IndividualSourceRequirement {
     /// A finite acknowledgement deadline is available.
     AckWait,
+
     /// A finite maximum delivery count is available.
     MaxDeliver,
+
     /// Delayed retry is supported.
     DelayedRetry,
+
     /// Terminal discard is supported.
     TerminalDiscard,
+
     /// Heartbeat acknowledgement is supported.
     Heartbeat,
 }
@@ -80,9 +86,13 @@ impl ErrorClassifier for UnsupportedIndividualRequirement {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct IndividualSourceRequirements {
     ack_wait: bool,
+
     max_deliver: bool,
+
     delayed_retry: bool,
+
     terminal_discard: bool,
+
     heartbeat: bool,
 }
 
@@ -103,6 +113,7 @@ impl IndividualSourceRequirements {
     #[must_use]
     pub const fn requiring_ack_wait(mut self) -> Self {
         self.ack_wait = true;
+
         self
     }
 
@@ -110,6 +121,7 @@ impl IndividualSourceRequirements {
     #[must_use]
     pub const fn requiring_max_deliver(mut self) -> Self {
         self.max_deliver = true;
+
         self
     }
 
@@ -117,6 +129,7 @@ impl IndividualSourceRequirements {
     #[must_use]
     pub const fn requiring_delayed_retry(mut self) -> Self {
         self.delayed_retry = true;
+
         self
     }
 
@@ -124,6 +137,7 @@ impl IndividualSourceRequirements {
     #[must_use]
     pub const fn requiring_terminal_discard(mut self) -> Self {
         self.terminal_discard = true;
+
         self
     }
 
@@ -131,6 +145,7 @@ impl IndividualSourceRequirements {
     #[must_use]
     pub const fn requiring_heartbeat(mut self) -> Self {
         self.heartbeat = true;
+
         self
     }
 }
@@ -139,9 +154,13 @@ impl IndividualSourceRequirements {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IndividualSourceDescriptor {
     ack_wait: Option<Duration>,
+
     max_deliver: Option<NonZeroU64>,
+
     supports_delayed_retry: bool,
+
     supports_terminal_discard: bool,
+
     supports_heartbeat: bool,
 }
 
@@ -249,6 +268,7 @@ impl ErrorClassifier for IndividualSourceDescriptorError {
 pub enum IndividualSourceOpenError<E> {
     /// Opening the transport source failed.
     Source(E),
+
     /// The opened source did not meet a requested capability or finite limit.
     Unsupported(UnsupportedIndividualRequirement),
 }
@@ -299,6 +319,7 @@ impl<E: ErrorClassifier> ErrorClassifier for IndividualSourceOpenError<E> {
 pub enum IndividualSettlementError<E> {
     /// The opened transport does not provide the requested operation.
     Unsupported(IndividualCapability),
+
     /// The provider operation failed.
     Operation(E),
 }
@@ -425,6 +446,7 @@ pub trait IndividualDeliverySource: Send {
 pub enum PartitionAdvance {
     /// The resolved record advanced the committed position.
     Advanced,
+
     /// Fencing conclusively proved this operation did not advance the committed cursor.
     OwnershipLost,
 }
@@ -463,8 +485,10 @@ pub trait PartitionedLogSettlement: Send + 'static {
 pub enum PartitionedLogReceive<D, P> {
     /// A record with a settlement handle bound to its partition and offset.
     Delivery(D),
+
     /// The source lost ownership of this partition; no record was advanced.
     OwnershipLost(P),
+
     /// The source closed cleanly.
     Closed,
 }

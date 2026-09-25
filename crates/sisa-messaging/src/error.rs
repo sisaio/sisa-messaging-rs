@@ -35,6 +35,7 @@ impl ErrorSummary {
             if rendered.write_str(": ").is_err() || write!(&mut rendered, "{current}").is_err() {
                 break;
             }
+
             source = current.source();
         }
 
@@ -73,16 +74,21 @@ impl BoundedWriter {
 impl Write for BoundedWriter {
     fn write_str(&mut self, value: &str) -> fmt::Result {
         let remaining = MAX_ERROR_SUMMARY_BYTES.saturating_sub(self.output.len());
+
         if value.len() <= remaining {
             self.output.push_str(value);
+
             return Ok(());
         }
 
         let mut boundary = remaining;
+
         while !value.is_char_boundary(boundary) {
             boundary -= 1;
         }
+
         self.output.push_str(&value[..boundary]);
+
         Err(fmt::Error)
     }
 }

@@ -167,6 +167,7 @@ impl HeaderName {
 
         Self::validate(&value)?;
         value.make_ascii_lowercase();
+
         Ok(Self(value))
     }
 
@@ -282,6 +283,7 @@ impl HeaderValue {
         let value = value.into();
 
         Self::validate(&value)?;
+
         Ok(Self(value))
     }
 
@@ -410,6 +412,7 @@ impl Headers {
 
         let previous = self.values.insert(name, value);
         self.aggregate_bytes = candidate_bytes;
+
         Ok(previous)
     }
 
@@ -475,6 +478,7 @@ impl serde::de::Visitor<'_> for HeaderNameVisitor {
         HeaderName::validate(value).map_err(E::custom)?;
         let mut value = value.to_owned();
         value.make_ascii_lowercase();
+
         Ok(HeaderName(value))
     }
 
@@ -491,6 +495,7 @@ impl serde::de::Visitor<'_> for HeaderNameVisitor {
     {
         HeaderName::validate(&value).map_err(E::custom)?;
         value.make_ascii_lowercase();
+
         Ok(HeaderName(value))
     }
 }
@@ -531,6 +536,7 @@ impl serde::de::Visitor<'_> for HeaderValueVisitor {
         E: serde::de::Error,
     {
         HeaderValue::validate(value).map_err(E::custom)?;
+
         Ok(HeaderValue(value.to_owned()))
     }
 
@@ -546,6 +552,7 @@ impl serde::de::Visitor<'_> for HeaderValueVisitor {
         E: serde::de::Error,
     {
         HeaderValue::validate(&value).map_err(E::custom)?;
+
         Ok(HeaderValue(value))
     }
 }
@@ -595,6 +602,7 @@ impl<'de> serde::de::Visitor<'de> for HeadersVisitor {
             }
 
             let value = map.next_value::<HeaderValue>()?;
+
             headers
                 .insert(name, value)
                 .map_err(serde::de::Error::custom)?;

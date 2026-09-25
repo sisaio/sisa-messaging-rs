@@ -99,6 +99,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
                 )
             })
             .collect::<Vec<_>>();
+
         let replacements = (0..header_count)
             .map(|index| HeaderValue::new(format!("replacement-{index}")).unwrap())
             .collect::<Vec<_>>();
@@ -113,6 +114,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
                         for (name, value) in &entries {
                             headers.insert(name.clone(), value.clone()).unwrap();
                         }
+
                         black_box(headers)
                     },
                     criterion::BatchSize::SmallInput,
@@ -121,6 +123,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
         );
 
         let mut populated = Headers::new();
+
         for (name, value) in &entries {
             populated.insert(name.clone(), value.clone()).unwrap();
         }
@@ -135,6 +138,7 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
                         for ((name, _), value) in entries.iter().zip(&replacements) {
                             headers.insert(name.clone(), value.clone()).unwrap();
                         }
+
                         black_box(headers)
                     },
                     criterion::BatchSize::SmallInput,
@@ -148,9 +152,11 @@ fn envelope_benchmarks(criterion: &mut Criterion) {
     criterion.bench_function("validate_header_name", |bencher| {
         bencher.iter(|| HeaderName::new(black_box("x-import-batch")))
     });
+
     criterion.bench_function("validate_header_value", |bencher| {
         bencher.iter(|| HeaderValue::new(black_box("2026-09-11")))
     });
+
     criterion.bench_function("project_framework_header_names", |bencher| {
         bencher.iter(|| {
             FrameworkHeader::ALL.iter().fold(0, |count, header| {
