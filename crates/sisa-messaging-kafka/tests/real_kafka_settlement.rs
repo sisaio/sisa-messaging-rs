@@ -66,6 +66,7 @@ async fn dropped_or_timed_out_waiter_reconciles_after_sync_worker_quiesces() {
     worker
         .join()
         .unwrap_or_else(|_| panic!("Kafka commit worker panicked"));
+
     drop(quiescent_consumer);
 
     let authoritative_generation = new_consumer(&brokers, &group);
@@ -87,6 +88,7 @@ async fn dropped_or_timed_out_waiter_reconciles_after_sync_worker_quiesces() {
             .is_ok_and(|set| set.count() > 0),
         "authoritative Kafka generation did not receive an assignment",
     );
+
     assert_eq!(
         committed_offset(&authoritative_generation, &topic, partition),
         Offset::Offset(offset + 1),
@@ -121,6 +123,7 @@ async fn dropping_the_settlement_receiver_does_not_cancel_sync_commit_worker() {
         let result = worker_consumer.commit(&offsets, CommitMode::Sync);
         let _ = completion_tx.send((worker_consumer, result));
     });
+
     drop(completion_rx);
 
     worker

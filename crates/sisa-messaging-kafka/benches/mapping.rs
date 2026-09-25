@@ -103,6 +103,7 @@ fn mapping_benchmarks(criterion: &mut Criterion) {
     group.bench_function("encode", |bencher| {
         bencher.iter(|| black_box(mapper.encode(black_box(&envelope))))
     });
+
     group.bench_function("decode", |bencher| {
         bencher.iter_batched(
             || wire_record.clone(),

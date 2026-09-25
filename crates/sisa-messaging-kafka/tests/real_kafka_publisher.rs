@@ -44,11 +44,13 @@ async fn publisher_returns_after_successful_delivery_report() {
     let topic = required_env(TOPIC_ENV);
     let client = new_kafka_client(&brokers);
     let destination = MetadataValue::new(topic).expect("test topic value is valid metadata");
+
     let publisher = KafkaPublisher::new(
         client,
         RoutingDestinationResolver,
         KafkaPublisherSettings::default(),
     );
+
     let envelope = publisher_envelope(destination);
 
     let result = publisher.publish(&envelope).await;
@@ -68,8 +70,10 @@ async fn invalid_topic_delivery_is_classified_permanently() {
 
     let brokers = required_env(BROKERS_ENV);
     let client = new_kafka_client(&brokers);
+
     let destination =
         MetadataValue::new("invalid topic").expect("fixture topic is valid shared metadata");
+
     let publisher = KafkaPublisher::new(
         client,
         RoutingDestinationResolver,

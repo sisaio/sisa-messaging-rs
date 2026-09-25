@@ -12,21 +12,25 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
         FrameworkHeader::MessageId,
         Some(envelope.message_id.to_string()),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::MessageType,
         Some(envelope.message_type.as_str()),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::MessageVersion,
         Some(envelope.message_version.to_string()),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::ContentType,
         Some(envelope.content_type.as_str()),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::OrderingKey,
@@ -44,6 +48,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .as_ref()
             .map(MetadataValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::ConversationId,
@@ -54,6 +59,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .map(ToString::to_string)
             .as_deref(),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::CausationId,
@@ -64,6 +70,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .map(ToString::to_string)
             .as_deref(),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::RequestId,
@@ -74,11 +81,13 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .map(ToString::to_string)
             .as_deref(),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::Source,
         metadata.routing.source.as_ref().map(MetadataValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::Destination,
@@ -88,6 +97,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .as_ref()
             .map(MetadataValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::ReplyTo,
@@ -97,6 +107,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .as_ref()
             .map(MetadataValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::SentAtMs,
@@ -106,6 +117,7 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .map(|value| value.to_string())
             .as_deref(),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::DeduplicationId,
@@ -115,16 +127,19 @@ pub(super) fn encode(envelope: &SerializedEnvelope) -> Result<KafkaRecord, Kafka
             .as_ref()
             .map(MetadataValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::TenantId,
         metadata.tenant_id.as_ref().map(MetadataValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::Traceparent,
         metadata.trace.traceparent.as_ref().map(HeaderValue::as_str),
     );
+
     push_header(
         &mut headers,
         FrameworkHeader::Tracestate,

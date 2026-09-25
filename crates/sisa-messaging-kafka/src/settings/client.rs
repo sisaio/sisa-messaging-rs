@@ -58,6 +58,7 @@ impl KafkaClientSettings {
     #[must_use]
     pub const fn with_acks(mut self, acks: KafkaAcks) -> Self {
         self.acks = acks;
+
         self
     }
 

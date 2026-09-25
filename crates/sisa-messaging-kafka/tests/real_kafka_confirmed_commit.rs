@@ -51,6 +51,7 @@ async fn confirmed_sync_commit_is_visible_to_a_new_group_generation() {
             .is_ok_and(|set| set.count() > 0),
         "new Kafka group generation did not receive an assignment",
     );
+
     assert_eq!(
         committed_offset(&next_generation, &topic, partition),
         Offset::Offset(offset + 1)

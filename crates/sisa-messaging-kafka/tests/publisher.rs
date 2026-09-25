@@ -67,6 +67,7 @@ fn envelope_for(topic: &str, payload: Vec<u8>) -> SerializedEnvelope {
 #[tokio::test]
 async fn missing_destination_fails_permanently_before_producer_delivery() {
     let client = local_client(&[]);
+
     let publisher = KafkaPublisher::new(
         client,
         RoutingDestinationResolver,
@@ -89,11 +90,13 @@ async fn oversized_message_is_rejected_permanently_without_leaking_payload() {
         ("message.max.bytes", "1000"),
         ("message.timeout.ms", "1000"),
     ]);
+
     let publisher = KafkaPublisher::new(
         client,
         RoutingDestinationResolver,
         KafkaPublisherSettings::default(),
     );
+
     let payload = [b"PAYLOAD_REDACTION_SENTINEL".as_slice(), &vec![b'x'; 2048]].concat();
     let envelope = envelope_for("publisher-size-probe", payload);
 
@@ -104,10 +107,12 @@ async fn oversized_message_is_rejected_permanently_without_leaking_payload() {
 
     assert_eq!(error.kind(), KafkaPublishErrorKind::Delivery);
     assert_eq!(error.classify(), FailureKind::Permanent);
+
     assert_eq!(
         error.to_string(),
         "Kafka producer reported an unsuccessful delivery"
     );
+
     assert!(!error.to_string().contains("PAYLOAD_REDACTION_SENTINEL"));
     assert!(StdError::source(&error).is_none());
 }
@@ -118,7 +123,9 @@ async fn full_local_queue_is_a_transient_enqueue_failure() {
         ("queue.buffering.max.messages", "1"),
         ("message.timeout.ms", "5000"),
     ]);
+
     let queue_observer = client.clone();
+
     let publisher = Arc::new(KafkaPublisher::new(
         client,
         RoutingDestinationResolver,
@@ -126,6 +133,7 @@ async fn full_local_queue_is_a_transient_enqueue_failure() {
             enqueue_timeout: Duration::ZERO,
         },
     ));
+
     let first_publisher = Arc::clone(&publisher);
     let first_envelope = envelope_for("publisher-queue-probe", b"first".to_vec());
 
@@ -151,9 +159,11 @@ async fn full_local_queue_is_a_transient_enqueue_failure() {
 
     assert_eq!(error.kind(), KafkaPublishErrorKind::Enqueue);
     assert_eq!(error.classify(), FailureKind::Transient);
+
     assert_eq!(
         error.to_string(),
         "Kafka producer queue rejected the record"
     );
+
     assert!(StdError::source(&error).is_none());
 }

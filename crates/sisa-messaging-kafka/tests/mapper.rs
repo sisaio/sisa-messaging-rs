@@ -7,6 +7,7 @@ use sisa_messaging_kafka::{KafkaEnvelopeMapper, KafkaHeader, KafkaMappingError, 
 
 fn envelope() -> SerializedEnvelope {
     let mut headers = Headers::new();
+
     headers
         .insert(
             HeaderName::new("x-request-zone").expect("valid fixture name"),
@@ -70,6 +71,7 @@ fn kafka_mapping_uses_stable_wire_headers_and_decodes_an_independent_record() {
     let mapper = KafkaEnvelopeMapper;
 
     let encoded = mapper.encode(&expected).expect("fixture maps");
+
     let expected_headers = vec![
         ("message-id", "01890f52-7b00-7000-8000-000000000001"),
         ("message-type", "orders.created"),
@@ -109,6 +111,7 @@ fn kafka_mapping_uses_stable_wire_headers_and_decodes_an_independent_record() {
         payload: br#"{"order":7}"#.to_vec(),
         headers: expected_headers,
     };
+
     let decoded = mapper
         .decode(hand_built_record)
         .expect("hand-built record decodes");
@@ -128,6 +131,7 @@ fn kafka_mapping_rejects_duplicate_and_null_headers_permanently() {
     };
 
     assert_eq!(error, KafkaMappingError::DuplicateHeader);
+
     assert_eq!(
         sisa_messaging::ErrorClassifier::classify(&error),
         sisa_messaging::FailureKind::Permanent
@@ -164,9 +168,11 @@ fn kafka_wire_header_keeps_nullable_values_for_decode_validation() {
         name: "x-nullable".to_owned(),
         value: None,
     };
+
     let mut wire = KafkaEnvelopeMapper
         .encode(&envelope())
         .expect("fixture maps");
+
     wire.headers.push(header);
 
     let result = KafkaEnvelopeMapper.decode(wire);
