@@ -20,3 +20,14 @@ disallowedTools = "Edit, Write, NotebookEdit"
 allow = [
   "Bash(rtk *)",
 ]
+
+# Each [settings.hooks.<Event>] table is emitted as one command hook for <Event> in
+# .claude/settings.json. `command` is a TOML literal string, so it holds no single quotes.
+#
+# After an edit to a workspace `.rs` file, format it with rustfmt and insert the blank lines
+# required by docs/api-conventions.md "Rust presentation". The separate target directory avoids
+# waiting on the build lock held by a concurrent workspace build; the hook always exits 0.
+[settings.hooks.PostToolUse]
+matcher = "Edit|Write"
+timeout = 120
+command = 'f=$(jq -r ".tool_input.file_path // empty" 2>/dev/null); case "$f" in "$CLAUDE_PROJECT_DIR"/*.rs) if [ -f "$f" ]; then cd "$CLAUDE_PROJECT_DIR" && rustfmt --edition 2024 "$f" && CARGO_TARGET_DIR=target/blank-lines-hook cargo xtask blank-lines --fix "$f"; fi ;; esac >/dev/null 2>&1; exit 0'
