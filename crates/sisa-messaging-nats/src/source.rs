@@ -15,6 +15,7 @@ use std::{num::NonZeroU64, time::Instant};
 /// One broker delivery with its settlement handle.
 pub struct NatsDelivery {
     wire: NatsWire,
+
     settlement: NatsSettlement,
 }
 
@@ -37,7 +38,9 @@ impl Delivery for NatsDelivery {
 /// Cancelling a pending receive leaves later deliveries available.
 pub struct NatsDeliverySource {
     consumer: PullConsumer,
+
     stream: Option<jetstream::consumer::pull::Stream>,
+
     closed: bool,
 }
 
@@ -62,9 +65,11 @@ impl NatsDeliverySource {
     fn descriptor(&self) -> Result<IndividualSourceDescriptor, NatsError> {
         let config = &self.consumer.cached_info().config;
         let ack_wait = (!config.ack_wait.is_zero()).then_some(config.ack_wait);
+
         let max_deliver = u64::try_from(config.max_deliver)
             .ok()
             .and_then(NonZeroU64::new);
+
         // The pull consumer uses explicit acknowledgements only. See `open` validation.
         IndividualSourceDescriptor::new(ack_wait, max_deliver, true, true, true)
             .map_err(|_| NatsError::Settings)
@@ -83,15 +88,19 @@ impl IndividualDeliverySource for NatsDeliverySource {
             .info()
             .await
             .map_err(|_| IndividualSourceOpenError::Source(NatsError::Source))?;
+
         if self.consumer.cached_info().config.ack_policy != AckPolicy::Explicit {
             return Err(IndividualSourceOpenError::Source(NatsError::Settings));
         }
+
         let descriptor = self
             .descriptor()
             .map_err(IndividualSourceOpenError::Source)?;
+
         descriptor
             .validate(requirements)
             .map_err(IndividualSourceOpenError::Unsupported)?;
+
         let stream = self
             .consumer
             .stream()
@@ -99,8 +108,10 @@ impl IndividualDeliverySource for NatsDeliverySource {
             .messages()
             .await
             .map_err(|_| IndividualSourceOpenError::Source(NatsError::Source))?;
+
         self.stream = Some(stream);
         self.closed = false;
+
         Ok(descriptor)
     }
 
@@ -124,7 +135,9 @@ impl NatsDeliverySource {
         if self.closed {
             return Ok(None);
         }
+
         let stream = self.stream.as_mut().ok_or(NatsError::Settings)?;
+
         let message = match stream.next().await {
             Some(Ok(message)) => message,
             Some(Err(error)) => {
@@ -135,20 +148,25 @@ impl NatsDeliverySource {
                     self.stream = None;
                     self.closed = true;
                 }
+
                 return Err(NatsError::Source);
             }
             None => {
                 self.stream = None;
                 self.closed = true;
+
                 return Ok(None);
             }
         };
+
         let wire = NatsWire {
             subject: message.message.subject.to_string(),
             headers: message.message.headers.clone().unwrap_or_default(),
             payload: message.message.payload.to_vec(),
         };
+
         let settlement = NatsSettlement { message };
+
         Ok(Some(NatsDelivery { wire, settlement }))
     }
 }

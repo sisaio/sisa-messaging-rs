@@ -13,7 +13,9 @@ use std::time::Instant;
 /// Publisher over a caller-owned JetStream context.
 pub struct NatsPublisher<R> {
     context: jetstream::Context,
+
     mapper: NatsMapper<R>,
+
     settings: NatsPublisherSettings,
 }
 
@@ -38,6 +40,7 @@ impl<R> NatsPublisher<R> {
 
 fn frame_len(wire: &NatsWire) -> Option<usize> {
     let mut size = wire.payload.len().checked_add(10)?;
+
     for (name, values) in wire.headers.iter() {
         for value in values {
             size = size
@@ -46,6 +49,7 @@ fn frame_len(wire: &NatsWire) -> Option<usize> {
                 .checked_add(4)?;
         }
     }
+
     size.checked_add(2)
 }
 
@@ -55,6 +59,7 @@ impl<R: SubjectResolver> Publisher for NatsPublisher<R> {
     #[tracing::instrument(name = "publish", target = "messaging.nats", level = "debug", skip_all)]
     async fn publish(&self, envelope: &SerializedEnvelope) -> Result<(), Self::Error> {
         let started = Instant::now();
+
         let result = async {
             let limit = self.context.client().max_payload();
 
