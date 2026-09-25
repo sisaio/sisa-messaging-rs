@@ -139,6 +139,66 @@ jobs:
       - run: cargo test --workspace --no-default-features --locked
       - run: cargo doc --workspace --no-deps --all-features --locked
 
+  redis-streams:
+    name: Redis Streams (${{ matrix.provider }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: Redis
+            image: redis:7
+          - provider: Valkey
+            image: valkey/valkey:8
+          - provider: Dragonfly
+            image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0
+          - provider: Garnet
+            image: ghcr.io/microsoft/garnet@sha256:880565c0c4186d0127846511174c732e60ba6dcb56f5bd8ac81fe78f1f34d753
+    env:
+      SISA_REDIS_URL: redis://127.0.0.1:6379
+    services:
+      redis:
+        image: ${{ matrix.image }}
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1 action revision
+        with:
+          toolchain: 1.98.0
+      - name: Cache Cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Wait for RESP PING
+        run: |
+          python3 - <<'PY'
+          import socket
+          import time
+
+          deadline = time.monotonic() + 60
+          while True:
+              try:
+                  with socket.create_connection(("127.0.0.1", 6379), timeout=1) as connection:
+                      connection.sendall(b"*1\r\n$4\r\nPING\r\n")
+                      if connection.recv(16) == b"+PONG\r\n":
+                          break
+              except OSError:
+                  pass
+              if time.monotonic() >= deadline:
+                  raise SystemExit("Redis-compatible service did not answer RESP PING")
+              time.sleep(1)
+          PY
+      - name: Run Redis Streams integration tests
+        run: cargo test -p sisa-messaging-redis --features integration --test streams -- --nocapture
+
   msrv:
     name: MSRV 1.95
     runs-on: ubuntu-24.04
