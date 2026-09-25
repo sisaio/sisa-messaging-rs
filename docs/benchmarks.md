@@ -7,7 +7,7 @@ number:
 
 1. Did a local algorithm or representation regress?
 2. How do PostgreSQL queries scale with realistic table state?
-3. What throughput and latency do NATS, Kafka, Iggy, and Redis Streams publication and
+3. What throughput and latency do NATS, Kafka, Iggy, RabbitMQ, and Redis Streams publication and
    consumption achieve independently?
 4. What does the complete enqueue → dispatch → broker → consume → commit path cost?
 
@@ -37,6 +37,9 @@ crates/
 │   └── mapping.rs
 ├── sisa-messaging-iggy/benches/
 │   └── mapping.rs
+├── sisa-messaging-rabbitmq/benches/
+│   ├── mapping.rs
+│   └── provider.rs
 ├── sisa-messaging-redis/benches/
 │   ├── mapping.rs
 │   └── provider.rs
@@ -144,6 +147,17 @@ ordering-key fixture, Criterion estimated about 1.46 µs for encode (interval 1.
 and about 2.92 µs for decode (2.9025–2.9458 µs). This is a starting measurement, not a release
 regression threshold.
 
+### RabbitMQ mapping
+
+- Encode and decode the `small` (256 B, no custom headers), `typical` (4 KiB, eight custom
+  headers, ordering key), and `large` (64 KiB, 32 custom headers, ordering key) fixtures.
+- Time the mapper independently of route resolution, channel construction, and broker I/O.
+
+The named `sisa-messaging-rabbitmq/benches/mapping.rs` benchmark is the provider's broker-free
+hot-path baseline. Initial local run (2026-09-25, macOS arm64 Darwin 25.5.0, rustc 1.98.0):
+`cargo bench -p sisa-messaging-rabbitmq --bench mapping`. Encode measured about 614 ns, 1.86 µs,
+and 6.02 µs; decode about 264 ns, 1.20 µs, and 4.88 µs for small, typical, and large. This is a
+starting measurement, not a release regression threshold.
 ### Redis Streams mapping and provider
 
 - Encode and decode a deterministic envelope independently of Redis I/O.
@@ -215,7 +229,9 @@ grow disproportionately to the requested batch.
 Pool size, worker concurrency, statement settings, durability settings, hardware, PostgreSQL
 configuration, cold/warm cache state, and seeded row distribution are recorded with every result.
 
-## 6. NATS benchmarks
+## 6. Broker benchmarks
+
+### NATS broker benchmarks
 
 Run against a real NATS server with JetStream and a pre-created stream/consumer.
 
@@ -232,6 +248,22 @@ acknowledgement.
 
 Loopback results measure software overhead, not network capacity. An optional remote profile may
 measure representative latency, but it must never be compared directly to loopback baselines.
+
+### RabbitMQ broker benchmarks
+
+`sisa-messaging-rabbitmq/benches/provider.rs` runs against a real broker when `RABBITMQ_URL` is
+set and registers nothing otherwise. It measures application-observed latency for:
+
+- confirmed mandatory publication at concurrency 1, 8, 32, and 128;
+- receive plus confirmed acknowledgement;
+- zero-delay requeue and terminal reject.
+
+Each settlement includes the following `basic.qos` round trip that confirms it. Initial local
+run (2026-09-25, `rabbitmq:4.1.8-alpine` in Docker Desktop on macOS arm64, loopback):
+confirmed publication took about 218 µs, 531 µs, 1.20 ms, and 3.07 ms per batch at concurrency
+1, 8, 32, and 128 (about 4.6k, 15.1k, 26.6k, and 41.7k messages/s); receive plus ack about
+217 µs, requeue about 272 µs, and terminate about 215 µs. These are loopback software-overhead
+measurements, not network capacity or release thresholds.
 
 ## 7. Consumer framework benchmarks
 
@@ -328,6 +360,7 @@ The final workspace exposes stable commands:
 cargo bench --workspace --all-features --no-run  # compile every microbenchmark
 cargo bench -p sisa-messaging --all-features     # shared hot paths, including optional JSON
 cargo bench -p sisa-messaging-nats               # mapping and local broker benches
+cargo bench -p sisa-messaging-rabbitmq           # mapping; broker benches with RABBITMQ_URL
 cargo run -p sisa-messaging-system-bench --release -- --profile smoke
 cargo run -p sisa-messaging-system-bench --release -- --profile standard
 cargo run -p sisa-messaging-system-bench --release -- --profile compare baseline.json

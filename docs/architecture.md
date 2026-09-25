@@ -36,6 +36,7 @@ not used.
 | `sisa-messaging-nats` | NATS JetStream mapping, subject resolution, publication, and inbound delivery |
 | `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, and outbound publication |
 | `sisa-messaging-iggy` | Apache Iggy envelope mapping, stream/topic resolution, and outbound publication |
+| `sisa-messaging-rabbitmq` | RabbitMQ AMQP 0-9-1 mapping, exchange/routing-key resolution, confirmed publication, and inbound delivery |
 | `sisa-messaging-redis` | Redis Streams envelope mapping, publication, and individual inbound delivery |
 
 Rust import names follow Cargo's hyphen-to-underscore conversion, for example
@@ -55,6 +56,7 @@ sisa-messaging-postgres ──────▶ sisa-messaging + outbox + inbox
 sisa-messaging-nats ──────────▶ sisa-messaging
 sisa-messaging-kafka ─────────▶ sisa-messaging
 sisa-messaging-iggy ──────────▶ sisa-messaging
+sisa-messaging-rabbitmq ──────▶ sisa-messaging
 
 application / system tests compose postgres + outbox + consumer + a transport provider
 ```
@@ -77,6 +79,16 @@ Rules:
   to 255 bytes: a custom header value over that bound is a permanent mapping error, and an
   oversized `tracestate` is omitted under the W3C Trace Context allowance while an oversized
   `traceparent` is rejected as a permanent mapping error.
+- RabbitMQ depends only on messaging. It publishes through an application-supplied lapin channel
+  already in publisher-confirm mode and implements the individual-delivery profile over one
+  dedicated channel per source. Publication is mandatory: a broker return is an unroutable
+  failure and a broker nack is a rejection, both transient because the application may repair
+  bindings or queue limits. Because AMQP 0-9-1 does not confirm `basic.ack` or `basic.reject`,
+  every settlement is followed by a no-op `basic.qos` round trip whose reply proves the channel
+  processed the settlement frame. A zero-delay negative acknowledgement requeues immediately;
+  delayed retry and heartbeat are unsupported, and terminal discard is a reject without requeue
+  whose dead-letter routing is application-owned.
+  The connection must not enable lapin automatic recovery; the provider cannot verify this.
 - Redis depends only on messaging. It maps envelopes, publishes to a configured stream, and
   receives individual deliveries from a caller-provisioned consumer group. Its source descriptor
   advertises no delayed retry, terminal discard, or heartbeat; unsupported settlement operations
@@ -95,6 +107,7 @@ Rules:
 | Transport authentication, TLS, connection initiation/lifecycle, and returned handle | Application |
 | SDK client construction behind a provider handle, when supported | Transport provider |
 | NATS stream and consumer provisioning | Application |
+| RabbitMQ exchanges, queues, bindings, channel confirm mode, queue policy, TTL, and dead-letter or alternate exchanges | Application |
 | Redis stream and consumer-group provisioning | Application |
 | Configuration source and deserialization | Application |
 | Envelope and transport-independent metadata | `sisa-messaging` |
@@ -104,6 +117,7 @@ Rules:
 | Versioned PostgreSQL migration authoring and release bundle | Repository, through Atlas Community Edition |
 | Production schema deployment | Consumer's deployment pipeline/operator |
 | NATS subject and wire projection | `sisa-messaging-nats` |
+| RabbitMQ route and headers-table projection | `sisa-messaging-rabbitmq` |
 | OTel SDK, exporters, resource, filters and shutdown | Application |
 | Metric instruments and tracing callsites | Owning library crate |
 | Purge and statistics schedules | Application or one explicit supervised maintenance task |
@@ -178,6 +192,9 @@ One consumer handles one message type/version by default. See
 - `NatsPublisher<R>` implements `Publisher` and awaits the JetStream acknowledgement.
 - `NatsDeliverySource`, `NatsDelivery`, and `NatsSettlement` implement inbound receive and
   settlement contracts.
+- `RabbitMqPublisher<R>` implements `Publisher` and awaits the broker publisher confirm.
+- `RabbitMqDeliverySource`, `RabbitMqDelivery`, and `RabbitMqSettlement` implement inbound
+  receive and settlement contracts; `RabbitMqMapper<R>` implements `EnvelopeMapper`.
 - The Redis Streams publisher and delivery source implement outbound publication, envelope
   mapping, and individual inbound delivery on servers that implement the required stream commands.
   The tested Garnet 2.1.8 image returns `ERR unknown command` for `XADD`, so it cannot run this
@@ -360,4 +377,5 @@ contexts, and application-atomic operations accept the caller's transaction expl
 - Cross-database transactions.
 - Persisting inbox payloads as an event archive.
 - Automatically provisioning NATS streams or consumers.
+- Automatically declaring RabbitMQ topology or emulating delayed retry with TTL/dead-letter queues.
 - Treating observability as a correctness source; the database remains authoritative.

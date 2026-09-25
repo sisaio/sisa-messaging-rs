@@ -47,6 +47,7 @@ messaging.inbox
 messaging.consumer
 messaging.postgres
 messaging.nats
+messaging.rabbitmq
 ```
 
 Span names:
@@ -143,15 +144,16 @@ same queries and export duplicate snapshots.
 
 ### Transport metrics
 
-Where practical, the NATS provider uses OTel messaging instruments:
+Where practical, the NATS and RabbitMQ providers use OTel messaging instruments:
 
 - `messaging.client.sent.messages`;
 - `messaging.client.consumed.messages`;
 - `messaging.client.operation.duration`.
 
-Use `messaging.system = "nats"`, a bounded `messaging.operation.name` such as `publish`, `receive`,
-`ack`, `nack`, `terminate`, and `error.type` only on failure. Do not add raw subjects when they may
-contain dynamic or sensitive tokens; use a stable destination template when available.
+Use `messaging.system = "nats"` or `"rabbitmq"`, a bounded `messaging.operation.name` such as
+`publish`, `receive`, `ack`, `nack`, `terminate`, and `error.type` only on failure. Do not add raw
+subjects, exchanges, queues, or routing keys when they may contain dynamic or sensitive tokens; use
+a stable destination template when available.
 
 Outbox lifecycle and transport metrics answer different questions and must not be summed together.
 
@@ -172,8 +174,9 @@ them unbounded. Receive and settlement activity uses the standard transport inst
 rather than duplicate custom counters.
 
 The OTel messaging semantic conventions are currently marked development. The NATS
-`messaging.nats` instrumentation scope pins `https://opentelemetry.io/schemas/1.42.0`.
-`messaging.client.sent.messages` counts publish attempts that reach the NATS client, including
+`messaging.nats` and RabbitMQ `messaging.rabbitmq` instrumentation scopes pin
+`https://opentelemetry.io/schemas/1.42.0`.
+`messaging.client.sent.messages` counts publish attempts that reach the broker client, including
 failed or timed-out attempts. `messaging.client.consumed.messages` counts delivered messages, not
 clean empty receives. Changing the schema version or instrument semantics requires a deliberate
 compatibility review. The implementation does not read `OTEL_SEMCONV_STABILITY_OPT_IN` from the
