@@ -7,8 +7,13 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum MappingError {
+    /// Subject is empty, too long, or outside the concrete outbound grammar.
     InvalidSubject,
+
+    /// Logical envelope fields cannot be projected to NATS wire form.
     InvalidEnvelope,
+
+    /// Framework or custom headers are missing, duplicated, or invalid.
     InvalidHeaders,
 }
 
@@ -31,16 +36,22 @@ impl ErrorClassifier for MappingError {
 pub enum NatsError {
     /// Invalid local settings.
     Settings,
+
     /// Invalid outbound wire data.
     Mapping,
+
     /// Outbound frame exceeds the current negotiated limit.
     PayloadTooLarge,
+
     /// Broker publication failed or its outcome is unknown.
     Publish,
+
     /// Operation deadline elapsed; broker outcome may be unknown.
     Timeout,
+
     /// Opening or reading a source failed.
     Source,
+
     /// Settlement failed; broker outcome may be unknown.
     Settlement,
 }

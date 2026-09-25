@@ -27,6 +27,14 @@ impl Delivery for NatsDelivery {
 }
 
 /// Source over a caller-provisioned pull consumer.
+///
+/// `open` validates the live consumer and starts a pull stream. A clean stream
+/// end returns `Ok(None)` from `receive`; fatal stream errors, including a
+/// deleted consumer, return [`NatsError::Source`].
+///
+/// A delivery is never acknowledged by receiving or dropping it. Callers must
+/// settle it explicitly; otherwise the broker can redeliver after its ack wait.
+/// Cancelling a pending receive leaves later deliveries available.
 pub struct NatsDeliverySource {
     consumer: PullConsumer,
     stream: Option<jetstream::consumer::pull::Stream>,
@@ -44,6 +52,8 @@ impl NatsDeliverySource {
     }
 
     /// Stops receiving locally and releases the active pull stream.
+    ///
+    /// This does not delete the broker consumer or settle delivered messages.
     pub fn close(&mut self) {
         self.stream = None;
         self.closed = true;
@@ -98,15 +108,13 @@ impl IndividualDeliverySource for NatsDeliverySource {
     async fn receive(&mut self) -> Result<Option<Self::Delivery>, Self::Error> {
         let started = Instant::now();
         let result = self.receive_inner().await;
-        telemetry::finished(
-            "receive",
-            started.elapsed(),
-            match &result {
-                Ok(Some(_)) => Ok(()),
-                Ok(None) => return result,
-                Err(error) => Err(*error),
-            },
-        );
+
+        match &result {
+            Ok(Some(_)) => telemetry::finished("receive", started.elapsed(), Ok(())),
+            Ok(None) => telemetry::receive_closed(started.elapsed()),
+            Err(error) => telemetry::finished("receive", started.elapsed(), Err(*error)),
+        }
+
         result
     }
 }

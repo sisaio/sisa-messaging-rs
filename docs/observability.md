@@ -171,9 +171,13 @@ scope, durable name, and subject are not default metric attributes because appli
 them unbounded. Receive and settlement activity uses the standard transport instruments above
 rather than duplicate custom counters.
 
-The OTel messaging semantic conventions are currently marked development. The implementation pins
-the schema URL/version it emits and changes it deliberately; it does not read
-`OTEL_SEMCONV_STABILITY_OPT_IN` from the environment.
+The OTel messaging semantic conventions are currently marked development. The NATS
+`messaging.nats` instrumentation scope pins `https://opentelemetry.io/schemas/1.42.0`.
+`messaging.client.sent.messages` counts publish attempts that reach the NATS client, including
+failed or timed-out attempts. `messaging.client.consumed.messages` counts delivered messages, not
+clean empty receives. Changing the schema version or instrument semantics requires a deliberate
+compatibility review. The implementation does not read `OTEL_SEMCONV_STABILITY_OPT_IN` from the
+environment.
 
 ## 5. Correctness and cardinality
 

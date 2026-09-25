@@ -16,7 +16,10 @@ criterion = { version = "0.8.2", default-features = false }
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7.19", default-features = false, features = ["rt"] }
 
-# NATS JetStream client and cancel-safe stream utilities.
+# NATS JetStream client and cancel-safe stream utilities. With default features
+# disabled, async-nats does not select a TLS crypto provider. Embedding
+# applications using TLS must select ring or aws-lc-rs, or supply an explicit
+# rustls ClientConfig with a crypto provider.
 async-nats = { version = "0.50.0", default-features = false, features = ["jetstream"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 
