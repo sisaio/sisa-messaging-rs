@@ -28,7 +28,9 @@ pub use self::report::OutboxRunReport;
 /// Composes one portable store and publisher into a bounded at-least-once worker.
 pub struct OutboxDispatcher<S, P, R = crate::ExponentialBackoff> {
     store: S,
+
     publisher: Arc<P>,
+
     settings: DispatcherSettings<R>,
 }
 
@@ -45,6 +47,7 @@ where
         settings: DispatcherSettings<R>,
     ) -> Result<Self, SettingsError> {
         settings.validate()?;
+
         Ok(Self {
             store,
             publisher: Arc::new(publisher),
@@ -89,7 +92,9 @@ where
                     &mut report,
                 )
                 .await;
+
                 tracing::info!(target: "messaging.outbox", "dispatcher stopped");
+
                 return result.map(|()| report);
             }
 
@@ -125,6 +130,7 @@ where
                         )
                         .await);
                     }
+
                     continue;
                 }
                 RenewalTurn::NotDue => {}
@@ -152,6 +158,7 @@ where
                             )
                             .await);
                         }
+
                         continue;
                     }
                 }
@@ -204,11 +211,14 @@ where
             }
 
             let claim_eligible = !state.has_rejected() && state.available() > 0;
+
             let claim_safe = claim_eligible
                 && state
                     .store_call_blockers(Instant::now(), self.settings.store_timeout)
                     .is_empty();
+
             let claim_due = claim_safe && Instant::now() >= next_claim;
+
             if claim_due {
                 if let Some(error) = claim::available(
                     &self.store,
@@ -229,6 +239,7 @@ where
                     )
                     .await);
                 }
+
                 continue;
             }
 
@@ -238,12 +249,14 @@ where
                 (None, Some(claim)) => Some(claim),
                 (None, None) => None,
             };
+
             let readiness = async move {
                 match wake_at {
                     Some(wake_at) => tokio::time::sleep_until(wake_at).await,
                     None => std::future::pending().await,
                 }
             };
+
             tokio::select! {
                 biased;
                 () = cancellation.cancelled() => {},
@@ -285,6 +298,7 @@ fn renewal_error<E>(outcome: RenewalOutcome<E>) -> Option<E> {
                 shortfall = lost,
                 "claim fencing shortfall"
             );
+
             None
         }
         RenewalOutcome::Failed { permanent_error } => {
@@ -293,6 +307,7 @@ fn renewal_error<E>(outcome: RenewalOutcome<E>) -> Option<E> {
                 operation = "extend_lease",
                 "lease renewal failed; claims will be released"
             );
+
             permanent_error
         }
         RenewalOutcome::Completed { .. } => None,

@@ -27,6 +27,7 @@ pub(crate) async fn claim<S: OutboxStore>(
 ) -> (Instant, ClaimCall<S::Error>) {
     let started = Instant::now();
     let limit = u32::try_from(available).unwrap_or(u32::MAX).max(1);
+
     let request = ClaimRequest {
         worker_id: worker_id.to_owned(),
         limit: NonZeroU32::new(limit).unwrap_or(NonZeroU32::MIN),
@@ -39,6 +40,7 @@ pub(crate) async fn claim<S: OutboxStore>(
             "outbox.claim"
         ))
         .await;
+
     let call = match result {
         Ok(Ok(batch)) => ClaimCall::Completed(batch),
         Ok(Err(error)) => ClaimCall::Failed(error),
@@ -64,20 +66,24 @@ where
         ClaimCall::Completed(batch) => {
             let completed = Instant::now();
             let returned = batch.records.len();
+
             let delay = if batch.records.is_empty() {
                 settings.idle_poll_interval
             } else {
                 settings.poll_interval
             };
+
             *next_claim = completed.checked_add(delay).unwrap_or(completed);
             report.poisoned += u64::from(batch.poison.observed);
             report.dead += u64::from(batch.poison.marked_dead);
+
             if batch.poison.marked_dead > 0 {
                 crate::telemetry::dead(
                     usize::try_from(batch.poison.marked_dead).unwrap_or(usize::MAX),
                     DeadReason::Undecodable,
                 );
             }
+
             if batch.poison.observed > 0 {
                 tracing::warn!(
                     target: "messaging.outbox",
@@ -86,15 +92,19 @@ where
                     "poison rows isolated during claim"
                 );
             }
+
             let renewal_at = completed
                 .checked_add(settings.renewal_offset())
                 .unwrap_or(completed);
+
             let lease_safe_until = started.checked_add(settings.lease).unwrap_or(started);
             let insertion = state.insert_claimed(batch.records, renewal_at, lease_safe_until);
             report.claimed += insertion.inserted as u64;
             crate::telemetry::claimed(insertion.inserted);
+
             if insertion.inserted < returned {
                 report.store_failures += 1;
+
                 tracing::error!(
                     target: "messaging.outbox",
                     inserted = insertion.inserted,
@@ -104,17 +114,20 @@ where
                     "store returned duplicate or excess claims"
                 );
             }
+
             None
         }
         ClaimCall::Failed(error) => {
             report.store_failures += 1;
             *next_claim = Instant::now() + settings.poll_interval;
+
             if error.classify().is_retryable() {
                 tracing::warn!(
                     target: "messaging.outbox",
                     operation = "claim",
                     "transient store failure; claim backed off"
                 );
+
                 None
             } else {
                 Some(error)
@@ -123,11 +136,13 @@ where
         ClaimCall::TimedOut => {
             report.store_failures += 1;
             *next_claim = Instant::now() + settings.poll_interval;
+
             tracing::warn!(
                 target: "messaging.outbox",
                 operation = "claim",
                 "transient store failure; claim backed off"
             );
+
             None
         }
     }
@@ -152,5 +167,6 @@ where
         settings.store_timeout,
     )
     .await;
+
     finish(started, result, settings, state, report, next_claim)
 }
