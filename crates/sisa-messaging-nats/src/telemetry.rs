@@ -1,0 +1,74 @@
+//! Direct OTel API instruments with a closed transport attribute vocabulary.
+
+use std::{sync::OnceLock, time::Duration};
+
+use opentelemetry::{
+    KeyValue,
+    metrics::{Counter, Histogram},
+};
+
+use crate::NatsError;
+
+struct Instruments {
+    sent: Counter<u64>,
+    consumed: Counter<u64>,
+    duration: Histogram<f64>,
+}
+
+static INSTRUMENTS: OnceLock<Instruments> = OnceLock::new();
+
+fn instruments() -> &'static Instruments {
+    INSTRUMENTS.get_or_init(|| {
+        let meter = opentelemetry::global::meter("messaging.nats");
+        Instruments {
+            sent: meter
+                .u64_counter("messaging.client.sent.messages")
+                .with_unit("{message}")
+                .build(),
+            consumed: meter
+                .u64_counter("messaging.client.consumed.messages")
+                .with_unit("{message}")
+                .build(),
+            duration: meter
+                .f64_histogram("messaging.client.operation.duration")
+                .with_unit("s")
+                .build(),
+        }
+    })
+}
+
+fn attributes(operation: &'static str, error: Option<NatsError>) -> Vec<KeyValue> {
+    let mut attributes = vec![
+        KeyValue::new("messaging.system", "nats"),
+        KeyValue::new("messaging.operation.name", operation),
+    ];
+    if let Some(error) = error {
+        let kind = match error {
+            NatsError::Settings => "settings",
+            NatsError::Mapping => "mapping",
+            NatsError::PayloadTooLarge => "payload_too_large",
+            NatsError::Publish => "publish",
+            NatsError::Timeout => "timeout",
+            NatsError::Source => "source",
+            NatsError::Settlement => "settlement",
+        };
+        attributes.push(KeyValue::new("error.type", kind));
+    }
+    attributes
+}
+
+pub(crate) fn finished(operation: &'static str, elapsed: Duration, result: Result<(), NatsError>) {
+    let instruments = instruments();
+    let succeeded = result.is_ok();
+    let attributes = attributes(operation, result.err());
+    instruments
+        .duration
+        .record(elapsed.as_secs_f64(), &attributes);
+    if succeeded {
+        match operation {
+            "publish" => instruments.sent.add(1, &attributes),
+            "receive" => instruments.consumed.add(1, &attributes),
+            _ => {}
+        }
+    }
+}
