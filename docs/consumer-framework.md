@@ -365,6 +365,12 @@ queues is application-owned topology and is never emulated. Prefetch is the sour
 `basic.qos` bound and should not exceed `max_in_flight`. A settlement whose channel has closed
 fails locally, and the channel's connection must not enable lapin automatic recovery.
 
+"No delivery bound" means the provider enforces none; AMQP 0-9-1 cannot report queue policy. A
+broker delivery limit, such as the quorum-queue `delivery-limit` that defaults to 20 on RabbitMQ
+4.x, is application-owned queue policy: past it the broker dead-letters the delivery, or drops it
+when the queue has no dead-letter exchange, so a zero-delay `nak` does not guarantee redelivery.
+Keep inbox `max_attempts` below that limit so the inbox records the dead transition first.
+
 ## 6. Concurrency, heartbeat and backpressure
 
 `max_in_flight` bounds deliveries that have been received but not terminally settled. The source

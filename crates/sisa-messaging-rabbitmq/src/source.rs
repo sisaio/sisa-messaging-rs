@@ -49,6 +49,11 @@ impl Delivery for RabbitMqDelivery {
 /// `open` on it: an orphaned consumer may hold up to `prefetch` unacknowledged deliveries until
 /// the channel closes.
 ///
+/// A descriptor `max_deliver()` of `None` means the provider enforces no delivery bound. A broker
+/// delivery limit, such as a quorum queue's `delivery-limit` (20 by default on RabbitMQ 4.x), is
+/// application-owned queue policy: past it the broker dead-letters or drops the delivery, so a
+/// zero-delay negative acknowledgement does not guarantee redelivery.
+///
 /// Use one channel per source: settlement confirmation issues `basic.qos` on this channel. The
 /// connection must not enable lapin automatic recovery.
 pub struct RabbitMqDeliverySource {
@@ -188,7 +193,9 @@ impl IndividualDeliverySource for RabbitMqDeliverySource {
     type Delivery = RabbitMqDelivery;
     type Error = RabbitMqError;
 
-    /// Validates requirements, then sets the prefetch and starts the consumer.
+    /// Rejects a closed or already opened source with [`RabbitMqError::Settings`] before
+    /// validating requirements, then validates requirements, sets the prefetch, and starts the
+    /// consumer.
     ///
     /// Succeeds at most once per source. After a failed or cancelled open, discard the channel:
     /// a broker consumer may already exist and hold up to `prefetch` unacknowledged deliveries
@@ -197,6 +204,11 @@ impl IndividualDeliverySource for RabbitMqDeliverySource {
         &mut self,
         requirements: IndividualSourceRequirements,
     ) -> Result<IndividualSourceDescriptor, IndividualSourceOpenError<Self::Error>> {
+        // A closed or already opened source rejects every open, whatever its requirements.
+        if self.closed || self.consumer.is_some() {
+            return Err(IndividualSourceOpenError::Source(RabbitMqError::Settings));
+        }
+
         let descriptor = Self::descriptor().map_err(IndividualSourceOpenError::Source)?;
 
         descriptor

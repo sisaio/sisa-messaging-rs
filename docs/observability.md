@@ -153,7 +153,9 @@ Where practical, the NATS and RabbitMQ providers use OTel messaging instruments:
 Use `messaging.system = "nats"` or `"rabbitmq"`, a bounded `messaging.operation.name` such as
 `publish`, `receive`, `ack`, `nack`, `terminate`, and `error.type` only on failure. Do not add raw
 subjects, exchanges, queues, or routing keys when they may contain dynamic or sensitive tokens; use
-a stable destination template when available.
+a stable destination template when available. The RabbitMQ provider records
+`messaging.client.operation.duration` in seconds with the OTel messaging advisory bucket
+boundaries `[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]`.
 
 Outbox lifecycle and transport metrics answer different questions and must not be summed together.
 
