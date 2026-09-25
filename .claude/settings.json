@@ -3,5 +3,19 @@
     "allow": [
       "Bash(rtk *)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r \".tool_input.file_path // empty\" 2>/dev/null); case \"$f\" in \"$CLAUDE_PROJECT_DIR\"/*.rs) if [ -f \"$f\" ]; then cd \"$CLAUDE_PROJECT_DIR\" && rustfmt --edition 2024 \"$f\" && CARGO_TARGET_DIR=target/blank-lines-hook cargo xtask blank-lines --fix \"$f\"; fi ;; esac >/dev/null 2>&1; exit 0",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
   }
 }

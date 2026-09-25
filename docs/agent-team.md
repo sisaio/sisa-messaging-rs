@@ -126,7 +126,8 @@ re-runs `.agents/sync.sh all`; never edit a generated file by hand.
 - `.agents/harnesses/claude.toml` maps tiers to generic Claude Code aliases (flagship and balanced
   to `opus`, fast to `sonnet`), which resolve to the latest model in each family rather than a
   pinned version; it also adds read-only-role `disallowedTools` and holds the permission allowlist,
-  including `Bash(rtk *)`.
+  including `Bash(rtk *)`, and the `PostToolUse` hook that runs `rustfmt` and then
+  `cargo xtask blank-lines --fix` on each edited workspace `.rs` file and never blocks the edit.
 - `.agents/skills/<name>/SKILL.md` holds skills shared by both harnesses.
 - `.agents/sync.sh <codex|claude|all> [--check]` generates Codex and Claude role files, config,
   settings, `CLAUDE.md`, and skill links. `--check` regenerates into a temporary directory, fails on
