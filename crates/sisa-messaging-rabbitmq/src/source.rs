@@ -96,7 +96,11 @@ impl RabbitMqDeliverySource {
     /// fails or this future is dropped. Deliveries already received stay valid and can still be
     /// settled. Deliveries the client buffered but `receive` never returned stay unacknowledged
     /// until the application closes the channel, at which point the broker requeues them.
-    /// Returns [`RabbitMqError::Source`] when the cancel is not confirmed.
+    ///
+    /// Returns `Ok(())` without I/O when no broker consumer is active: the source was never
+    /// opened, was already closed, or the broker already ended the consumer. Returns
+    /// [`RabbitMqError::Source`] when the cancel is not confirmed, including when the channel is
+    /// no longer open and no cancel can be sent.
     ///
     /// After a failed or cancelled `open` or `close`, the application must discard the channel:
     /// an orphaned broker consumer may still hold up to `prefetch` deliveries until the channel
@@ -109,7 +113,7 @@ impl RabbitMqDeliverySource {
         };
 
         if !self.channel.status().connected() {
-            return Ok(());
+            return Err(RabbitMqError::Source);
         }
 
         self.channel
