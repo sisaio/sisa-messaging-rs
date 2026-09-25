@@ -21,8 +21,9 @@ pub use resolver::{IggyDestinationResolver, RoutingDestinationResolver};
 /// Publishes shared envelopes through an application-created, connected Iggy client.
 ///
 /// Each publish sends exactly one message and awaits the server's reply directly; it never uses
-/// the SDK's background `IggyProducer`. See the crate documentation for what success means and how
-/// a timeout is classified.
+/// the SDK's background `IggyProducer`. A publish on a client whose session is already closed
+/// fails with [`IggyPublishErrorKind::ClientDisconnected`] without sending. See the crate
+/// documentation for what success means, how a timeout is classified, and supervision.
 pub struct IggyPublisher<R> {
     client: IggyClient,
 
@@ -61,6 +62,19 @@ where
         // message, so the payload is moved rather than cloned a second time.
         let partitioning = to_partitioning(record.key.as_deref()).map_err(mapping_failed)?;
         let mut message = to_iggy_message(record).map_err(mapping_failed)?;
+
+        // Refuse to send on a session already known to be closed. With reconnection disabled it
+        // will not recover, and the SDK would report its own pre-send refusal with the same
+        // `Disconnected` error it uses for a request lost after writing. This runs after
+        // resolution and mapping so their permanent errors still surface on a closed session, and
+        // as late as possible before the send; a session lost after this check is still reported
+        // as `OutcomeUnknown` by the send itself.
+        if !self.client.is_connected().await {
+            return Err(IggyPublishError::new(
+                IggyPublishErrorKind::ClientDisconnected,
+                FailureKind::Transient,
+            ));
+        }
 
         match tokio::time::timeout(
             self.settings.send_timeout(),

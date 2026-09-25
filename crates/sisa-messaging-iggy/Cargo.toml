@@ -12,6 +12,9 @@ publish = false
 # Apache Iggy wire client configured by the application.
 iggy = { workspace = true }
 
+# Shared Iggy SDK types, such as the client `ClientState` read by `IggyClient::is_connected`.
+iggy_common = { workspace = true }
+
 # Transport-independent envelope and publisher contracts.
 sisa-messaging = { workspace = true }
 

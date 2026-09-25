@@ -243,6 +243,10 @@ fn iggy_client_error_from_covers_every_known_arm() {
 /// routes it through this conversion. It intercepts that variant beforehand and reports success,
 /// since the server's own deduplication confirms the request already committed. No test
 /// currently exercises this path; a deterministic fake-reply test is tracked in #63.
+///
+/// `IggyPublishErrorKind::ClientDisconnected` never appears as an expected kind: the publisher
+/// reports it from its own pre-send session check, and no SDK error proves a request was unsent.
+/// Every connection error in this table must therefore stay `OutcomeUnknown`.
 #[test]
 fn iggy_publish_error_from_covers_every_known_arm() {
     let cases = [
@@ -362,6 +366,11 @@ fn iggy_publish_error_from_covers_every_known_arm() {
         let classified = IggyPublishError::from(error);
         assert_eq!(classified.kind(), expected_kind);
         assert_eq!(classified.classify(), expected_failure);
+        assert_ne!(
+            classified.kind(),
+            IggyPublishErrorKind::ClientDisconnected,
+            "no SDK error may map to ClientDisconnected"
+        );
     }
 }
 

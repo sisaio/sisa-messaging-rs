@@ -31,6 +31,9 @@ rdkafka = { version = "=0.39.0", default-features = false, features = ["tokio"] 
 # compiles in regardless of `default-features = false` here.
 iggy = { version = "=0.11.0", default-features = false }
 
+# Shared Iggy SDK types such as `ClientState`; same exact pin as `iggy`.
+iggy_common = { version = "=0.11.0", default-features = false }
+
 # Error and diagnostics support without subscriber, SDK, or exporter policy.
 opentelemetry = { version = "0.32.0", default-features = false, features = ["metrics"] }
 thiserror = { version = "2.0.20", default-features = false }

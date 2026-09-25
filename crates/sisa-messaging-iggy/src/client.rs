@@ -3,11 +3,14 @@
 use std::fmt;
 use std::sync::Arc;
 
+use iggy::binary::BinaryTransport;
+use iggy::prelude::locking::IggyRwLockFn;
 use iggy::prelude::{
     AutoLogin, Client, ClientWrapper, Credentials as SdkCredentials, IggyClient as SdkIggyClient,
     NonZeroIggyDuration, TcpClient, TcpClientConfig, TcpClientConfigBuilder,
     TcpClientReconnectionConfig,
 };
+use iggy_common::ClientState;
 
 use crate::{IggyClientError, IggyClientErrorKind, IggyClientSettings, IggyCredentials};
 
@@ -59,6 +62,44 @@ impl IggyClient {
             Ok(Err(error)) => Err(IggyClientError::from(error)),
             Err(_elapsed) => Err(IggyClientError::new(IggyClientErrorKind::Timeout)),
         }
+    }
+
+    /// Reports whether the underlying SDK session is still usable for publishing.
+    ///
+    /// This reads the SDK TCP client's own connection state. `false` means the session was shut
+    /// down, by [`IggyClient::shutdown`] on this handle or any clone, or was lost; reconnection is
+    /// disabled, so it will not recover on its own. The application must then build a new
+    /// [`IggyClient`] and a new [`IggyPublisher`](crate::IggyPublisher). `true` is not a delivery
+    /// guarantee: the session can still be lost between this check and the next send.
+    pub async fn is_connected(&self) -> bool {
+        let wrapper = self.inner.client();
+        let guard = wrapper.read().await;
+
+        // This crate only builds TCP clients; any other transport is not inspected and defers to
+        // the send outcome.
+        let ClientWrapper::Tcp(tcp_client) = &*guard else {
+            return true;
+        };
+
+        // Only a closed session is unusable. Transitional states such as `Connecting` and
+        // `Authenticating` defer to the send outcome rather than refusing the request.
+        let state = tcp_client.get_state().await;
+
+        !matches!(state, ClientState::Shutdown | ClientState::Disconnected)
+    }
+
+    /// Closes the SDK session so it can no longer send, releasing its TCP connection.
+    ///
+    /// Clones of this handle share one session, so shutting down any clone shuts down all of
+    /// them: afterwards [`IggyClient::is_connected`] returns `false`, and publishing through any
+    /// clone fails with
+    /// [`IggyPublishErrorKind::ClientDisconnected`](crate::IggyPublishErrorKind::ClientDisconnected)
+    /// without sending. Shutting down an already shut-down client succeeds. A shut-down client
+    /// cannot reconnect; build a new [`IggyClient`] instead.
+    pub async fn shutdown(&self) -> Result<(), IggyClientError> {
+        Client::shutdown(self.inner.as_ref())
+            .await
+            .map_err(IggyClientError::from)
     }
 
     pub(crate) fn sdk_client(&self) -> &SdkIggyClient {
