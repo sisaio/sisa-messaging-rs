@@ -108,6 +108,7 @@ jobs:
           ci_database_url+="${PGDATABASE}?sslmode=disable"
           DATABASE_URL="${ci_database_url}" cargo sqlx prepare --check -- --package sisa-messaging-postgres --all-targets
       - run: cargo fmt --all -- --check
+      - run: cargo run --locked --quiet --package sisa-messaging-xtask -- blank-lines --check
       - run: cargo check --workspace --all-targets --all-features --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: cargo test --workspace --all-features --locked
