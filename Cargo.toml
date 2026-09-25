@@ -26,6 +26,9 @@ futures-util = { version = "0.3.31", default-features = false, features = ["std"
 # Kafka transport client; applications select authentication and protocol features.
 rdkafka = { version = "=0.39.0", default-features = false, features = ["tokio"] }
 
+# Redis Streams protocol shared by Redis, Valkey, Dragonfly, and Garnet.
+redis = { version = "=0.27.6", default-features = false, features = ["aio", "tokio-comp", "streams"] }
+
 # Apache Iggy transport client; the provider uses only TCP, reconnection stays
 # application-owned. The SDK has no Cargo features, so QUIC, HTTP, and WebSocket transport code
 # compiles in regardless of `default-features = false` here.
@@ -59,6 +62,7 @@ sisa-messaging-kafka = { version = "=0.1.0", path = "crates/sisa-messaging-kafka
 sisa-messaging-nats = { version = "=0.1.0", path = "crates/sisa-messaging-nats" }
 sisa-messaging-outbox = { version = "=0.1.0", path = "crates/sisa-messaging-outbox" }
 sisa-messaging-postgres = { version = "=0.1.0", path = "crates/sisa-messaging-postgres" }
+sisa-messaging-redis = { version = "=0.1.0", path = "crates/sisa-messaging-redis" }
 
 # Identifier primitives.
 uuid = { version = "1.18.1", default-features = false, features = ["std", "v7"] }
