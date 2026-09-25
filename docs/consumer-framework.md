@@ -254,10 +254,11 @@ The intended NATS/PostgreSQL call site is:
 ```rust,ignore
 let inbox = PostgresInboxStore::new(pool.clone(), InboxSettings::default());
 let source = NatsDeliverySource::new(pull_consumer);
+let mapper = NatsMapper::new(subject_resolver);
 
 let consumer = Consumer::<OrderCreated, _>::new(
     source,
-    NatsEnvelopeMapper::default(),
+    mapper,
     JsonSerializer,
     inbox,
     InboxScope::new("orders-projection")?,
@@ -267,6 +268,11 @@ let consumer = Consumer::<OrderCreated, _>::new(
 
 let task = tokio::spawn(consumer.run(cancel.child_token()));
 ```
+
+This is an intended integration sketch until the consumer runtime is implemented. The application
+supplies `subject_resolver` because the mapper also supports encoding. The future consumer runtime
+applies `source_timeout` to the whole source opening operation and `settlement_timeout` to each
+settlement operation. Direct users of the NATS provider apply their own time bounds.
 
 Constructors do no I/O. The application creates or looks up the JetStream stream and durable
 consumer before constructing `NatsDeliverySource`. It configures the same stable durable name and

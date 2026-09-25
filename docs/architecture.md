@@ -177,9 +177,10 @@ let publisher = NatsPublisher::new(jetstream, resolver, nats_publisher_settings)
 let dispatcher = OutboxDispatcher::new(outbox_store, publisher, dispatcher_settings)?;
 
 let source = NatsDeliverySource::new(pull_consumer);
+let mapper = NatsMapper::new(inbound_subject_resolver);
 let consumer = Consumer::new(
     source,
-    NatsEnvelopeMapper::default(),
+    mapper,
     JsonSerializer,
     inbox_store,
     scope,
@@ -187,6 +188,9 @@ let consumer = Consumer::new(
     consumer_settings,
 )?;
 ```
+
+The consumer lines are an intended integration sketch until the consumer runtime is implemented.
+The application supplies `inbound_subject_resolver` because the mapper also supports encoding.
 
 Defaults are applied by the application:
 
