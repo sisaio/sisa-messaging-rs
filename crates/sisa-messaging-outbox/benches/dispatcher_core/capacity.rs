@@ -15,6 +15,7 @@ enum LeasePhase {
 #[derive(Clone, Copy)]
 struct LeaseEntry {
     phase: LeasePhase,
+
     safe_until: Instant,
 }
 
@@ -36,7 +37,9 @@ fn admission_blockers(
             if !matches!(entry.phase, LeasePhase::Publishing) {
                 return None;
             }
+
             let safe = has_store_headroom(now, timeout, entry.safe_until);
+
             (!safe).then_some(*claim)
         })
         .collect()
@@ -53,6 +56,7 @@ pub(crate) fn benchmarks(criterion: &mut Criterion) {
 
     for size in [1_usize, 32, 256, 1_024] {
         let retained = size / 2;
+
         capacity.bench_with_input(
             BenchmarkId::new("available", size),
             &size,
@@ -65,13 +69,16 @@ pub(crate) fn benchmarks(criterion: &mut Criterion) {
     capacity.finish();
 
     let mut headroom = criterion.benchmark_group("outbox_lease_headroom");
+
     for size in [1_usize, 32, 256, 1_024] {
         let now = Instant::now();
         let timeout = Duration::from_millis(19);
+
         let boundary = now
             .checked_add(timeout)
             .and_then(|deadline| deadline.checked_add(timeout))
             .unwrap_or(now);
+
         let claims = (0..size as u128)
             .map(|index| {
                 let phase = if index % 4 == 3 {
@@ -79,6 +86,7 @@ pub(crate) fn benchmarks(criterion: &mut Criterion) {
                 } else {
                     LeasePhase::Publishing
                 };
+
                 let safe_until = if index % 2 == 0 {
                     boundary
                 } else {
@@ -86,6 +94,7 @@ pub(crate) fn benchmarks(criterion: &mut Criterion) {
                         .checked_add(Duration::from_secs(1))
                         .unwrap_or(boundary)
                 };
+
                 (claim(index), LeaseEntry { phase, safe_until })
             })
             .collect::<HashMap<_, _>>();
@@ -104,5 +113,6 @@ pub(crate) fn benchmarks(criterion: &mut Criterion) {
             },
         );
     }
+
     headroom.finish();
 }

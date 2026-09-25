@@ -85,6 +85,7 @@ pub(crate) fn publish_stopped() {
 
 pub(crate) fn publish_finished(duration: Duration, error_type: Option<&'static str>) {
     let attributes = error_type.map(|value| KeyValue::new("error.type", value));
+
     instruments()
         .publish_duration
         .record(duration.as_secs_f64(), attributes.as_slice());
@@ -112,11 +113,13 @@ pub(crate) fn record_stats(
     oldest_pending_age_seconds: f64,
 ) {
     let instruments = instruments();
+
     for (state, count) in message_counts {
         instruments
             .message_count
             .record(count, &[KeyValue::new("state", state)]);
     }
+
     instruments
         .pending_oldest_age
         .record(oldest_pending_age_seconds, &[]);

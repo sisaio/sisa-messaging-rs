@@ -78,10 +78,13 @@ pub struct FencedClaims {
 pub enum DeadReason {
     /// Its new-claim deadline elapsed before another attempt began.
     Expired,
+
     /// Its persisted representation could not be decoded safely.
     Undecodable,
+
     /// Publication failed permanently.
     Permanent,
+
     /// The configured retry policy denied another attempt.
     Exhausted,
 }
@@ -108,6 +111,7 @@ pub enum FailureAction {
         /// Database-time delay before the record becomes eligible again.
         delay: Duration,
     },
+
     /// Clear the claim and make the row terminal.
     Dead {
         /// Stable reason recorded for the terminal transition.
@@ -120,10 +124,13 @@ pub enum FailureAction {
 pub struct FailureRecord {
     /// Claim whose ownership must still match.
     pub claim: Claim,
+
     /// Explicit retry classification; stores never parse rendered text.
     pub failure_kind: FailureKind,
+
     /// Caller-reviewed, UTF-8-boundary-bounded diagnostic text.
     pub error: ErrorSummary,
+
     /// Retry or dead transition decided by the dispatcher.
     pub action: FailureAction,
 }

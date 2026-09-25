@@ -43,6 +43,7 @@ impl ExponentialBackoff {
             max_delay,
             max_attempts,
         };
+
         policy.validate()?;
 
         Ok(policy)
@@ -80,12 +81,15 @@ impl RetryPolicy for ExponentialBackoff {
         if self.base_delay.is_zero() {
             return Err(RetryPolicyError::ZeroBaseDelay);
         }
+
         if self.max_delay.is_zero() {
             return Err(RetryPolicyError::ZeroMaximumDelay);
         }
+
         if self.base_delay > self.max_delay {
             return Err(RetryPolicyError::BaseExceedsMaximum);
         }
+
         if std::time::Instant::now()
             .checked_add(self.max_delay)
             .is_none()
