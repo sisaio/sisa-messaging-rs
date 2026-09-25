@@ -1243,3 +1243,25 @@ async fn concurrent_mixed_settlements_on_one_channel() {
     fixture.cleanup().await;
     let _ = connection.close(200, "OK".into()).await;
 }
+
+#[tokio::test]
+#[ignore = "requires a real RabbitMQ broker at RABBITMQ_URL"]
+async fn close_on_closed_channel_is_source_error() {
+    let fixture = Fixture::new(FieldTable::default()).await;
+    let (channel, mut source) = fixture.opened_source(4).await;
+
+    channel.close(200, "OK".into()).await.unwrap();
+
+    assert_eq!(source.close().await, Err(RabbitMqError::Source));
+    assert!(source.receive().await.unwrap().is_none());
+
+    assert!(matches!(
+        source.open(IndividualSourceRequirements::new()).await,
+        Err(IndividualSourceOpenError::Source(RabbitMqError::Settings))
+    ));
+
+    // The first close released the consumer, so a second close has nothing to cancel.
+    assert_eq!(source.close().await, Ok(()));
+
+    fixture.cleanup().await;
+}
