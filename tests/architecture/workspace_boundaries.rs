@@ -21,7 +21,9 @@ const LIBRARY_CRATES: [&str; 8] = [
 #[derive(Debug, Eq, PartialEq)]
 struct Dependency {
     actual_name: String,
+
     inherited: bool,
+
     runtime: bool,
 }
 
@@ -47,11 +49,13 @@ fn cargo_metadata() -> String {
         .current_dir(workspace_root())
         .output()
         .unwrap_or_else(|error| panic!("failed to execute cargo metadata: {error}"));
+
     assert!(
         output.status.success(),
         "cargo metadata failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     String::from_utf8(output.stdout)
         .unwrap_or_else(|error| panic!("cargo metadata returned invalid UTF-8: {error}"))
 }
@@ -64,6 +68,7 @@ fn skip_json_whitespace(bytes: &[u8], mut position: usize) -> usize {
     {
         position += 1;
     }
+
     position
 }
 
@@ -74,6 +79,7 @@ fn json_string_end(bytes: &[u8], start: usize) -> Option<usize> {
     }
 
     let mut escaped = false;
+
     for (offset, byte) in bytes.get(start + 1..)?.iter().enumerate() {
         if escaped {
             escaped = false;
@@ -83,6 +89,7 @@ fn json_string_end(bytes: &[u8], start: usize) -> Option<usize> {
             return Some(start + offset + 2);
         }
     }
+
     None
 }
 
@@ -90,21 +97,26 @@ fn json_string_end(bytes: &[u8], start: usize) -> Option<usize> {
 fn json_nested_value_end(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
     let mut depth = 0_u32;
     let mut position = start;
+
     while let Some(byte) = bytes.get(position) {
         if *byte == b'"' {
             position = json_string_end(bytes, position)?;
             continue;
         }
+
         if *byte == open {
             depth += 1;
         } else if *byte == close {
             depth = depth.checked_sub(1)?;
+
             if depth == 0 {
                 return Some(position + 1);
             }
         }
+
         position += 1;
     }
+
     None
 }
 
@@ -121,16 +133,20 @@ fn json_value_end(bytes: &[u8], start: usize) -> Option<usize> {
 /// Returns the raw value of a named top-level field in a JSON object.
 fn top_level_json_field<'a>(object: &'a str, wanted_key: &str) -> Option<&'a str> {
     let bytes = object.as_bytes();
+
     if bytes.first() != Some(&b'{') {
         return None;
     }
 
     let mut position = 1;
+
     loop {
         position = skip_json_whitespace(bytes, position);
+
         if bytes.get(position) == Some(&b'}') {
             return None;
         }
+
         if bytes.get(position) == Some(&b',') {
             position += 1;
             continue;
@@ -139,14 +155,18 @@ fn top_level_json_field<'a>(object: &'a str, wanted_key: &str) -> Option<&'a str
         let key_end = json_string_end(bytes, position)?;
         let key = object.get(position + 1..key_end - 1)?;
         position = skip_json_whitespace(bytes, key_end);
+
         if bytes.get(position) != Some(&b':') {
             return None;
         }
+
         position = skip_json_whitespace(bytes, position + 1);
         let value_end = json_value_end(bytes, position)?;
+
         if key == wanted_key {
             return object.get(position..value_end).map(str::trim);
         }
+
         position = value_end;
     }
 }
@@ -158,22 +178,28 @@ fn json_array_values(array: &str) -> Vec<&str> {
 
     let mut values = Vec::new();
     let mut position = 1;
+
     loop {
         position = skip_json_whitespace(bytes, position);
+
         if bytes.get(position) == Some(&b']') {
             return values;
         }
+
         if bytes.get(position) == Some(&b',') {
             position += 1;
             continue;
         }
+
         let value_end = json_value_end(bytes, position)
             .unwrap_or_else(|| panic!("invalid JSON array value at byte {position}"));
+
         values.push(
             array
                 .get(position..value_end)
                 .expect("JSON value must end on a UTF-8 boundary"),
         );
+
         position = value_end;
     }
 }
@@ -193,6 +219,7 @@ fn dependency_declarations(manifest: &str) -> Vec<Dependency> {
 
     for raw_line in manifest.lines() {
         let line = raw_line.split('#').next().unwrap_or_default().trim();
+
         if line.starts_with('[') && line.ends_with(']') {
             section = line.trim_matches(['[', ']']).trim();
             continue;
@@ -200,11 +227,13 @@ fn dependency_declarations(manifest: &str) -> Vec<Dependency> {
 
         let runtime = section == "dependencies"
             || (section.starts_with("target.") && section.ends_with(".dependencies"));
+
         let dependency_section = runtime
             || section == "dev-dependencies"
             || section == "build-dependencies"
             || section.ends_with(".dev-dependencies")
             || section.ends_with(".build-dependencies");
+
         if !dependency_section || line.is_empty() {
             continue;
         }
@@ -212,8 +241,10 @@ fn dependency_declarations(manifest: &str) -> Vec<Dependency> {
         let Some((alias, value)) = line.split_once('=') else {
             continue;
         };
+
         let alias = alias.trim().trim_matches('"');
         let actual_name = inline_string_field(value, "package").unwrap_or(alias);
+
         dependencies.push(Dependency {
             actual_name: actual_name.to_owned(),
             inherited: inline_bool_field(value, "workspace") == Some("true"),
@@ -231,13 +262,16 @@ fn workspace_dependencies(manifest: &str) -> BTreeMap<String, String> {
 
     for raw_line in manifest.lines() {
         let line = raw_line.split('#').next().unwrap_or_default().trim();
+
         if line.starts_with('[') && line.ends_with(']') {
             in_workspace_dependencies = line == "[workspace.dependencies]";
             continue;
         }
+
         if !in_workspace_dependencies || line.is_empty() {
             continue;
         }
+
         if let Some((alias, value)) = line.split_once('=') {
             let alias = alias.trim().trim_matches('"');
             let actual_name = inline_string_field(value, "package").unwrap_or(alias);
@@ -252,6 +286,7 @@ fn workspace_dependencies(manifest: &str) -> BTreeMap<String, String> {
 fn uses_dependency_specific_table(manifest: &str) -> bool {
     manifest.lines().map(str::trim).any(|line| {
         let section = line.trim_matches(['[', ']']);
+
         section.starts_with("dependencies.")
             || section.starts_with("dev-dependencies.")
             || section.starts_with("build-dependencies.")
@@ -268,6 +303,7 @@ fn inline_string_field<'a>(value: &'a str, field: &str) -> Option<&'a str> {
     let tail = tail.trim_start();
     let quoted = tail.strip_prefix('"')?;
     let (contents, _) = quoted.split_once('"')?;
+
     Some(contents)
 }
 
@@ -275,6 +311,7 @@ fn inline_string_field<'a>(value: &'a str, field: &str) -> Option<&'a str> {
 fn inline_bool_field<'a>(value: &'a str, field: &str) -> Option<&'a str> {
     let (_, tail) = value.split_once(field)?;
     let (_, tail) = tail.split_once('=')?;
+
     tail.trim_start().split([',', '}']).next().map(str::trim)
 }
 
@@ -291,22 +328,28 @@ fn crate_manifest(crate_name: &str) -> String {
 /// Returns a raw field value from a manifest's package section.
 fn package_field<'a>(manifest: &'a str, wanted_field: &str) -> Option<&'a str> {
     let mut in_package = false;
+
     for raw_line in manifest.lines() {
         let line = raw_line.split('#').next().unwrap_or_default().trim();
+
         if line.starts_with('[') && line.ends_with(']') {
             in_package = line == "[package]";
             continue;
         }
+
         if !in_package {
             continue;
         }
+
         let Some((field, value)) = line.split_once('=') else {
             continue;
         };
+
         if field.trim() == wanted_field {
             return Some(value.trim());
         }
     }
+
     None
 }
 
@@ -318,14 +361,18 @@ fn rust_sources_under(path: &Path) -> Vec<PathBuf> {
     while let Some(directory) = pending.pop() {
         let entries = fs::read_dir(&directory)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()));
+
         for entry in entries {
             let entry = entry.unwrap_or_else(|error| {
                 panic!("failed to inspect {}: {error}", directory.display())
             });
+
             let path = entry.path();
+
             let file_type = entry
                 .file_type()
                 .unwrap_or_else(|error| panic!("failed to inspect {}: {error}", path.display()));
+
             if file_type.is_dir() {
                 pending.push(path);
             } else if path.extension().is_some_and(|extension| extension == "rs") {
@@ -335,6 +382,7 @@ fn rust_sources_under(path: &Path) -> Vec<PathBuf> {
     }
 
     sources.sort();
+
     sources
 }
 
@@ -357,6 +405,7 @@ fn dependency_graph() -> BTreeMap<&'static str, BTreeSet<String>> {
                 })
                 .filter(|dependency| dependency.starts_with("sisa-messaging"))
                 .collect();
+
             (crate_name, dependencies)
         })
         .collect()
@@ -371,9 +420,11 @@ fn set(names: &[&str]) -> BTreeSet<String> {
 #[test]
 fn cargo_workspace_members_are_exactly_the_documented_packages() {
     let metadata = cargo_metadata();
+
     let packages = top_level_json_field(&metadata, "packages")
         .map(json_array_values)
         .expect("cargo metadata must contain a packages array");
+
     let expected_packages = set(&[
         "sisa-messaging",
         "sisa-messaging-outbox",
@@ -386,6 +437,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-architecture-tests",
         "sisa-messaging-xtask",
     ]);
+
     let actual_packages: BTreeSet<String> = packages
         .iter()
         .map(|package| {
@@ -403,6 +455,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         let name = top_level_json_field(package, "name")
             .map(json_string)
             .expect("each cargo metadata package must have a name");
+
         if LIBRARY_CRATES.contains(&name) {
             assert_eq!(
                 top_level_json_field(package, "publish"),
@@ -414,6 +467,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
 
     for crate_name in LIBRARY_CRATES {
         let manifest = crate_manifest(crate_name);
+
         assert_eq!(
             package_field(&manifest, "publish"),
             Some("false"),
@@ -454,6 +508,7 @@ impl ForbiddenSourceVisitor {
 
     fn inspect_called_path(&mut self, path: &SynPath) {
         let segments = path_segments(path);
+
         match segments.as_slice() {
             [root, function, ..]
                 if root == "env"
@@ -554,12 +609,14 @@ impl ForbiddenSourceVisitor {
 impl<'ast> Visit<'ast> for ForbiddenSourceVisitor {
     fn visit_attribute(&mut self, attribute: &'ast Attribute) {
         let segments = path_segments(attribute.path());
+
         if segments
             .first()
             .is_some_and(|segment| segment == "async_trait")
         {
             self.record("#[async_trait");
         }
+
         visit::visit_attribute(self, attribute);
     }
 
@@ -567,6 +624,7 @@ impl<'ast> Visit<'ast> for ForbiddenSourceVisitor {
         if let Expr::Path(function) = call.func.as_ref() {
             self.inspect_called_path(&function.path);
         }
+
         visit::visit_expr_call(self, call);
     }
 
@@ -577,12 +635,14 @@ impl<'ast> Visit<'ast> for ForbiddenSourceVisitor {
 
     fn visit_macro(&mut self, item: &'ast Macro) {
         let segments = path_segments(&item.path);
+
         if let Some(pattern) = segments
             .last()
             .and_then(|macro_name| forbidden_macro_pattern(macro_name))
         {
             self.record(pattern);
         }
+
         visit::visit_macro(self, item);
     }
 
@@ -624,6 +684,7 @@ fn forbidden_macro_token_pattern(identifier: &str) -> Option<&'static str> {
 
 fn ident_name(ident: &Ident) -> String {
     let rendered = ident.to_string();
+
     rendered.strip_prefix("r#").unwrap_or(&rendered).to_owned()
 }
 
@@ -647,12 +708,14 @@ fn forbidden_source_pattern(source: &str) -> syn::Result<Option<&'static str>> {
     let file = syn::parse_file(source)?;
     let mut visitor = ForbiddenSourceVisitor::default();
     visitor.visit_file(&file);
+
     Ok(visitor.pattern)
 }
 
 /// Reports whether a package is an OpenTelemetry SDK or exporter dependency.
 fn is_forbidden_otel_dependency(name: &str) -> bool {
     let normalized = name.replace('-', "_");
+
     normalized == "opentelemetry_sdk"
         || normalized.starts_with("opentelemetry_exporter_")
         || matches!(
@@ -705,6 +768,7 @@ fn provider_packages_never_depend_on_each_other() {
 fn library_dependencies_are_inherited_from_the_workspace() {
     let root_manifest = read(&workspace_root().join("Cargo.toml"));
     let workspace_dependencies = workspace_dependencies(&root_manifest);
+
     for crate_name in LIBRARY_CRATES {
         assert_eq!(
             workspace_dependencies.get(crate_name).map(String::as_str),
@@ -715,16 +779,19 @@ fn library_dependencies_are_inherited_from_the_workspace() {
 
     for crate_name in LIBRARY_CRATES {
         let manifest = crate_manifest(crate_name);
+
         assert!(
             !uses_dependency_specific_table(&manifest),
             "{crate_name} must use an inline workspace dependency declaration"
         );
+
         for dependency in dependency_declarations(&manifest) {
             assert!(
                 dependency.inherited,
                 "{crate_name} must inherit dependency {} from [workspace.dependencies]",
                 dependency.actual_name
             );
+
             assert!(
                 workspace_dependencies.contains_key(&dependency.actual_name),
                 "{crate_name} dependency {} is absent from [workspace.dependencies]",
@@ -739,11 +806,14 @@ fn library_dependencies_are_inherited_from_the_workspace() {
 fn library_sources_do_not_load_configuration_or_use_async_trait() {
     for crate_name in LIBRARY_CRATES {
         let source_root = workspace_root().join("crates").join(crate_name).join("src");
+
         for source_path in rust_sources_under(&source_root) {
             let source = read(&source_path);
+
             let forbidden = forbidden_source_pattern(&source).unwrap_or_else(|error| {
                 panic!("failed to parse {} as Rust: {error}", source_path.display())
             });
+
             assert!(
                 forbidden.is_none(),
                 "{} contains forbidden library source pattern {:?}",
@@ -765,8 +835,10 @@ fn library_dependencies_exclude_async_trait_and_otel_sdk_exporters() {
             let actual_name = workspace_dependencies
                 .get(&dependency.actual_name)
                 .map_or(dependency.actual_name.as_str(), String::as_str);
+
             let normalized = actual_name.replace('_', "-");
             assert_ne!(normalized, "async-trait", "{crate_name} uses async-trait");
+
             assert!(
                 !is_forbidden_otel_dependency(actual_name),
                 "{crate_name} uses forbidden OTel SDK/exporter dependency {}",
@@ -782,6 +854,7 @@ fn every_library_forbids_unsafe_code_without_bypass() {
     for crate_name in LIBRARY_CRATES {
         let source_root = workspace_root().join("crates").join(crate_name).join("src");
         let lib_source = read(&source_root.join("lib.rs"));
+
         assert!(
             lib_source
                 .lines()
@@ -791,6 +864,7 @@ fn every_library_forbids_unsafe_code_without_bypass() {
 
         for source_path in rust_sources_under(&source_root) {
             let source = read(&source_path);
+
             assert!(
                 !source.contains("allow(unsafe_code)")
                     && !source.contains("warn(unsafe_code)")
@@ -841,59 +915,74 @@ fn source_detector_recognizes_environment_arguments_files_and_async_trait_usage(
         detected(r#"fn check() { let _ = std::env::var("TOKEN"); }"#),
         Some("std::env")
     );
+
     assert_eq!(
         detected("use std::{ env as process_env };"),
         Some("std::env")
     );
+
     assert_eq!(
         detected("fn check() { let _ = std::env::args().next(); }"),
         Some("std::env")
     );
+
     assert_eq!(
         detected("fn check() { let _ = env::args().next(); }"),
         Some("env::args(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = env::args_os().next(); }"),
         Some("env::args_os(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = r#env::args_os().next(); }"),
         Some("env::args_os(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = std::fs::read_to_string(path); }"),
         Some("std::fs")
     );
+
     assert_eq!(
         detected("fn check() { let _ = fs::read(path); }"),
         Some("fs::read(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = fs::read_to_string(path); }"),
         Some("fs::read_to_string(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = fs::read_dir(path); }"),
         Some("fs::read_dir(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = std /* comment */ :: env :: args(); }"),
         Some("std::env")
     );
+
     assert_eq!(
         detected("fn check() { let _ = fs /* comment */ :: read_to_string(path); }"),
         Some("fs::read_to_string(")
     );
+
     assert_eq!(
         detected("fn check() { let _ = File::open(path); }"),
         Some("File::open(")
     );
+
     assert_eq!(detected("fn check() { let _ = vfs::read(path); }"), None);
+
     assert_eq!(
         detected("fn check() { let _ = ConfigFile::open(path); }"),
         None
     );
+
     assert_eq!(
         detected("#[async_trait] trait Handler {}"),
         Some("#[async_trait")
@@ -967,20 +1056,25 @@ fn source_detector_rejects_bare_and_qualified_configuration_macros() {
     ] {
         let expected = forbidden_macro_pattern(macro_name)
             .expect("fixture macro must be forbidden by library policy");
+
         for qualifier in ["core::", "::core::"] {
             let source =
                 format!(r#"fn check() {{ let _ = {qualifier}{macro_name}!("fixture"); }}"#);
+
             assert_eq!(detected(&source), Some(expected), "source: {source}");
         }
+
         for namespace in ["std", "core"] {
             let source = format!(
                 r#"use {namespace}::{macro_name} as config; fn check() {{ let _ = config!("fixture"); }}"#
             );
+
             let import_expected = if namespace == "std" && macro_name == "env" {
                 "std::env"
             } else {
                 expected
             };
+
             assert_eq!(detected(&source), Some(import_expected), "source: {source}");
         }
     }
@@ -992,66 +1086,78 @@ fn source_detector_inspects_opaque_macro_bodies_without_reading_literals() {
         detected(r#"macro_rules! load { () => { include_str!("settings.toml") } }"#),
         Some("configuration-sensitive macro token `include_str`")
     );
+
     assert_eq!(
         detected(r#"macro_rules! load { () => { env!("CONFIG") } }"#),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(r#"macro_rules! harmless { () => { "include_str!(settings.toml)" } }"#),
         None
     );
+
     assert_eq!(
         detected(r#"fn check() { let _ = identity!(std::env::var("PATH")); }"#),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! invoke { ($m:ident) => { $m!("PATH") }; } const X: &str = invoke!(env);"#,
         ),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! invoke { ($($m:ident)*) => { $($m)*!("PATH") }; } const X: &str = invoke!(env);"#,
         ),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! invoke { ($($m:ident)+) => { $($m)+!("PATH") }; } const X: &str = invoke!(env);"#,
         ),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! invoke { ($($m:ident)?) => { $($m)?!("PATH") }; } const X: &str = invoke!(env);"#,
         ),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! identifiers { ($($name:ident)*) => { stringify!($($name)*) }; } const X: &str = identifiers!(safe tokens);"#,
         ),
         None
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! load { ($m:ident) => { use std::$m as config; const X: &str = config!("/etc/hosts"); }; } load!(include_str);"#,
         ),
         Some("configuration-sensitive macro token `include_str`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! load { ($m:ident) => { fn x() { let _ = std::$m::var("PATH"); } }; } load!(env);"#,
         ),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(
             r#"macro_rules! load { ($p:path) => { fn x() { let _ = $p("PATH"); } }; } load!(std::env::var);"#,
         ),
         Some("configuration-sensitive macro token `env`")
     );
+
     assert_eq!(
         detected(r#"macro_rules! harmless { () => { "std::env::var(PATH)" } }"#),
         None
@@ -1081,5 +1187,6 @@ fn detected(source: &str) -> Option<&'static str> {
 fn source_detector_reports_parse_failures() {
     let error = forbidden_source_pattern("fn incomplete(")
         .expect_err("invalid Rust source must fail architecture analysis");
+
     assert!(!error.to_string().is_empty());
 }
