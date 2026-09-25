@@ -1044,6 +1044,9 @@ async fn queue_delete_is_source_error() {
     assert_eq!(result.err(), Some(RabbitMqError::Source));
     assert!(source.receive().await.unwrap().is_none());
 
+    // The broker already ended the consumer, so there is nothing to cancel.
+    assert_eq!(source.close().await, Ok(()));
+
     fixture.cleanup().await;
 }
 
