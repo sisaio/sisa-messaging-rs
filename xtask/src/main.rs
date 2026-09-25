@@ -189,13 +189,11 @@ fn process(file: &Path, mode: Mode, summary: &mut Summary) {
     }
 }
 
-/// Lists every tracked `.rs` file, relative to the current directory, from the workspace root.
+/// Lists the tracked `.rs` files of the current directory's repository that still exist in the
+/// working tree, relative to the current directory.
 fn tracked_rust_files() -> io::Result<Vec<PathBuf>> {
-    let root = workspace_root();
-
     let output = Command::new("git")
-        .args(["ls-files", "-z", "--", "*.rs"])
-        .current_dir(&root)
+        .args(["ls-files", "-z", "--deduplicate", "--", ":(top)*.rs"])
         .output()?;
 
     if !output.status.success() {
@@ -208,27 +206,17 @@ fn tracked_rust_files() -> io::Result<Vec<PathBuf>> {
     let listing = String::from_utf8(output.stdout)
         .map_err(|_| io::Error::other("git ls-files returned a non-UTF-8 path"))?;
 
+    // A tracked file deleted but not yet staged is not a file to check; any other failure to
+    // stat it is left for `process` to report.
     Ok(listing
         .split('\0')
         .filter(|path| !path.is_empty())
-        .map(|path| relative_to_current(&root, path))
+        .map(PathBuf::from)
+        .filter(|path| match fs::symlink_metadata(path) {
+            Ok(_) => true,
+            Err(error) => error.kind() != io::ErrorKind::NotFound,
+        })
         .collect())
-}
-
-/// Returns the workspace root, the parent of this package's manifest directory.
-fn workspace_root() -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-
-    manifest.parent().unwrap_or(manifest).to_path_buf()
-}
-
-/// Joins a workspace-relative path to the root, shortening it when the current directory is the
-/// root so reports stay readable.
-fn relative_to_current(root: &Path, path: &str) -> PathBuf {
-    match std::env::current_dir() {
-        Ok(current) if current == root => PathBuf::from(path),
-        _ => root.join(path),
-    }
 }
 
 /// Adds `path` when it is a file, or the `.rs` files below it when it is a directory.
