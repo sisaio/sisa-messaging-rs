@@ -4,7 +4,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/sisaio/sisa-messaging-rs"
 
@@ -26,6 +26,11 @@ futures-util = { version = "0.3.31", default-features = false, features = ["std"
 # Kafka transport client; applications select authentication and protocol features.
 rdkafka = { version = "=0.39.0", default-features = false, features = ["tokio"] }
 
+# Apache Iggy transport client; the provider uses only TCP, reconnection stays
+# application-owned. The SDK has no Cargo features, so QUIC, HTTP, and WebSocket transport code
+# compiles in regardless of `default-features = false` here.
+iggy = { version = "=0.11.0", default-features = false }
+
 # Error and diagnostics support without subscriber, SDK, or exporter policy.
 opentelemetry = { version = "0.32.0", default-features = false, features = ["metrics"] }
 thiserror = { version = "2.0.20", default-features = false }
@@ -45,6 +50,7 @@ serde_json = { version = "1.0.145", default-features = false, features = ["std"]
 # Workspace-local messaging crates include contracts and concrete providers.
 sisa-messaging = { version = "=0.1.0", path = "crates/sisa-messaging" }
 sisa-messaging-consumer = { version = "=0.1.0", path = "crates/sisa-messaging-consumer" }
+sisa-messaging-iggy = { version = "=0.1.0", path = "crates/sisa-messaging-iggy" }
 sisa-messaging-inbox = { version = "=0.1.0", path = "crates/sisa-messaging-inbox" }
 sisa-messaging-kafka = { version = "=0.1.0", path = "crates/sisa-messaging-kafka" }
 sisa-messaging-nats = { version = "=0.1.0", path = "crates/sisa-messaging-nats" }
