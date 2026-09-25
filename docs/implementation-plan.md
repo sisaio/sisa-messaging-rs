@@ -32,7 +32,8 @@ sisa-messaging-rs/
 │   ├── sisa-messaging-postgres/
 │   ├── sisa-messaging-nats/
 │   ├── sisa-messaging-kafka/
-│   └── sisa-messaging-iggy/
+│   ├── sisa-messaging-iggy/
+│   └── sisa-messaging-rabbitmq/
 ├── examples/
 │   ├── outbox-basic/
 │   ├── axum-outbox/
@@ -73,6 +74,7 @@ multiple sources.
 | `sisa-messaging-nats` | JetStream publisher, delivery source, wire mapper and settlement | messaging |
 | `sisa-messaging-kafka` | Kafka publisher and wire mapper; partitioned-log delivery source and settlement in Phase 6a | messaging |
 | `sisa-messaging-iggy` | Apache Iggy publisher and wire mapper; partitioned-log delivery source deferred to Phase 6b's fencing decision | messaging |
+| `sisa-messaging-rabbitmq` | RabbitMQ AMQP 0-9-1 confirmed publisher, individual delivery source, wire mapper and settlement | messaging |
 
 Provider crates never depend on each other. Examples, system tests, and the system benchmark are
 the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and consumer crates.
@@ -215,6 +217,33 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
   success-after-reply guarantee and the fencing gap remain unproven against a live broker until a
   Linux run or CI job records them.
 
+### Phase 6c — RabbitMQ AMQP 0-9-1 provider
+
+- Use `lapin = 4.12.0` (MIT) with an exact workspace pin and default features disabled. The
+  library enables no TLS feature; the application chooses one when it builds the connection.
+  lapin was chosen over `amqprs` because each publish returns its own confirm future with any
+  mandatory return attached, and each delivery's acker is single-use and fails once its channel
+  dies; `amqprs` delivers confirms and returns through `async-trait` callbacks.
+- Let the application own the connection, TLS, credentials, topology, dead-letter and retry
+  infrastructure, and channels. The publisher takes a channel already in confirm mode and fails
+  construction otherwise; each delivery source takes one dedicated channel and sets its own
+  prefetch. The provider never declares topology or enables confirms. Automatic connection
+  recovery must stay disabled, which the provider documents but cannot verify.
+- Publish with `mandatory` set and succeed only on a broker ack without a return. A return is an
+  unroutable failure and a nack is a rejection, both transient because application-owned topology
+  can change; a channel close or timeout is an unknown outcome, also transient. Settings, mapping,
+  and payload-size failures are permanent. The encoded content header is capped at the AMQP minimum
+  frame size so an oversized header table is a mapping error rather than a connection error.
+- Implement the #23 individual-delivery profile: ack, immediate requeue for a zero-delay nak, and
+  terminal reject, each confirmed by a following `basic.qos` round trip because AMQP 0-9-1 does
+  not confirm settlements. Delayed retry and heartbeat are unsupported and rejected before the
+  consumer starts.
+- Exercise deterministic mapping tests and real-broker tests for confirms, returns, nacks,
+  confirm ambiguity under a memory alarm and connection close, settlement ordering, redelivery,
+  prefetch bounds, cancellation, stale settlement after channel close, consumer cancellation,
+  and unsupported capabilities. CI runs them against a pinned `rabbitmq:4.1.8-alpine` image.
+  Record the mapping and broker benchmarks in `benchmarks.md`.
+
 ### Phase 7 — consumer runtime
 
 - Implement typed `ConsumerHandler` and the bounded `Consumer` receive/process/settle loop.
@@ -299,6 +328,13 @@ reason rather than an automatic rejection when ecosystems cannot yet converge.
 - Awaited publish acknowledgement, broker deduplication, negotiated payload limit, mapping,
   confirmed consumer ack, nak, terminate, heartbeat, redelivery, cancellation, and safe errors.
 - Tests use a real JetStream server, with fault injection where an ambiguity window must be shown.
+
+### RabbitMQ integration tests
+
+- Publisher confirms, mandatory returns, nacks, confirm ambiguity, mapping, confirmed ack,
+  requeue, terminal reject, redelivery, prefetch, cancellation, channel close, and unsupported
+  capabilities.
+- Tests use a real broker; `RABBITMQ_CONTAINER` names the container used for fault injection.
 
 ### System tests
 

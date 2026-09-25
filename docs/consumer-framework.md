@@ -25,6 +25,7 @@ The consumer runtime crate is `sisa-messaging-consumer`.
 sisa-messaging ───────────────▶ inbound delivery contracts and envelopes
        ▲
        ├── sisa-messaging-nats ─▶ NATS delivery source, mapper and settlement
+       ├── sisa-messaging-rabbitmq ─▶ RabbitMQ source, mapper and settlement
        │
        └── sisa-messaging-consumer ─▶ generic receive/process/settle runtime
                     │
@@ -35,8 +36,8 @@ sisa-messaging ───────────────▶ inbound delivery
           sisa-messaging-postgres ──▶ PostgreSQL implementations
 ```
 
-`sisa-messaging-consumer` does not depend on SQLx or async-nats. Neither provider depends on the
-other. The application is still the only place that chooses the NATS/PostgreSQL combination.
+`sisa-messaging-consumer` does not depend on SQLx, async-nats, or lapin. No provider depends on
+another. The application is still the only place that chooses the NATS/PostgreSQL combination.
 
 Transport-neutral inbound contracts live in `sisa-messaging`. `Delivery` always splits once into
 an owned transport wire value and a profile-bound settlement handle; `EnvelopeMapper<Wire>` is the
@@ -350,6 +351,19 @@ heartbeat operations remain bounded by `settlement_timeout`. A partitioned log i
 only after the transaction commits or a durable terminal disposition exists. A failed, timed-out,
 or cancelled advance is indeterminate and requires the partition-scoped reconciliation described
 above; failure to settle or advance is observable but does not change the database result.
+
+For RabbitMQ, AMQP 0-9-1 does not confirm `basic.ack` or `basic.reject`, so each settlement is
+followed by a no-op `basic.qos` on the same channel; its reply proves the broker processed the
+settlement frame, at the cost of one extra round trip per settlement. `ack` maps to `basic.ack`,
+`terminate` to `basic.reject` without requeue, and `nak(Duration::ZERO)` to `basic.reject` with
+requeue. The descriptor reports no acknowledgement wait, no delivery bound, no delayed retry, and
+no heartbeat: a non-zero `nak` delay or a heartbeat returns the bounded unsupported-operation
+error without broker action, and requirements are validated before `basic.qos` and
+`basic.consume`, so a rejected profile never starts a consumer. A RabbitMQ consumer therefore
+needs a zero-delay retry policy and no heartbeat. Delayed retry through TTL or dead-letter
+queues is application-owned topology and is never emulated. Prefetch is the source's
+`basic.qos` bound and should not exceed `max_in_flight`. A settlement whose channel has closed
+fails locally, and the channel's connection must not enable lapin automatic recovery.
 
 ## 6. Concurrency, heartbeat and backpressure
 
