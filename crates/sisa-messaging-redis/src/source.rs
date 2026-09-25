@@ -205,15 +205,18 @@ impl RedisDeliverySource {
     }
 
     fn delivery_from_entry(&self, entry: StreamId) -> Result<RedisDelivery, RedisError> {
-        let version = entry.get::<Vec<u8>>("v").ok_or(RedisError::Protocol)?;
-        let envelope = entry.get::<Vec<u8>>("h").ok_or(RedisError::Protocol)?;
-        let payload = entry.get::<Vec<u8>>("p").ok_or(RedisError::Protocol)?;
+        let version = entry.get::<Vec<u8>>("v");
+        let envelope = entry.get::<Vec<u8>>("h");
+        let payload = entry.get::<Vec<u8>>("p");
+        let complete = version.is_some() && envelope.is_some() && payload.is_some();
 
         Ok(RedisDelivery {
             wire: RedisWire {
-                version,
-                envelope,
-                payload,
+                version: version
+                    .filter(|_| complete)
+                    .unwrap_or_else(|| b"invalid".to_vec()),
+                envelope: envelope.unwrap_or_default(),
+                payload: payload.unwrap_or_default(),
             },
             settlement: RedisSettlement {
                 connection: self.commands.clone(),
@@ -355,7 +358,19 @@ impl IndividualDeliverySource for RedisDeliverySource {
         let groups = tokio::time::timeout(self.settings.command_timeout, query)
             .await
             .map_err(|_| IndividualSourceOpenError::Source(RedisError::Timeout))?
-            .map_err(|error| IndividualSourceOpenError::Source(map_stream_command(error)))?;
+            .map_err(|error| {
+                let mapped = if error.kind() == redis::ErrorKind::ResponseError
+                    && error
+                        .detail()
+                        .is_some_and(|detail| detail.eq_ignore_ascii_case("no such key"))
+                {
+                    RedisError::SourceClosed
+                } else {
+                    map_stream_command(error)
+                };
+
+                IndividualSourceOpenError::Source(mapped)
+            })?;
 
         if !groups.groups.iter().any(|group| group.name == self.group) {
             return Err(IndividualSourceOpenError::Source(RedisError::SourceClosed));
