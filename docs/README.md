@@ -10,7 +10,8 @@ The project is a set of Rust libraries for durable message publication, transact
 deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, Kafka
 and Apache Iggy publication, and Redis Streams publication and individual delivery for servers
 with the required stream commands. Redis 7, Valkey 8, and Dragonfly 2.0.0 pass the provider suite;
-the tested Garnet 2.1.8 image lacks `XADD`. It is not a service and does not own application startup,
+Garnet is tracked separately in [#75](https://github.com/sisaio/sisa-messaging-rs/issues/75)
+because the tested 2.1.8 image lacks `XADD`. It is not a service and does not own application startup,
 configuration loading, database pools, broker connection lifecycles, telemetry exporters, or
 process shutdown.
 

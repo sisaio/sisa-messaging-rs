@@ -180,7 +180,7 @@ measurement includes a 2 ms idle wait, and cancellation uses a 1 ms timeout.
 The tested `ghcr.io/microsoft/garnet` image at digest
 `sha256:880565c0c4186d0127846511174c732e60ba6dcb56f5bd8ac81fe78f1f34d753`
 (Garnet 2.1.8) returns `ERR unknown command` for plain `XADD`. Its provider benchmark cannot run,
-and no latency value is reported for that server image.
+and no latency value is reported for that server image. Garnet support is tracked in #75.
 
 ## 5. PostgreSQL benchmarks
 

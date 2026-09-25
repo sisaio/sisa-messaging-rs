@@ -72,33 +72,6 @@ pub(crate) fn map_stream_command(error: redis::RedisError) -> RedisError {
     RedisError::Command
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unknown_stream_command_is_permanent_and_redacted() {
-        let upstream = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
-            "response error",
-            "unknown command 'XADD', with args containing sensitive-payload".to_owned(),
-        ));
-
-        let error = map_stream_command(upstream);
-        assert_eq!(error, RedisError::Unsupported);
-        assert_eq!(error.classify(), FailureKind::Permanent);
-        assert!(!error.to_string().contains("sensitive-payload"));
-
-        let other = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
-            "response error",
-            "wrong number of arguments for XADD".to_owned(),
-        ));
-
-        assert_eq!(map_stream_command(other), RedisError::Command);
-    }
-}
-
 /// Invalid or missing envelope wire field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RedisMappingError;

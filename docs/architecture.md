@@ -181,7 +181,7 @@ One consumer handles one message type/version by default. See
 - The Redis Streams publisher and delivery source implement outbound publication, envelope
   mapping, and individual inbound delivery on servers that implement the required stream commands.
   The tested Garnet 2.1.8 image returns `ERR unknown command` for `XADD`, so it cannot run this
-  delivery path.
+  delivery path; support is tracked separately in #75.
 
 ## 6. Canonical construction
 

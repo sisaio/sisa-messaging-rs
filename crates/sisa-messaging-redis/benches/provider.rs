@@ -27,7 +27,7 @@ fn benchmark(c: &mut Criterion) {
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
-    let (publisher, mut fresh, mut reclaim) = runtime.block_on(async {
+    let (publisher, mut fresh, mut reclaim, stream, mut commands) = runtime.block_on(async {
         let client = redis::Client::open(url).unwrap();
         let suffix = MessageId::new().to_string().replace('-', "");
         let stream = format!("sisa-bench-{suffix}");
@@ -93,12 +93,12 @@ fn benchmark(c: &mut Criterion) {
 
         let publisher = RedisPublisher::new(
             client.get_multiplexed_async_connection().await.unwrap(),
-            stream,
+            stream.clone(),
             Duration::from_secs(2),
         )
         .unwrap();
 
-        (publisher, fresh, reclaim)
+        (publisher, fresh, reclaim, stream, commands)
     });
 
     c.bench_function("redis_append_read_ack_256b", |b| {
@@ -130,6 +130,14 @@ fn benchmark(c: &mut Criterion) {
                 assert!(result.is_err());
             })
         })
+    });
+
+    runtime.block_on(async {
+        let _: i64 = redis::cmd("DEL")
+            .arg(&stream)
+            .query_async(&mut commands)
+            .await
+            .unwrap();
     });
 }
 

@@ -153,8 +153,6 @@ jobs:
             image: valkey/valkey:8
           - provider: Dragonfly
             image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0
-          - provider: Garnet
-            image: ghcr.io/microsoft/garnet@sha256:880565c0c4186d0127846511174c732e60ba6dcb56f5bd8ac81fe78f1f34d753
     env:
       SISA_REDIS_URL: redis://127.0.0.1:6379
     services:
@@ -197,7 +195,7 @@ jobs:
               time.sleep(1)
           PY
       - name: Run Redis Streams integration tests
-        run: cargo test -p sisa-messaging-redis --features integration --test streams -- --nocapture
+        run: cargo test -p sisa-messaging-redis --features integration --test streams --locked -- --ignored --nocapture
 
   msrv:
     name: MSRV 1.95

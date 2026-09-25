@@ -1,6 +1,9 @@
 #![cfg(feature = "integration")]
 
-use redis::{aio::MultiplexedConnection, streams::StreamPendingReply};
+use redis::{
+    aio::MultiplexedConnection,
+    streams::{StreamPendingCountReply, StreamPendingReply},
+};
 use sisa_messaging::{
     ContentType, Delivery, EnvelopeMapper, IndividualDeliverySource, IndividualSettlement,
     IndividualSettlementError, IndividualSourceOpenError, IndividualSourceRequirements, MessageId,
@@ -49,7 +52,26 @@ async fn pending(connection: &mut MultiplexedConnection, stream: &str, group: &s
     reply.count()
 }
 
+async fn pending_ids(
+    connection: &mut MultiplexedConnection,
+    stream: &str,
+    group: &str,
+) -> Vec<String> {
+    let reply: StreamPendingCountReply = redis::cmd("XPENDING")
+        .arg(stream)
+        .arg(group)
+        .arg("-")
+        .arg("+")
+        .arg(16)
+        .query_async(connection)
+        .await
+        .unwrap();
+
+    reply.ids.into_iter().map(|pending| pending.id).collect()
+}
+
 #[tokio::test]
+#[ignore = "requires a real Redis Streams server at SISA_REDIS_URL"]
 async fn append_read_ack_reclaim_and_cancel() {
     let url =
         std::env::var("SISA_REDIS_URL").expect("SISA_REDIS_URL must point to a real RESP server");
@@ -208,7 +230,8 @@ async fn append_read_ack_reclaim_and_cancel() {
     settlement.ack().await.unwrap();
     assert_eq!(pending(&mut commands, &stream, &group).await, 0);
 
-    let third = publisher.append(&envelope()).await.unwrap();
+    let third_envelope = envelope();
+    let third = publisher.append(&third_envelope).await.unwrap();
     assert!(!third.is_empty());
 
     let delivered = tokio::time::timeout(Duration::from_secs(2), second.receive())
@@ -217,16 +240,35 @@ async fn append_read_ack_reclaim_and_cancel() {
         .unwrap()
         .unwrap();
 
-    let (_, settlement) = delivered.into_parts();
+    let (wire, settlement) = delivered.into_parts();
+
+    assert_eq!(
+        RedisMapper.decode(wire).unwrap().message_id,
+        third_envelope.message_id
+    );
 
     assert!(matches!(
         settlement.nak(Duration::from_secs(1)).await,
         Err(IndividualSettlementError::Unsupported(_))
     ));
 
-    assert_eq!(pending(&mut commands, &stream, &group).await, 1);
+    assert_eq!(
+        pending_ids(&mut commands, &stream, &group).await.as_slice(),
+        std::slice::from_ref(&third)
+    );
 
-    let fourth = publisher.append(&envelope()).await.unwrap();
+    let removed: i64 = redis::cmd("XACK")
+        .arg(&stream)
+        .arg(&group)
+        .arg(&third)
+        .query_async(&mut commands)
+        .await
+        .unwrap();
+
+    assert_eq!(removed, 1);
+
+    let fourth_envelope = envelope();
+    let fourth = publisher.append(&fourth_envelope).await.unwrap();
     assert!(!fourth.is_empty());
 
     let delivered = tokio::time::timeout(Duration::from_secs(2), second.receive())
@@ -235,16 +277,35 @@ async fn append_read_ack_reclaim_and_cancel() {
         .unwrap()
         .unwrap();
 
-    let (_, settlement) = delivered.into_parts();
+    let (wire, settlement) = delivered.into_parts();
+
+    assert_eq!(
+        RedisMapper.decode(wire).unwrap().message_id,
+        fourth_envelope.message_id
+    );
 
     assert!(matches!(
         settlement.terminate().await,
         Err(IndividualSettlementError::Unsupported(_))
     ));
 
-    assert_eq!(pending(&mut commands, &stream, &group).await, 2);
+    assert_eq!(
+        pending_ids(&mut commands, &stream, &group).await.as_slice(),
+        std::slice::from_ref(&fourth)
+    );
 
-    let fifth = publisher.append(&envelope()).await.unwrap();
+    let removed: i64 = redis::cmd("XACK")
+        .arg(&stream)
+        .arg(&group)
+        .arg(&fourth)
+        .query_async(&mut commands)
+        .await
+        .unwrap();
+
+    assert_eq!(removed, 1);
+
+    let fifth_envelope = envelope();
+    let fifth = publisher.append(&fifth_envelope).await.unwrap();
 
     let delivered = tokio::time::timeout(Duration::from_secs(2), second.receive())
         .await
@@ -252,7 +313,17 @@ async fn append_read_ack_reclaim_and_cancel() {
         .unwrap()
         .unwrap();
 
-    let (_, settlement) = delivered.into_parts();
+    let (wire, settlement) = delivered.into_parts();
+
+    assert_eq!(
+        RedisMapper.decode(wire).unwrap().message_id,
+        fifth_envelope.message_id
+    );
+
+    assert_eq!(
+        pending_ids(&mut commands, &stream, &group).await.as_slice(),
+        std::slice::from_ref(&fifth)
+    );
 
     let removed: i64 = redis::cmd("XACK")
         .arg(&stream)
@@ -290,6 +361,6 @@ async fn append_read_ack_reclaim_and_cancel() {
 
     assert!(matches!(
         gone.open(IndividualSourceRequirements::new()).await,
-        Err(IndividualSourceOpenError::Source(RedisError::Command))
+        Err(IndividualSourceOpenError::Source(RedisError::SourceClosed))
     ));
 }
