@@ -8,12 +8,12 @@ and public documentation must agree with them.
 
 The project is a set of Rust libraries for durable message publication, transactional consumer
 deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, Kafka
-and Apache Iggy publication, and Redis Streams publication and individual delivery for servers
-with the required stream commands. Redis 7, Valkey 8, and Dragonfly 2.0.0 pass the provider suite;
-Garnet is tracked separately in [#75](https://github.com/sisaio/sisa-messaging-rs/issues/75)
-because the tested 2.1.8 image lacks `XADD`. It is not a service and does not own application startup,
-configuration loading, database pools, broker connection lifecycles, telemetry exporters, or
-process shutdown.
+and Apache Iggy publication, RabbitMQ AMQP 0-9-1 confirmed publication and individual delivery,
+and Redis Streams publication and individual delivery for servers with the required stream
+commands. Redis 7, Valkey 8, and Dragonfly 2.0.0 pass the provider suite; Garnet is tracked
+separately in [#75](https://github.com/sisaio/sisa-messaging-rs/issues/75) because the tested 2.1.8
+image lacks `XADD`. It is not a service and does not own application startup, configuration
+loading, database pools, broker connection lifecycles, telemetry exporters, or process shutdown.
 
 ## Read in this order
 
@@ -31,8 +31,8 @@ process shutdown.
    IDs, async traits, and module rules.
 7. [Observability](observability.md) — tracing, logging, direct OpenTelemetry metrics, names,
    attributes, and ownership.
-8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, Iggy, Redis Streams,
-   consumer, and full-pipeline performance measurement.
+8. [Benchmark program](benchmarks.md) — micro, PostgreSQL, NATS, Kafka, Iggy, RabbitMQ, Redis
+   Streams, consumer, and full-pipeline performance measurement.
 9. [Implementation plan](implementation-plan.md) — repository layout, build order, test strategy,
    dependency policy, and completion gates.
 10. [`0001_messaging.sql`](../migrations/0001_messaging.sql) — the executable PostgreSQL 18+
@@ -50,7 +50,8 @@ process shutdown.
   publication is still possible; expiry, permanent failure, or exhausted retry policy can instead
   make a row dead. Apache Iggy publication succeeds only when the server answers the send request;
   in a cluster that reply follows quorum commit, and on a single node disk durability follows the
-  topic's durability policy and the server's storage configuration.
+  topic's durability policy and the server's storage configuration. RabbitMQ publication is
+  mandatory and succeeds only on a broker publisher confirm without a return.
 - The durable and direct paths remain visibly different: the store enqueues; the transport
   publishes.
 - The application owns pools, broker connection initiation and lifecycle, broker resources,
