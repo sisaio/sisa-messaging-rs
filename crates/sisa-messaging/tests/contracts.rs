@@ -50,6 +50,7 @@ fn semantic_ids_round_trip_without_becoming_interchangeable() {
 #[test]
 fn envelope_freezes_contract_and_ordering_values_at_construction() {
     let order_id = OrderingKey::new("order-42").unwrap();
+
     let envelope = Envelope::new(
         MessageId::new(),
         OrderedMessage {
@@ -67,14 +68,17 @@ fn envelope_freezes_contract_and_ordering_values_at_construction() {
 #[test]
 fn bounded_values_reject_empty_control_and_oversized_input_without_echoing_it() {
     assert_eq!(MessageType::new(""), Err(ValidationError::Empty));
+
     assert_eq!(
         ContentType::new("application/json\rhidden"),
         Err(ValidationError::InvalidCharacter)
     );
+
     assert_eq!(
         MetadataValue::new("x".repeat(1_025)),
         Err(ValidationError::TooLong { max_bytes: 1_024 })
     );
+
     assert!(
         !ValidationError::InvalidCharacter
             .to_string()
@@ -91,6 +95,7 @@ fn bounded_values_reject_empty_control_and_oversized_input_without_echoing_it() 
     }
 
     assert!(OrderingKey::new("x".repeat(512)).is_ok());
+
     assert_eq!(
         OrderingKey::new("x".repeat(513)),
         Err(ValidationError::TooLong { max_bytes: 512 })
@@ -103,22 +108,27 @@ fn custom_headers_reject_injection_and_framework_collisions() {
         HeaderValueError::ControlCharacter.to_string(),
         "header value contains a forbidden control character"
     );
+
     assert_eq!(
         HeaderName::new("message-id"),
         Err(HeaderNameError::Reserved)
     );
+
     assert_eq!(
         HeaderName::new("traceparent"),
         Err(HeaderNameError::Reserved)
     );
+
     assert_eq!(
         HeaderName::new("contains space"),
         Err(HeaderNameError::InvalidCharacter)
     );
+
     assert_eq!(
         HeaderValue::new("safe\r\nunsafe"),
         Err(HeaderValueError::Newline)
     );
+
     assert_eq!(
         HeaderValue::new("safe\x01"),
         Err(HeaderValueError::ControlCharacter)
@@ -130,6 +140,7 @@ fn custom_headers_reject_injection_and_framework_collisions() {
         } else {
             HeaderValueError::ControlCharacter
         };
+
         assert_eq!(
             HeaderValue::new(
                 String::from_utf8(vec![
@@ -142,6 +153,7 @@ fn custom_headers_reject_injection_and_framework_collisions() {
     }
 
     assert!(HeaderValue::new("Zażółć gęślą").is_ok());
+
     assert_eq!(
         HeaderName::new("X-Import-Batch").unwrap().as_str(),
         "x-import-batch"
@@ -166,6 +178,7 @@ fn custom_headers_enforce_exact_count_boundaries_atomically() {
     }
 
     let snapshot = headers.clone();
+
     let error = headers
         .insert(
             header_name(MAX_CUSTOM_HEADER_COUNT),
@@ -198,11 +211,14 @@ fn custom_headers_enforce_exact_aggregate_byte_boundaries_atomically() {
 
     let retained_bytes = 7 * (2 + VALUE_BYTES);
     let boundary_name = HeaderName::new("x").unwrap();
+
     let boundary_value =
         HeaderValue::new("b".repeat(MAX_CUSTOM_HEADER_BYTES - retained_bytes - 1)).unwrap();
+
     headers.insert(boundary_name, boundary_value).unwrap();
 
     let snapshot = headers.clone();
+
     let error = headers
         .insert(HeaderName::new("y").unwrap(), HeaderValue::new("").unwrap())
         .unwrap_err();
@@ -222,6 +238,7 @@ fn custom_header_byte_accounting_uses_utf8_bytes_and_replacement_delta() {
         headers.insert(name.clone(), utf8_value.clone()).unwrap(),
         None
     );
+
     assert_eq!(
         headers
             .insert(name.clone(), HeaderValue::new("ab").unwrap())
@@ -230,10 +247,12 @@ fn custom_header_byte_accounting_uses_utf8_bytes_and_replacement_delta() {
     );
 
     let smaller = HeaderValue::new("").unwrap();
+
     assert_eq!(
         headers.insert(name.clone(), smaller.clone()).unwrap(),
         Some(HeaderValue::new("ab").unwrap())
     );
+
     assert_eq!(headers.get(&name), Some(&smaller));
 }
 
@@ -250,6 +269,7 @@ fn replacement_at_count_and_byte_limits_succeeds_or_rolls_back() {
     }
 
     let first = header_name(0);
+
     assert_eq!(
         count_limited
             .insert(first, HeaderValue::new("replacement").unwrap())
@@ -268,8 +288,10 @@ fn replacement_at_count_and_byte_limits_succeeds_or_rolls_back() {
 
     let retained_bytes = 7 * (3 + MAX_VALUE_BYTES);
     let boundary_name = HeaderName::new("x").unwrap();
+
     let boundary_value =
         HeaderValue::new("b".repeat(MAX_CUSTOM_HEADER_BYTES - retained_bytes - 1)).unwrap();
+
     byte_limited
         .insert(boundary_name.clone(), boundary_value.clone())
         .unwrap();
@@ -283,6 +305,7 @@ fn replacement_at_count_and_byte_limits_succeeds_or_rolls_back() {
 
     let snapshot = byte_limited.clone();
     let larger_value = HeaderValue::new(format!("{}c", boundary_value.as_str())).unwrap();
+
     let error = byte_limited
         .insert(boundary_name.clone(), larger_value)
         .unwrap_err();
@@ -292,12 +315,14 @@ fn replacement_at_count_and_byte_limits_succeeds_or_rolls_back() {
     assert_eq!(byte_limited.get(&boundary_name), Some(&boundary_value));
 
     let smaller = HeaderValue::new("small").unwrap();
+
     assert_eq!(
         byte_limited
             .insert(boundary_name.clone(), smaller.clone())
             .unwrap(),
         Some(boundary_value)
     );
+
     assert_eq!(byte_limited.get(&boundary_name), Some(&smaller));
 }
 
@@ -313,22 +338,27 @@ fn custom_header_operations_match_a_deterministic_bounded_model() {
             .wrapping_add(1_442_695_040_888_963_407);
 
         let index = (seed.rotate_left(17) % 72) as usize;
+
         let input_name = if seed & 1 == 0 {
             format!("X-{index}")
         } else {
             format!("x-{index}")
         };
+
         let value = "v".repeat((seed.rotate_right(11) % 8_193) as usize);
         let name = HeaderName::new(input_name).unwrap();
         let header_value = HeaderValue::new(value.clone()).unwrap();
         let canonical_name = name.as_str().to_owned();
         let previous = model.get(&canonical_name);
+
         let current_bytes = model
             .iter()
             .map(|(name, value)| name.len() + value.len())
             .sum::<usize>();
+
         let previous_bytes = previous.map_or(0, |value| canonical_name.len() + value.len());
         let candidate_bytes = current_bytes - previous_bytes + canonical_name.len() + value.len();
+
         let expected_error = if previous.is_none() && model.len() == MAX_CUSTOM_HEADER_COUNT {
             Some(HeadersError::TooManyHeaders)
         } else if candidate_bytes > MAX_CUSTOM_HEADER_BYTES {
@@ -345,11 +375,13 @@ fn custom_header_operations_match_a_deterministic_bounded_model() {
                 let expected_previous = model
                     .insert(canonical_name.clone(), value)
                     .map(|value| HeaderValue::new(value).unwrap());
+
                 assert_eq!(result.unwrap(), expected_previous);
             }
         }
 
         assert_eq!(headers.len(), model.len());
+
         for (name, value) in &model {
             assert_eq!(
                 headers
@@ -368,6 +400,7 @@ fn framework_header_mapping_matches_the_frozen_fixture() {
         .map(|header| header.name())
         .collect::<Vec<_>>()
         .join("\n");
+
     let expected = include_str!("fixtures/framework-headers.txt").trim_end();
 
     assert_eq!(actual, expected);
@@ -423,6 +456,7 @@ impl std::fmt::Display for VeryLargeSafeDisplay {
         for _ in 0..10_000 {
             formatter.write_str("é")?;
         }
+
         Ok(())
     }
 }
@@ -523,11 +557,13 @@ fn individual_provider_errors_redact_formatting_and_safe_summaries_but_retain_ty
     let open_summary = ErrorSummary::from_safe_error(&open);
     assert!(!open_summary.as_str().contains("SECRET_SENTINEL"));
     assert!(!open_summary.to_string().contains("SECRET_SENTINEL"));
+
     assert!(matches!(
         &open,
         IndividualSourceOpenError::Source(error)
             if error.to_string().contains("SECRET_SENTINEL")
     ));
+
     assert_eq!(open.classify(), FailureKind::Transient);
 
     let settlement = IndividualSettlementError::Operation(SecretProviderError);
@@ -539,11 +575,13 @@ fn individual_provider_errors_redact_formatting_and_safe_summaries_but_retain_ty
     let settlement_summary = ErrorSummary::from_safe_error(&settlement);
     assert!(!settlement_summary.as_str().contains("SECRET_SENTINEL"));
     assert!(!settlement_summary.to_string().contains("SECRET_SENTINEL"));
+
     assert!(matches!(
         &settlement,
         IndividualSettlementError::Operation(error)
             if error.to_string().contains("SECRET_SENTINEL")
     ));
+
     assert_eq!(settlement.classify(), FailureKind::Transient);
 }
 
@@ -577,7 +615,9 @@ impl EnvelopeMapper<Vec<u8>> for ContractMapper {
 #[derive(Clone, Copy)]
 struct IndividualSupport {
     delayed_retry: bool,
+
     terminal_discard: bool,
+
     heartbeat: bool,
 }
 
@@ -608,7 +648,9 @@ enum IndividualEvent {
 
 struct IndividualFixtureSettlement {
     support: IndividualSupport,
+
     events: Arc<Mutex<Vec<IndividualEvent>>>,
+
     progress: Arc<Mutex<IndividualProgress>>,
 }
 
@@ -626,6 +668,7 @@ impl IndividualFixtureSettlement {
 #[derive(Default)]
 struct IndividualProgress {
     outstanding: bool,
+
     settled: bool,
 }
 
@@ -637,13 +680,16 @@ impl IndividualSettlement for IndividualFixtureSettlement {
     ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send {
         let support = self.support;
         let events = Arc::clone(&self.events);
+
         poll_fn(move |_| {
             if !support.heartbeat {
                 return Poll::Ready(Err(IndividualSettlementError::Unsupported(
                     IndividualCapability::Heartbeat,
                 )));
             }
+
             events.lock().unwrap().push(IndividualEvent::Heartbeat);
+
             Poll::Ready(Ok(()))
         })
     }
@@ -653,6 +699,7 @@ impl IndividualSettlement for IndividualFixtureSettlement {
     ) -> impl Future<Output = Result<(), IndividualSettlementError<Self::Error>>> + Send {
         poll_fn(move |_| {
             self.settled(IndividualEvent::Ack);
+
             Poll::Ready(Ok(()))
         })
     }
@@ -667,7 +714,9 @@ impl IndividualSettlement for IndividualFixtureSettlement {
                     IndividualCapability::DelayedRetry,
                 )));
             }
+
             self.settled(IndividualEvent::Nak);
+
             Poll::Ready(Ok(()))
         })
     }
@@ -681,7 +730,9 @@ impl IndividualSettlement for IndividualFixtureSettlement {
                     IndividualCapability::TerminalDiscard,
                 )));
             }
+
             self.settled(IndividualEvent::Terminate);
+
             Poll::Ready(Ok(()))
         })
     }
@@ -689,6 +740,7 @@ impl IndividualSettlement for IndividualFixtureSettlement {
 
 struct IndividualFixtureDelivery {
     wire: Vec<u8>,
+
     settlement: IndividualFixtureSettlement,
 }
 
@@ -703,7 +755,9 @@ impl Delivery for IndividualFixtureDelivery {
 
 struct IndividualSourceFixture {
     descriptor: IndividualSourceDescriptor,
+
     next: Option<IndividualFixtureDelivery>,
+
     progress: Arc<Mutex<IndividualProgress>>,
 }
 
@@ -714,6 +768,7 @@ impl IndividualSourceFixture {
         events: Arc<Mutex<Vec<IndividualEvent>>>,
     ) -> Self {
         let progress = Arc::new(Mutex::new(IndividualProgress::default()));
+
         Self {
             descriptor,
             next: Some(IndividualFixtureDelivery {
@@ -731,10 +786,12 @@ impl IndividualSourceFixture {
     fn poll_receive(&mut self) -> Poll<Result<Option<IndividualFixtureDelivery>, ContractError>> {
         if let Some(delivery) = self.next.take() {
             self.progress.lock().unwrap().outstanding = true;
+
             return Poll::Ready(Ok(Some(delivery)));
         }
 
         let progress = self.progress.lock().unwrap();
+
         if progress.outstanding && !progress.settled {
             Poll::Pending
         } else {
@@ -749,6 +806,7 @@ impl IndividualSourceFixture {
         Output = Result<IndividualSourceDescriptor, IndividualSourceOpenError<ContractError>>,
     > + Send {
         let descriptor = self.descriptor;
+
         ready(
             descriptor
                 .validate(requirements)
@@ -775,6 +833,7 @@ impl NatsFixture {
             terminal_discard: true,
             heartbeat: true,
         };
+
         Self(IndividualSourceFixture::new(
             support.descriptor(Some(Duration::from_secs(30)), NonZeroU64::new(5)),
             support,
@@ -790,6 +849,7 @@ impl RabbitMqFixture {
             terminal_discard: true,
             heartbeat: false,
         };
+
         Self(IndividualSourceFixture::new(
             support.descriptor(None, None),
             support,
@@ -805,6 +865,7 @@ impl RedisStreamsFixture {
             terminal_discard: false,
             heartbeat: false,
         };
+
         Self(IndividualSourceFixture::new(
             support.descriptor(None, None),
             support,
@@ -843,6 +904,7 @@ impl_individual_source!(RedisStreamsFixture);
 
 struct ReadinessFixture {
     ready: Arc<AtomicBool>,
+
     source: IndividualSourceFixture,
 }
 
@@ -863,6 +925,7 @@ impl IndividualDeliverySource for ReadinessFixture {
         &mut self,
     ) -> impl Future<Output = Result<Option<Self::Delivery>, Self::Error>> + Send {
         let ready = Arc::clone(&self.ready);
+
         poll_fn(move |_context| {
             if ready.load(AtomicOrdering::SeqCst) {
                 self.source.poll_receive()
@@ -879,17 +942,29 @@ struct PartitionId(u8);
 #[derive(Debug)]
 struct PartitionState {
     partition: PartitionId,
+
     next_offset: u64,
+
     committed_offset: u64,
+
     unresolved: Option<u64>,
+
     generation: u64,
+
     reconciled_committed_offset: Option<u64>,
+
     reconciled_generation: Option<u64>,
+
     advance_outstanding_generation: Option<u64>,
+
     owned: bool,
+
     paused: bool,
+
     reconcile_required: bool,
+
     loss_pending: bool,
+
     max_offset: u64,
 }
 
@@ -925,10 +1000,15 @@ enum AdvanceMode {
 
 struct PartitionFixtureSettlement {
     partition: PartitionId,
+
     offset: u64,
+
     generation: u64,
+
     state: Arc<Mutex<PartitionState>>,
+
     resolved: Arc<AtomicBool>,
+
     mode: AdvanceMode,
 }
 
@@ -940,12 +1020,19 @@ impl PartitionFixtureSettlement {
 
 struct PartitionFixtureAdvanceFuture {
     partition: PartitionId,
+
     offset: u64,
+
     generation: u64,
+
     state: Arc<Mutex<PartitionState>>,
+
     resolved: Arc<AtomicBool>,
+
     mode: AdvanceMode,
+
     effect_applied: bool,
+
     completed: bool,
 }
 
@@ -954,6 +1041,7 @@ impl PartitionFixtureAdvanceFuture {
         if state.advance_outstanding_generation == Some(self.generation) {
             state.advance_outstanding_generation = None;
         }
+
         self.completed = true;
     }
 }
@@ -965,69 +1053,88 @@ impl Future for PartitionFixtureAdvanceFuture {
         let this = self.get_mut();
         let shared_state = Arc::clone(&this.state);
         let mut state = shared_state.lock().unwrap();
+
         if state.partition != this.partition {
             this.completed = true;
+
             return Poll::Ready(Err(ContractError));
         }
+
         if !state.owned || state.generation != this.generation {
             state.paused = true;
             state.reconcile_required = true;
+
             if this.effect_applied {
                 // Fencing cannot prove non-advancement after this future already applied its
                 // effect. Report an indeterminate operation and let the source reconcile.
                 this.finish(&mut state);
+
                 return Poll::Ready(Err(ContractError));
             }
+
             state.loss_pending = true;
             this.finish(&mut state);
+
             return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
         }
+
         if matches!(this.mode, AdvanceMode::OwnershipLost) {
             state.owned = false;
             state.paused = true;
             state.loss_pending = true;
             this.finish(&mut state);
+
             return Poll::Ready(Ok(PartitionAdvance::OwnershipLost));
         }
+
         if !this.resolved.load(AtomicOrdering::SeqCst)
             || state.unresolved != Some(this.offset)
             || this.offset != state.committed_offset + 1
         {
             this.finish(&mut state);
+
             return Poll::Ready(Err(ContractError));
         }
+
         if matches!(this.mode, AdvanceMode::ErrorBeforeEffect) {
             state.paused = true;
             state.reconcile_required = true;
             this.finish(&mut state);
+
             return Poll::Ready(Err(ContractError));
         }
+
         if matches!(this.mode, AdvanceMode::PendingBeforeEffect) {
             return Poll::Pending;
         }
+
         if matches!(this.mode, AdvanceMode::PendingAfterEffect) && this.effect_applied {
             return Poll::Pending;
         }
 
         state.committed_offset = this.offset;
+
         match this.mode {
             AdvanceMode::Success => {
                 state.unresolved = None;
                 state.paused = false;
                 state.reconcile_required = false;
                 this.finish(&mut state);
+
                 Poll::Ready(Ok(PartitionAdvance::Advanced))
             }
             AdvanceMode::ErrorAfterEffect => {
                 state.paused = true;
                 state.reconcile_required = true;
                 this.finish(&mut state);
+
                 Poll::Ready(Err(ContractError))
             }
             AdvanceMode::PendingAfterEffect => {
                 state.paused = true;
                 state.reconcile_required = true;
                 this.effect_applied = true;
+
                 Poll::Pending
             }
             AdvanceMode::OwnershipLost
@@ -1036,6 +1143,7 @@ impl Future for PartitionFixtureAdvanceFuture {
                 state.paused = true;
                 state.reconcile_required = true;
                 this.finish(&mut state);
+
                 Poll::Ready(Err(ContractError))
             }
         }
@@ -1047,7 +1155,9 @@ impl Drop for PartitionFixtureAdvanceFuture {
         if self.completed {
             return;
         }
+
         let mut state = self.state.lock().unwrap();
+
         if state.partition == self.partition
             && state.advance_outstanding_generation == Some(self.generation)
         {
@@ -1065,6 +1175,7 @@ impl PartitionedLogSettlement for PartitionFixtureSettlement {
     fn advance(self) -> impl Future<Output = Result<PartitionAdvance, Self::Error>> + Send {
         {
             let mut state = self.state.lock().unwrap();
+
             if state.partition == self.partition && state.unresolved == Some(self.offset) {
                 // Track the future from construction so even an unpolled live future prevents
                 // reconciliation until it completes, is dropped, or a newer generation fences it.
@@ -1073,6 +1184,7 @@ impl PartitionedLogSettlement for PartitionFixtureSettlement {
                 state.advance_outstanding_generation = Some(self.generation);
             }
         }
+
         PartitionFixtureAdvanceFuture {
             partition: self.partition,
             offset: self.offset,
@@ -1092,7 +1204,9 @@ impl PartitionedLogSettlement for PartitionFixtureSettlement {
 
 struct PartitionFixtureDelivery {
     partition: PartitionId,
+
     offset: u64,
+
     settlement: PartitionFixtureSettlement,
 }
 
@@ -1107,8 +1221,11 @@ impl Delivery for PartitionFixtureDelivery {
 
 struct PartitionedFixtureSource {
     partitions: BTreeMap<PartitionId, Arc<Mutex<PartitionState>>>,
+
     ownership_events: VecDeque<PartitionId>,
+
     next_advance_mode: AdvanceMode,
+
     closed: bool,
 }
 
@@ -1165,32 +1282,39 @@ impl PartitionedFixtureSource {
                 state.paused = true;
                 state.loss_pending = false;
             }
+
             return Poll::Ready(Ok(PartitionedLogReceive::OwnershipLost(partition)));
         }
 
         for (partition, shared_state) in &self.partitions {
             let mut state = shared_state.lock().unwrap();
+
             if state.loss_pending {
                 state.loss_pending = false;
                 state.owned = false;
                 state.paused = true;
+
                 return Poll::Ready(Ok(PartitionedLogReceive::OwnershipLost(*partition)));
             }
         }
 
         let has_ready_partition = self.partitions.values().any(|shared_state| {
             let state = shared_state.lock().unwrap();
+
             state.owned
                 && !state.paused
                 && !state.reconcile_required
                 && state.unresolved.is_none()
                 && state.next_offset <= state.max_offset
         });
+
         if !has_ready_partition {
             for shared_state in self.partitions.values() {
                 let mut state = shared_state.lock().unwrap();
+
                 let advance_can_still_effect_cursor =
                     state.advance_outstanding_generation == Some(state.generation);
+
                 if state.reconcile_required && state.owned && !advance_can_still_effect_cursor {
                     if let Some(offset) = state.unresolved {
                         if state.committed_offset >= offset {
@@ -1200,6 +1324,7 @@ impl PartitionedFixtureSource {
                             state.unresolved = None;
                         }
                     }
+
                     state.reconciled_committed_offset = Some(state.committed_offset);
                     state.reconciled_generation = Some(state.generation);
                     state.reconcile_required = false;
@@ -1210,6 +1335,7 @@ impl PartitionedFixtureSource {
 
         for (partition, shared_state) in &self.partitions {
             let mut state = shared_state.lock().unwrap();
+
             if !state.owned
                 || state.paused
                 || state.reconcile_required
@@ -1226,6 +1352,7 @@ impl PartitionedFixtureSource {
             let state = Arc::clone(shared_state);
             let mode = self.next_advance_mode;
             self.next_advance_mode = AdvanceMode::Success;
+
             return Poll::Ready(Ok(PartitionedLogReceive::Delivery(
                 PartitionFixtureDelivery {
                     partition: *partition,
@@ -1244,10 +1371,12 @@ impl PartitionedFixtureSource {
 
         let must_wait = self.partitions.values().any(|shared_state| {
             let state = shared_state.lock().unwrap();
+
             state.unresolved.is_some()
                 || state.advance_outstanding_generation == Some(state.generation)
                 || (state.owned && (state.paused || state.reconcile_required))
         });
+
         if must_wait {
             return Poll::Pending;
         }
@@ -1255,11 +1384,13 @@ impl PartitionedFixtureSource {
         let all_assigned_partitions_drained = !self.partitions.is_empty()
             && self.partitions.values().all(|shared_state| {
                 let state = shared_state.lock().unwrap();
+
                 state.owned
                     && !state.paused
                     && !state.reconcile_required
                     && state.next_offset > state.max_offset
             });
+
         if self.closed || all_assigned_partitions_drained {
             Poll::Ready(Ok(PartitionedLogReceive::Closed))
         } else {
@@ -1328,6 +1459,7 @@ impl_partitioned_source!(IggyFixture);
 
 struct PartitionReadinessFixture {
     ready: Arc<AtomicBool>,
+
     source: PartitionedFixtureSource,
 }
 
@@ -1346,6 +1478,7 @@ impl PartitionedLogDeliverySource for PartitionReadinessFixture {
         Output = Result<PartitionedLogReceive<Self::Delivery, Self::Partition>, Self::Error>,
     > + Send {
         let ready = Arc::clone(&self.ready);
+
         poll_fn(move |_| {
             if ready.load(AtomicOrdering::SeqCst) {
                 self.source.poll_receive()
@@ -1358,11 +1491,13 @@ impl PartitionedLogDeliverySource for PartitionReadinessFixture {
 
 fn poll_once<F: Future>(mut future: Pin<&mut F>) -> Poll<F::Output> {
     let mut context = Context::from_waker(Waker::noop());
+
     future.as_mut().poll(&mut context)
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = Box::pin(future);
+
     match poll_once(future.as_mut()) {
         Poll::Ready(output) => output,
         Poll::Pending => panic!("in-memory contract future unexpectedly remained pending"),
@@ -1409,11 +1544,13 @@ fn inbound_public_types_and_native_futures_are_send_sync_and_statically_dispatch
         terminal_discard: true,
         heartbeat: true,
     };
+
     let mut settlement = IndividualFixtureSettlement {
         support,
         events: Arc::default(),
         progress: Arc::default(),
     };
+
     let mut individual = NatsFixture::new();
     let mut kafka = KafkaFixture::new();
     let mut iggy = IggyFixture::new();
@@ -1428,6 +1565,7 @@ fn inbound_public_types_and_native_futures_are_send_sync_and_statically_dispatch
     assert_send(redis.open(IndividualSourceRequirements::new()));
     assert_send(redis.receive());
     assert_send(settlement.heartbeat());
+
     assert_send(
         IndividualFixtureSettlement {
             support,
@@ -1436,6 +1574,7 @@ fn inbound_public_types_and_native_futures_are_send_sync_and_statically_dispatch
         }
         .ack(),
     );
+
     assert_send(
         IndividualFixtureSettlement {
             support,
@@ -1444,6 +1583,7 @@ fn inbound_public_types_and_native_futures_are_send_sync_and_statically_dispatch
         }
         .nak(Duration::from_secs(1)),
     );
+
     assert_send(
         IndividualFixtureSettlement {
             support,
@@ -1452,16 +1592,20 @@ fn inbound_public_types_and_native_futures_are_send_sync_and_statically_dispatch
         }
         .terminate(),
     );
+
     assert_send(kafka.open());
     assert_send(kafka.receive());
     assert_send(iggy.open());
     assert_send(iggy.receive());
+
     let mut partition_readiness = PartitionReadinessFixture {
         ready: Arc::default(),
         source: PartitionedFixtureSource::new(&[(PartitionId(0), 1)], &[]),
     };
+
     assert_send(partition_readiness.open());
     assert_send(partition_readiness.receive());
+
     assert_send(
         PartitionFixtureSettlement {
             partition: PartitionId(0),
@@ -1483,6 +1627,7 @@ fn individual_fixtures_report_truthful_snapshots_and_reject_missing_requirements
         .requiring_delayed_retry()
         .requiring_terminal_discard()
         .requiring_heartbeat();
+
     let mut nats = NatsFixture::new();
     let nats_descriptor = block_on(nats.open(all_capabilities)).unwrap();
 
@@ -1499,10 +1644,13 @@ fn individual_fixtures_report_truthful_snapshots_and_reject_missing_requirements
     assert!(!rabbit_descriptor.supports_delayed_retry());
     assert!(rabbit_descriptor.supports_terminal_discard());
     assert!(!rabbit_descriptor.supports_heartbeat());
+
     let error =
         block_on(rabbit.open(IndividualSourceRequirements::new().requiring_delayed_retry()))
             .unwrap_err();
+
     assert_eq!(error.classify(), FailureKind::Permanent);
+
     assert!(matches!(
         error,
         IndividualSourceOpenError::Unsupported(error)
@@ -1516,9 +1664,11 @@ fn individual_fixtures_report_truthful_snapshots_and_reject_missing_requirements
     assert!(!redis_descriptor.supports_delayed_retry());
     assert!(!redis_descriptor.supports_terminal_discard());
     assert!(!redis_descriptor.supports_heartbeat());
+
     let error =
         block_on(redis.open(IndividualSourceRequirements::new().requiring_terminal_discard()))
             .unwrap_err();
+
     assert!(matches!(
         error,
         IndividualSourceOpenError::Unsupported(error)
@@ -1534,11 +1684,13 @@ fn individual_fixtures_report_truthful_snapshots_and_reject_missing_requirements
 #[test]
 fn individual_operations_fail_classified_without_emulation_and_delivery_splits_once() {
     let events = Arc::new(Mutex::new(Vec::new()));
+
     let support = IndividualSupport {
         delayed_retry: false,
         terminal_discard: true,
         heartbeat: false,
     };
+
     let mut settlement = IndividualFixtureSettlement {
         support,
         events: Arc::clone(&events),
@@ -1546,11 +1698,14 @@ fn individual_operations_fail_classified_without_emulation_and_delivery_splits_o
     };
 
     let heartbeat_error = block_on(settlement.heartbeat()).unwrap_err();
+
     assert!(matches!(
         heartbeat_error,
         IndividualSettlementError::Unsupported(IndividualCapability::Heartbeat)
     ));
+
     assert_eq!(heartbeat_error.classify(), FailureKind::Permanent);
+
     let retry_error = block_on(
         IndividualFixtureSettlement {
             support,
@@ -1560,14 +1715,17 @@ fn individual_operations_fail_classified_without_emulation_and_delivery_splits_o
         .nak(Duration::from_secs(10)),
     )
     .unwrap_err();
+
     assert!(matches!(
         retry_error,
         IndividualSettlementError::Unsupported(IndividualCapability::DelayedRetry)
     ));
+
     assert_eq!(
         retry_error.to_string(),
         "individual settlement operation is unsupported"
     );
+
     assert!(events.lock().unwrap().is_empty());
 
     let mut nats = NatsFixture::new();
@@ -1586,6 +1744,7 @@ fn individual_operations_fail_classified_without_emulation_and_delivery_splits_o
     let (wire, settlement) = block_on(redis.receive()).unwrap().unwrap().into_parts();
     assert_eq!(wire, [1, 2, 3]);
     let error = block_on(settlement.terminate()).unwrap_err();
+
     assert!(matches!(
         error,
         IndividualSettlementError::Unsupported(IndividualCapability::TerminalDiscard)
@@ -1599,7 +1758,9 @@ fn cancel_safe_individual_readiness_keeps_the_delivery_available() {
         terminal_discard: true,
         heartbeat: true,
     };
+
     let ready = Arc::new(AtomicBool::new(false));
+
     let mut source = ReadinessFixture {
         ready: Arc::clone(&ready),
         source: IndividualSourceFixture::new(
@@ -1608,6 +1769,7 @@ fn cancel_safe_individual_readiness_keeps_the_delivery_available() {
             Arc::default(),
         ),
     };
+
     let unpolled = Box::pin(source.receive());
     drop(unpolled);
     let mut pending = Box::pin(source.receive());
@@ -1644,6 +1806,7 @@ where
 {
     let (_, settlement) = delivery.into_parts();
     let partition = settlement.partition().clone();
+
     (partition, settlement)
 }
 
@@ -1662,6 +1825,7 @@ fn partitioned_sources_hold_gaps_and_allow_other_partitions_to_progress() {
     let (offset, second_settlement) = second_partition.into_parts();
     assert_eq!(offset, 1);
     second_settlement.mark_durably_resolved();
+
     assert_eq!(
         block_on(second_settlement.advance()).unwrap(),
         PartitionAdvance::Advanced
@@ -1673,6 +1837,7 @@ fn partitioned_sources_hold_gaps_and_allow_other_partitions_to_progress() {
     let (first_offset, first_settlement) = first.into_parts();
     assert_eq!(first_offset, 1);
     first_settlement.mark_durably_resolved();
+
     assert_eq!(
         block_on(first_settlement.advance()).unwrap(),
         PartitionAdvance::Advanced
@@ -1698,17 +1863,21 @@ fn partition_receive_only_consumes_after_poll_and_preserves_pending_readiness() 
     assert_eq!(unpolled_delivery.offset, 1);
 
     let ready = Arc::new(AtomicBool::new(false));
+
     let mut readiness_source = PartitionReadinessFixture {
         ready: Arc::clone(&ready),
         source: PartitionedFixtureSource::new(&[(PartitionId(0), 1)], &[]),
     };
+
     let mut pending_receive = Box::pin(readiness_source.receive());
     assert!(poll_once(pending_receive.as_mut()).is_pending());
     drop(pending_receive);
+
     {
         let state = readiness_source.source.partitions[&PartitionId(0)]
             .lock()
             .unwrap();
+
         assert_eq!(state.next_offset, 1);
         assert_eq!(state.unresolved, None);
     }
@@ -1725,6 +1894,7 @@ fn partition_receive_keeps_no_assignment_and_ownership_loss_open_until_clean_clo
     assert!(poll_once(receive.as_mut()).is_pending());
     drop(receive);
     no_assignment.0.close();
+
     assert!(matches!(
         block_on(no_assignment.receive()).unwrap(),
         PartitionedLogReceive::Closed
@@ -1734,14 +1904,17 @@ fn partition_receive_keeps_no_assignment_and_ownership_loss_open_until_clean_clo
         &[(PartitionId(3), 1)],
         &[PartitionId(3)],
     ));
+
     assert!(matches!(
         block_on(lost_source.receive()).unwrap(),
         PartitionedLogReceive::OwnershipLost(PartitionId(3))
     ));
+
     let mut after_loss = Box::pin(lost_source.receive());
     assert!(poll_once(after_loss.as_mut()).is_pending());
     drop(after_loss);
     lost_source.0.close();
+
     assert!(matches!(
         block_on(lost_source.receive()).unwrap(),
         PartitionedLogReceive::Closed
@@ -1758,6 +1931,7 @@ fn partition_advance_requires_durable_resolution_before_cursor_movement() {
 
     let error = block_on(settlement.advance()).unwrap_err();
     assert_eq!(error.classify(), FailureKind::Transient);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1783,6 +1957,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         &[(PartitionId(3), 1)],
         &[PartitionId(3)],
     ));
+
     assert!(matches!(
         block_on(lost_source.receive()).unwrap(),
         PartitionedLogReceive::OwnershipLost(PartitionId(3))
@@ -1792,6 +1967,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         &[(PartitionId(0), 1), (PartitionId(1), 2)],
         &[],
     ));
+
     let first = take_partition_delivery(&mut unpolled_advance_source);
     assert_eq!(first.partition, PartitionId(0));
     let (first_offset, unpolled_advance) = first.into_parts();
@@ -1801,6 +1977,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     unpolled_advance.mark_durably_resolved();
     let unpolled_advance = Box::pin(unpolled_advance.advance());
     drop(unpolled_advance);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1817,20 +1994,24 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     let (other_offset, other_first_settlement) = other_first.into_parts();
     assert_eq!(other_offset, 1);
     other_first_settlement.mark_durably_resolved();
+
     assert_eq!(
         block_on(other_first_settlement.advance()).unwrap(),
         PartitionAdvance::Advanced
     );
+
     let other_second = take_partition_delivery(&mut unpolled_advance_source);
     assert_eq!(other_second.partition, PartitionId(1));
     assert_eq!(other_second.offset, 2);
     let (other_offset, other_second_settlement) = other_second.into_parts();
     assert_eq!(other_offset, 2);
     other_second_settlement.mark_durably_resolved();
+
     assert_eq!(
         block_on(other_second_settlement.advance()).unwrap(),
         PartitionAdvance::Advanced
     );
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1845,6 +2026,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     assert_eq!(replay.partition, PartitionId(0));
     assert_eq!(replay.offset, 1);
     assert_eq!(replay.settlement.generation, generation);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1859,6 +2041,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         &[(PartitionId(0), 1), (PartitionId(1), 1)],
         &[],
     ));
+
     live_advance_source.0.next_advance_mode = AdvanceMode::PendingBeforeEffect;
     let first = take_partition_delivery(&mut live_advance_source);
     assert_eq!(first.partition, PartitionId(0));
@@ -1868,6 +2051,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     first_settlement.mark_durably_resolved();
     let mut live_advance = Box::pin(first_settlement.advance());
     assert!(poll_once(live_advance.as_mut()).is_pending());
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1882,13 +2066,16 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     assert_eq!(other_partition.offset, 1);
     let (_, other_settlement) = other_partition.into_parts();
     other_settlement.mark_durably_resolved();
+
     assert_eq!(
         block_on(other_settlement.advance()).unwrap(),
         PartitionAdvance::Advanced
     );
+
     let mut blocked_receive = Box::pin(live_advance_source.receive());
     assert!(poll_once(blocked_receive.as_mut()).is_pending());
     drop(blocked_receive);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1905,6 +2092,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     assert_eq!(replay.partition, PartitionId(0));
     assert_eq!(replay.offset, 1);
     assert_eq!(replay.settlement.generation, generation);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1924,10 +2112,12 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     let mut old_advance = Box::pin(fenced_settlement.advance());
     assert!(poll_once(old_advance.as_mut()).is_pending());
     fenced_source.0.fence_partition(fenced_partition);
+
     assert_eq!(
         block_on(old_advance).unwrap(),
         PartitionAdvance::OwnershipLost
     );
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.generation, old_generation + 1);
@@ -1936,14 +2126,17 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         assert_eq!(state.unresolved, Some(1));
         assert!(state.reconcile_required);
     }
+
     assert!(matches!(
         block_on(fenced_source.receive()).unwrap(),
         PartitionedLogReceive::OwnershipLost(partition) if partition == fenced_partition
     ));
+
     fenced_source.0.restart_partition(fenced_partition);
     let replay = take_partition_delivery(&mut fenced_source);
     assert_eq!(replay.partition, fenced_partition);
     assert_eq!(replay.offset, 1);
+
     assert_eq!(
         state.lock().unwrap().committed_offset,
         0,
@@ -1957,6 +2150,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     before_effect.mark_durably_resolved();
     let error = block_on(before_effect.advance()).unwrap_err();
     assert_eq!(error.classify(), FailureKind::Transient);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -1964,6 +2158,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         assert!(state.paused);
         assert!(state.reconcile_required);
     }
+
     before_effect_source.0.restart_partition(PartitionId(0));
     let replay = take_partition_delivery(&mut before_effect_source);
     assert_eq!(replay.offset, 1);
@@ -1975,6 +2170,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     after_effect_error.mark_durably_resolved();
     let error = block_on(after_effect_error.advance()).unwrap_err();
     assert_eq!(error.classify(), FailureKind::Transient);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 1);
@@ -1982,6 +2178,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         assert!(state.paused);
         assert!(state.reconcile_required);
     }
+
     let next = take_partition_delivery(&mut after_effect_error_source);
     assert_eq!(next.offset, 2);
 
@@ -1993,6 +2190,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     let mut pending_advance = Box::pin(after_effect_pending.advance());
     assert!(poll_once(pending_advance.as_mut()).is_pending());
     drop(pending_advance);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 1);
@@ -2000,9 +2198,11 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         assert!(state.paused);
         assert!(state.reconcile_required);
     }
+
     after_effect_pending_source
         .0
         .restart_partition(PartitionId(0));
+
     let next = take_partition_delivery(&mut after_effect_pending_source);
     assert_eq!(next.offset, 2);
 
@@ -2014,6 +2214,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     after_effect_fence.mark_durably_resolved();
     let mut late_advance = Box::pin(after_effect_fence.advance());
     assert!(poll_once(late_advance.as_mut()).is_pending());
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 1);
@@ -2025,6 +2226,7 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     after_effect_fence_source.0.fence_partition(PartitionId(0));
     let error = block_on(late_advance).unwrap_err();
     assert_eq!(error.classify(), FailureKind::Transient);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.generation, old_generation + 1);
@@ -2034,8 +2236,10 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
         assert!(state.paused);
         assert!(state.reconcile_required);
     }
+
     let next = take_partition_delivery(&mut after_effect_fence_source);
     assert_eq!(next.offset, 2);
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 1);
@@ -2049,10 +2253,12 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     let state = Arc::clone(&relinquished_source.0.partitions[&PartitionId(0)]);
     relinquished.mark_durably_resolved();
     relinquished.mode = AdvanceMode::OwnershipLost;
+
     assert_eq!(
         block_on(relinquished.advance()).unwrap(),
         PartitionAdvance::OwnershipLost
     );
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
@@ -2061,24 +2267,30 @@ fn partition_ownership_loss_and_indeterminate_advances_reconcile_before_delivery
     }
 
     let mut stale_source = IggyFixture::new();
+
     let (delivery_partition, stale) =
         take_partition_and_settlement(take_partition_delivery(&mut stale_source));
+
     let state = Arc::clone(&stale_source.0.partitions[&PartitionId(0)]);
     stale.mark_durably_resolved();
     state.lock().unwrap().generation += 1;
+
     assert_eq!(
         block_on(stale.advance()).unwrap(),
         PartitionAdvance::OwnershipLost
     );
+
     assert!(matches!(
         block_on(stale_source.receive()).unwrap(),
         PartitionedLogReceive::OwnershipLost(partition) if partition == delivery_partition
     ));
+
     {
         let state = state.lock().unwrap();
         assert_eq!(state.committed_offset, 0);
         assert_eq!(state.unresolved, Some(1));
     }
+
     stale_source.0.restart_partition(delivery_partition);
     let replay = take_partition_delivery(&mut stale_source);
     assert_eq!(replay.partition, delivery_partition);
@@ -2098,10 +2310,12 @@ fn contract_futures_retain_send_and_existing_publication_contracts() {
     };
 
     assert_send(ContractPublisher.publish(&serialized));
+
     assert_eq!(
         ContractMapper.encode(&serialized).unwrap(),
         serialized.payload
     );
+
     assert!(ContractMapper.decode(Vec::new()).is_err());
     assert!(ContractError.classify().is_retryable());
 }
@@ -2206,6 +2420,7 @@ mod json_contract {
                 .map(|id| id.as_str()),
             Some("checkout-42")
         );
+
         assert!(decoded.headers.is_empty());
     }
 
@@ -2283,6 +2498,7 @@ mod json_contract {
         }
 
         let retained_bytes = 7 * (3 + MAX_VALUE_BYTES);
+
         byte_limited
             .insert(
                 HeaderName::new("x").unwrap(),
@@ -2306,6 +2522,7 @@ mod json_contract {
         let mut entries = (0..MAX_CUSTOM_HEADER_COUNT)
             .map(|index| format!(r#""x-{index}":"v""#))
             .collect::<Vec<_>>();
+
         entries.push(r#""x-64":{"secret":"sensitive-unconsumed-value-sentinel"}"#.to_owned());
         let input = format!("{{{}}}", entries.join(","));
 
@@ -2322,12 +2539,14 @@ mod json_contract {
             serde_json::from_str(r#"{"X-Label":"first","x-label":"second"}"#).unwrap();
 
         assert_eq!(decoded.len(), 1);
+
         assert_eq!(
             decoded
                 .get(&HeaderName::new("x-label").unwrap())
                 .map(HeaderValue::as_str),
             Some("second")
         );
+
         assert_eq!(
             serde_json::to_string(&decoded).unwrap(),
             r#"{"x-label":"second"}"#
@@ -2338,6 +2557,7 @@ mod json_contract {
     fn custom_header_json_errors_do_not_echo_oversized_or_malformed_inputs() {
         let oversized_name = format!("sensitive-name-sentinel-{}", "x".repeat(255));
         let oversized_value = format!("sensitive-value-sentinel-{}", "x".repeat(8_192));
+
         let cases = [
             format!(
                 "{{{}:\"safe\"}}",
@@ -2373,16 +2593,20 @@ mod json_contract {
                 )
             })
             .collect::<Vec<_>>();
+
         let retained_bytes = 7 * (3 + MAX_VALUE_BYTES);
         let sentinel = "sensitive-byte-sentinel-";
+
         let oversized = format!(
             "{sentinel}{}",
             "b".repeat(MAX_CUSTOM_HEADER_BYTES - retained_bytes - sentinel.len())
         );
+
         entries.push(format!(
             r#""x":{}"#,
             serde_json::to_string(&oversized).unwrap()
         ));
+
         let input = format!("{{{}}}", entries.join(","));
 
         let error = serde_json::from_str::<Headers>(&input).unwrap_err();
@@ -2421,6 +2645,7 @@ mod json_contract {
             metadata: full_metadata(),
             ordering_key: Some(OrderingKey::new("order-42").unwrap()),
         };
+
         let error =
             <JsonSerializer as Serializer<JsonMessage>>::deserialize(&JsonSerializer, malformed)
                 .unwrap_err();

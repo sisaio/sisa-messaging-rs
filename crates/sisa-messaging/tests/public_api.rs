@@ -35,6 +35,7 @@ fn crate_root_reexports_match_the_public_api_inventory() {
 
     for line in source.lines() {
         let trimmed = line.trim();
+
         if let Some(start) = trimmed.strip_prefix("pub use ") {
             current.push_str(start);
         } else if !current.is_empty() {
@@ -45,12 +46,14 @@ fn crate_root_reexports_match_the_public_api_inventory() {
 
         if current.ends_with(';') {
             current.pop();
+
             exports.push(
                 current
                     .split_whitespace()
                     .collect::<String>()
                     .replace(",}", "}"),
             );
+
             current.clear();
         }
     }

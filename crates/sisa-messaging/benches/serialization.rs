@@ -68,6 +68,7 @@ fn serialization_benchmarks(criterion: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("serialize", name), &name, |bencher, _| {
             bencher.iter(|| JsonSerializer.serialize(black_box(&envelope)))
         });
+
         group.bench_with_input(
             BenchmarkId::new("deserialize", name),
             &name,
@@ -84,6 +85,7 @@ fn serialization_benchmarks(criterion: &mut Criterion) {
                 );
             },
         );
+
         group.bench_with_input(
             BenchmarkId::new("metadata_encode", name),
             &name,
