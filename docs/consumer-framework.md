@@ -37,7 +37,7 @@ sisa-messaging ───────────────▶ inbound delivery
 ```
 
 `sisa-messaging-consumer` does not depend on SQLx, async-nats, or lapin. No provider depends on
-another. The application is still the only place that chooses the NATS/PostgreSQL combination.
+another. The application is still the only place that chooses the transport/PostgreSQL combination.
 
 Transport-neutral inbound contracts live in `sisa-messaging`. `Delivery` always splits once into
 an owned transport wire value and a profile-bound settlement handle; `EnvelopeMapper<Wire>` is the
