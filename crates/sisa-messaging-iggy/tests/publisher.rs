@@ -241,9 +241,8 @@ fn iggy_client_error_from_covers_every_known_arm() {
 ///
 /// `IggyError::RequestAlreadyApplied` is deliberately absent from this table: `publish` never
 /// routes it through this conversion. It intercepts that variant beforehand and reports success,
-/// since the server's own deduplication confirms the request already committed. Proving that
-/// interception needs a real duplicate request from a broker, so it is left to the opt-in
-/// real-broker test rather than asserted here.
+/// since the server's own deduplication confirms the request already committed. No test
+/// currently exercises this path; a deterministic fake-reply test is tracked in #63.
 #[test]
 fn iggy_publish_error_from_covers_every_known_arm() {
     let cases = [

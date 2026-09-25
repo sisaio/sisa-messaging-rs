@@ -198,9 +198,10 @@ the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and con
   outcome classified transient, because the SDK's detached transport task still sends a queued
   request. Within one call the SDK replays the same request id when it observes no reply, and a
   reply that the write was already applied counts as success; an application retry is a new
-  request that the server deduplicates only when the topic enables message deduplication. The
-  provider documents this rather than adding its own retries. Header names and values are capped
-  at 255 bytes; an oversized `tracestate` is omitted and `traceparent` stays required.
+  request that the server deduplicates only when its server-level message deduplication is
+  enabled. The provider documents this rather than adding its own retries. Header names and
+  values are capped at 255 bytes; an oversized `tracestate` is omitted and an oversized
+  `traceparent` is rejected.
 - Defer the partitioned-log delivery source and settlement. Iggy offset stores carry no
   consumer-group membership generation, ownership is checked only when a write is admitted, and
   offset reads may come from a lagging follower, so the #23 fencing and reconciliation rules cannot

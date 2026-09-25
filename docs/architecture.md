@@ -74,8 +74,8 @@ Rules:
   Iggy TCP protocol; its partitioned-log delivery source is deferred until Iggy can fence
   consumer-group offset stores by membership generation. Iggy limits each header name and value
   to 255 bytes: a custom header value over that bound is a permanent mapping error, and an
-  oversized `tracestate` is omitted under the W3C Trace Context allowance while `traceparent`
-  stays required.
+  oversized `tracestate` is omitted under the W3C Trace Context allowance while an oversized
+  `traceparent` is rejected as a permanent mapping error.
 - Provider crates never depend on one another.
 - Only applications and system tests name concrete provider combinations.
 

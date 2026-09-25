@@ -10,7 +10,8 @@
 //! through the SDK's `send_messages` call, never the SDK's `IggyProducer`, which batches in the
 //! background and reports success before a message is durable. Success means the server's reply
 //! to the append request arrived: a VSR quorum commit for a clustered deployment, or a single-node
-//! commit whose durability depends on the server's own fsync configuration.
+//! commit whose durability depends on the topic's durability policy and the server's storage
+//! configuration.
 //!
 //! A timeout is reported as [`IggyPublishErrorKind::OutcomeUnknown`], a transient failure: the
 //! SDK's transport task runs detached, so a timeout even while the request is still queued behind
@@ -19,8 +20,8 @@
 //! observe a reply, and a request its own replay confirms already committed is reported here as
 //! success with no fresh reply to inspect. An application-level retry after `OutcomeUnknown`
 //! issues a new request with a new VSR request id, so the server deduplicates it against the
-//! earlier attempt only if the target topic has message deduplication enabled; otherwise a retry
-//! can durably duplicate the message.
+//! earlier attempt only if the server's message deduplication is enabled; otherwise a retry can
+//! durably duplicate the message.
 //!
 //! Partitioning uses the shared ordering key as an Iggy messages-key when present, and balanced
 //! (round-robin) partitioning otherwise. An ordering key longer than 255 bytes is a mapping error
@@ -33,7 +34,8 @@
 //! mapping error ([`IggyMappingError::InvalidHeader`]). `tracestate` is the one exception: a value
 //! over 255 bytes is omitted from the wire record instead of failing the envelope, following the
 //! W3C Trace Context allowance for a participant to drop `tracestate` under vendor size
-//! constraints; `traceparent` has no such allowance and remains a required header.
+//! constraints; an oversized `traceparent` has no such allowance and is rejected as
+//! [`IggyMappingError::InvalidFrameworkValue`].
 //!
 //! ## Logging
 //!
