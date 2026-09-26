@@ -3491,6 +3491,9 @@ version = "0.1.0"
 dependencies = [
  "sisa-messaging",
  "sisa-messaging-inbox",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

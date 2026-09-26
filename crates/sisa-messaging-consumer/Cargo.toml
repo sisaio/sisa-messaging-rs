@@ -9,8 +9,20 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# Transport-neutral delivery, envelope, and inbox contracts.
 sisa-messaging = { workspace = true }
 sisa-messaging-inbox = { workspace = true }
+
+# Portable runtime coordination, bounded tasks, and cancellation.
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# Bounded diagnostic events; applications retain subscriber ownership.
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Deterministic paused-time tests and bounded multi-thread interleaving tests.
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true
