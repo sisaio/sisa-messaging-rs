@@ -517,6 +517,27 @@ async fn a_panicking_coordinator_stops_an_idle_consumer() {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn mapper_panic_is_classified_and_redacted_before_handler_execution() {
+    let harness = Harness::new(SettlementMode::Broker);
+    harness.deliver_mapper_panic(1);
+
+    let error = expect_error(harness.run().await);
+
+    assert_eq!(error.kind(), ConsumerErrorKind::ProviderPanicked);
+    assert_eq!(error.failure_kind(), FailureKind::Permanent);
+    assert_redacted(&error);
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(1))),
+        0
+    );
+
+    assert!(harness.probe.events_for(1).contains(&Event::Left(1)));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn drain_deadline_waits_for_a_workflow_blocked_mid_poll() {
     let mut harness = Harness::new(SettlementMode::Broker);

@@ -263,7 +263,19 @@ where
     H: ConsumerHandler<M, Inbox::Transaction>,
 {
     let timer = telemetry::ProcessingTimer::new();
-    let mapped = shared.mapper.decode(wire).map_err(|_| ());
+
+    // A mapper can panic before metadata exists. Give that delivery an ambient-parented process
+    // span, then preserve the panic for the coordinator's typed failure classification.
+    let mapped =
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.mapper.decode(wire)))
+        {
+            Ok(mapped) => mapped.map_err(|_| ()),
+            Err(payload) => {
+                let _span = telemetry::ProcessingSpan::new(shared.labels, None, &shared.ambient);
+
+                std::panic::resume_unwind(payload);
+            }
+        };
 
     let span = telemetry::ProcessingSpan::new(
         shared.labels,

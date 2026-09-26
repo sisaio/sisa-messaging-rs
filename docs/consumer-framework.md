@@ -126,15 +126,16 @@ A partition settlement owns opaque partition, offset, and fencing generation, an
 partition so a generic coordinator can associate an ownership-loss event. It advances only after
 the consumer transaction commits or a durable terminal disposition exists. Initially the consumer
 permits one unresolved record per partition: a later offset cannot advance until its earlier record
-resolves. `OwnershipLost` proves fencing prevented advancement. An advance error, timeout, or
-dropped advance future is indeterminate: the source pauses that partition. Before reading the
-authoritative committed cursor and ownership generation, it must establish that the previous
-advance cannot still change the cursor, either by proving it is quiescent or by an authoritative
-fence against its old generation. It replays when the cursor did not advance,
-continues only when it did, and stays paused or fails when the advance's effects, cursor, or
-fencing cannot be established; other partitions may progress. No replay or later offset may be
-emitted while the old advance could still take effect. A source must not emit a new generation
-while this handling is underway. Automatic commit is not a profile option. Redis Streams reclaim is
+resolves. `OwnershipLost` proves fencing prevented advancement. A timeout, transient advance error,
+or dropped advance future is indeterminate: the consumer leaves that partition unresolved and the
+source pauses it. Before reading the authoritative committed cursor and ownership generation, the
+source must establish that the previous advance cannot still change the cursor, either by proving it
+is quiescent or by an authoritative fence against its old generation. It replays when the cursor did
+not advance, continues only when it did, and stays paused or fails when the advance's effects,
+cursor, or fencing cannot be established; other partitions may progress. A returned permanent
+advance error ends the run as a typed settlement failure. No replay or later offset may be emitted
+while the old advance could still take effect. A source must not emit a new generation while this
+handling is underway. Automatic commit is not a profile option. Redis Streams reclaim is
 individual delivery, not partitioned-log ownership; its unavailable delay, heartbeat, or terminal
 operation must fail requirement validation.
 
@@ -201,6 +202,7 @@ pub struct ConsumerSettings {
     pub source_timeout: Duration,
     pub database_timeout: Duration,
     pub settlement_timeout: Duration,
+    pub heartbeat_interval: Option<Duration>,
     pub nak_delay: Duration,
     pub drain_timeout: Duration,
     pub mode: SettlementMode,
@@ -424,9 +426,10 @@ permanent or unsupported settlement error stops the consumer in every mode.
 The partitioned profile consumes a `PartitionedLogDeliverySource` and does not call individual
 `ack`, `nak`, or `terminate`. It keeps at most one unresolved record active per partition while
 allowing other partitions to progress within `max_in_flight`. It calls `advance` only after the
-record's transaction commits or a durable terminal disposition is recorded. An error, timeout,
-or cancellation during `advance` leaves that partition unresolved and paused while other
-partitions continue. The source must fence and reconcile its cursor and ownership generation before
+record's transaction commits or a durable terminal disposition is recorded. A transient error,
+timeout, or otherwise ambiguous outcome during `advance` leaves that partition unresolved and
+paused while other partitions continue; a returned permanent provider error stops the run with
+`Settlement`. The source must fence and reconcile its cursor and ownership generation before
 replaying the record or continuing at a later offset. An observed ownership-loss event cancels that
 partition's active workflow and leaves its record unresolved. Because ownership-loss events share
 the source receive stream, the consumer cannot poll for one while all `max_in_flight` slots are
@@ -539,10 +542,11 @@ Errors are separated by decision boundary:
 - `ConsumerError`: descriptor-dependent startup incompatibility after source opening, or a fatal
   source, provider, settlement, operator-action, panic, or runtime failure that ends `run`. It
   carries a `ConsumerErrorKind` (`SourceOpen`, `SourceOpenTimeout`, `Unsupported`,
-  `AttemptBoundExceedsMaxDeliver`, `Source`, `Inbox`, `FailureNotRecorded`, `Settlement`,
-  `OperatorActionRequired`, `HandlerPanicked`, `ProviderPanicked`, `Runtime`) and a
-  `FailureKind`. Its `Display` and `Debug` output are fixed text, `Error::source` is `None`, and
-  the typed provider error is available through `ConsumerError::provider_source`;
+  `AttemptBoundExceedsMaxDeliver`, `HeartbeatDeadlineTooShort`, `Source`, `Inbox`,
+  `FailureNotRecorded`, `Settlement`, `PartitionOrder`, `PartitionUnresolved`,
+  `OperatorActionRequired`, `HandlerPanicked`, `ProviderPanicked`, `Runtime`) and a `FailureKind`.
+  Its `Display` and `Debug` output are fixed text, `Error::source` is `None`, and the typed
+  provider error is available through `ConsumerError::provider_source`;
 - handler error: application-owned and classified as transient or permanent;
 - inbox/unit-of-work error: provider-owned and retained as a source;
 - mapping/codec error: mapped to a stable poison reason without rendering payload bytes;
