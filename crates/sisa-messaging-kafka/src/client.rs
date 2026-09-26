@@ -75,10 +75,13 @@ impl KafkaClient {
     /// Prepares a partitioned delivery source for one static consumer-group member.
     ///
     /// The source inherits this client's brokers and advanced properties and forces the
-    /// properties its fencing depends on: `group.id`, `group.instance.id`, and a stable
-    /// `transactional.id`, `isolation.level=read_committed`, the eager `range` assignor over
-    /// the `classic` group protocol, disabled automatic commits and offset stores,
-    /// `allow.auto.create.topics=false`, and an idempotent `acks=all` offset-commit producer.
+    /// properties its fencing and at-least-once delivery depend on: `group.id`,
+    /// `group.instance.id`, and a stable `transactional.id`, `isolation.level=read_committed`,
+    /// `auto.offset.reset=earliest`, the eager `range` assignor over the `classic` group
+    /// protocol, disabled automatic commits and offset stores, `allow.auto.create.topics=false`,
+    /// and an idempotent `acks=all` offset-commit producer. A group without a committed offset
+    /// therefore starts at the earliest retained record; an application that wants a new group
+    /// to start at the log end commits that position for the group before the source opens.
     /// An advanced property that names an identity property, or sets a forced property to a
     /// different value, returns [`KafkaClientErrorKind::TypedPropertyOverride`]. Unless an
     /// advanced property sets them, the consumer uses `fetch.wait.max.ms=10` and the offset-commit

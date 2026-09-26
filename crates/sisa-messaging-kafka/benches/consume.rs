@@ -319,6 +319,8 @@ impl Bench {
                 !task.is_finished(),
                 "the consumer stopped before committing"
             );
+
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         let elapsed = started.elapsed();

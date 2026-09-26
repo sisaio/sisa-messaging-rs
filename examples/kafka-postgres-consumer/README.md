@@ -25,8 +25,8 @@ Before running it:
    it. Publish through `KafkaPublisher` so records carry the headers `KafkaEnvelopeMapper`
    decodes. `OrderCreated` is the type in `src/main.rs`.
 4. Grant the consumer group `orders-projection`, the topic, and the transactional identity
-   `sisa.orders-projection.<instance id>` to the principal the client authenticates as. The
-   broker must support transactions.
+   `sisa.17.orders-projection.<instance id>` (the group id prefixed by its byte length) to the
+   principal the client authenticates as. The broker must support transactions.
 5. Set `SISA_KAFKA_BOOTSTRAP_SERVERS`, `SISA_KAFKA_INSTANCE_ID`, and `SISA_POSTGRES_URL` in the
    environment. Give each running instance a distinct, stable instance id; a second live
    instance with the same id fences the first.
