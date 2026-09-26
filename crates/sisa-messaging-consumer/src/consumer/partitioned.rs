@@ -32,6 +32,17 @@ struct ActiveEntry {
 
     deferred: bool,
 
+    /// Set under the lock immediately before `advance` starts. A source may resume the partition
+    /// as soon as it confirms the advance, so the next offset can arrive before the guard exits.
+    advancing: bool,
+
+    /// Recorded by the guard while a deferred delivery waits: whether the finished workflow left
+    /// the partition resolved (advanced, fenced, or stale) rather than unresolved.
+    released_safely: bool,
+
+    /// An ownership loss arrived after the deferred delivery, so that delivery is stale too.
+    deferred_lost: bool,
+
     released: Arc<Notify>,
 }
 
@@ -98,7 +109,17 @@ where
                     entry.stale = true;
                     entry.token.cancel();
 
-                    if entry.coordinator_done && !entry.deferred {
+                    if entry.deferred {
+                        // The deferred delivery preceded this loss in the source stream, so its
+                        // ownership is lost as well; it must drop without running the handler.
+                        entry.deferred_lost = true;
+
+                        if entry.coordinator_done {
+                            // The guard already signalled; signal again so the deferred
+                            // coordinator can never wait on an exited workflow.
+                            entry.released.notify_one();
+                        }
+                    } else if entry.coordinator_done {
                         active.remove(&partition);
                     }
                 }
@@ -112,7 +133,13 @@ where
                     let mut active = lock(&self.active);
 
                     if let Some(entry) = active.get_mut(&partition) {
-                        if entry.stale && !entry.deferred {
+                        // A stale entry awaits its replacement generation; a still-running
+                        // advance may be followed by the next offset before its guard releases
+                        // it. A finished advance that left the entry unresolved cannot be.
+                        let deferrable =
+                            entry.stale || (entry.advancing && !entry.coordinator_done);
+
+                        if deferrable && !entry.deferred {
                             entry.deferred = true;
 
                             Some(Arc::clone(&entry.released))
@@ -135,6 +162,9 @@ where
                                 stale: false,
                                 coordinator_done: false,
                                 deferred: false,
+                                advancing: false,
+                                released_safely: false,
+                                deferred_lost: false,
                                 released: Arc::new(Notify::new()),
                             },
                         );
@@ -208,9 +238,11 @@ impl<P: Eq + Hash> Drop for ActiveGuard<P> {
 
         current.coordinator_done = true;
 
-        if current.stale && current.deferred {
+        if current.deferred {
             // Keep the old token as a placeholder until the one deferred coordinator atomically
-            // installs its replacement. Later records cannot overtake it in that gap.
+            // installs its replacement, or stops when this workflow left the partition
+            // unresolved. Later records cannot overtake it in that gap.
+            current.released_safely = self.safe_to_release || current.stale;
             current.released.notify_one();
         } else if self.safe_to_release || current.stale {
             let released = Arc::clone(&current.released);
@@ -255,12 +287,24 @@ where
     {
         let mut current = lock(&active);
 
-        if !current.get(&partition).is_some_and(|entry| {
-            entry.stale
-                && entry.coordinator_done
+        let placeholder = current.get(&partition).filter(|entry| {
+            entry.coordinator_done
                 && entry.deferred
                 && Arc::ptr_eq(&entry.released, &start.released)
-        }) {
+        });
+
+        if placeholder.is_some_and(|entry| entry.deferred_lost) {
+            // Ownership was lost after this delivery: release the partition and drop the
+            // settlement without running the handler.
+            current.remove(&partition);
+            drop(current);
+            telemetry::partition_event(shared.labels, "stale_work");
+            drop(settlement);
+
+            return Ok(());
+        }
+
+        if !placeholder.is_some_and(|entry| entry.released_safely) {
             drop(current);
             start.stop.cancel();
 
@@ -280,6 +324,9 @@ where
                 stale: false,
                 coordinator_done: false,
                 deferred: false,
+                advancing: false,
+                released_safely: false,
+                deferred_lost: false,
                 released: Arc::new(Notify::new()),
             },
         );
@@ -379,6 +426,12 @@ where
         Resolution::Completed | Resolution::Dead(_) => {
             // Advance is not selected against cancellation. Once started it must complete or
             // timeout before the coordinator can release local ownership.
+            if let Some(entry) = lock(&guard.active).get_mut(&guard.partition)
+                && Arc::ptr_eq(&entry.token, &token)
+            {
+                entry.advancing = true;
+            }
+
             let advanced =
                 tokio::time::timeout(shared.settings.settlement_timeout, settlement.advance())
                     .await;
@@ -549,6 +602,9 @@ mod tests {
                 stale: false,
                 coordinator_done: false,
                 deferred: false,
+                advancing: false,
+                released_safely: false,
+                deferred_lost: false,
                 released: Arc::new(Notify::new()),
             },
         );
@@ -571,6 +627,9 @@ mod tests {
                 stale: false,
                 coordinator_done: false,
                 deferred: false,
+                advancing: false,
+                released_safely: false,
+                deferred_lost: false,
                 released: Arc::new(Notify::new()),
             },
         );

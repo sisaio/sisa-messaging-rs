@@ -139,6 +139,8 @@ struct Script {
     settle: HashMap<u8, VecDeque<Step>>,
 
     fenced_advance: HashSet<u8>,
+
+    advance_gate: HashMap<u8, Arc<Semaphore>>,
 }
 
 /// Shared observation and scripting state for every fake.
@@ -316,6 +318,12 @@ impl Probe {
             .entry(tag)
             .or_default()
             .push_back(step);
+    }
+
+    /// Holds the partitioned advance for `tag` after its settle step resolves and before the
+    /// result returns, modeling a source that resumes the partition ahead of the coordinator.
+    pub fn gate_advance(&self, tag: u8, gate: Arc<Semaphore>) {
+        lock(&self.script).advance_gate.insert(tag, gate);
     }
 
     pub fn fence_advance(&self, tag: u8) {
@@ -608,9 +616,14 @@ impl PartitionedLogSettlement for FakePartitionedSettlement {
             return Ok(PartitionAdvance::OwnershipLost);
         }
 
-        inner
-            .ack()
-            .await
+        let gate = lock(&inner.probe.script).advance_gate.remove(&inner.tag);
+        let acked = inner.ack().await;
+
+        if let Some(gate) = gate {
+            let _permit = gate.acquire().await;
+        }
+
+        acked
             .map(|()| PartitionAdvance::Advanced)
             .map_err(|error| match error {
                 IndividualSettlementError::Operation(error) => error,

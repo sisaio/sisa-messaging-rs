@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use sisa_messaging::FailureKind;
 use sisa_messaging_consumer::{ConsumerErrorKind, ConsumerExit, SettlementMode};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -657,4 +658,242 @@ async fn provider_continuation_after_reconciled_advance_accepts_next_offset() {
             .iter()
             .any(|event| matches!(event, Event::Ack(3)))
     );
+}
+
+/// Yields until the intake has received every queued source step.
+async fn drain_source_queue(harness: &Harness) {
+    for _ in 0..64 {
+        if harness.queued() == 0 {
+            break;
+        }
+
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(harness.queued(), 0);
+
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn advanced_release_race_defers_next_offset_until_guard_drops() {
+    let harness = Harness::new(SettlementMode::Broker);
+    let gate = Arc::new(Semaphore::new(0));
+    harness.probe.gate_advance(1, Arc::clone(&gate));
+    harness.deliver(1, "confirmed offset");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(1))))
+        .await;
+
+    // The source resumed after confirming offset 1 and emits the next offset on the same
+    // partition while the coordinator has not yet released its entry.
+    harness.deliver(3, "next offset before release");
+    drain_source_queue(&harness).await;
+
+    assert!(!running.is_finished());
+
+    assert!(
+        !harness
+            .probe
+            .events_for(3)
+            .iter()
+            .any(|event| matches!(event, Event::Handle(3)))
+    );
+
+    gate.add_permits(1);
+
+    // A regressed coordinator stops the run instead, so bound the wait on the paused clock.
+    let advanced = tokio::time::timeout(
+        Duration::from_secs(3_600),
+        harness
+            .probe
+            .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(3)))),
+    )
+    .await;
+
+    assert!(advanced.is_ok(), "deferred next offset did not advance");
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(3))),
+        1
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn deferred_next_offset_after_unresolved_advance_stops() {
+    let harness = Harness::new(SettlementMode::Broker);
+    let gate = Arc::new(Semaphore::new(0));
+    harness.probe.gate_advance(1, Arc::clone(&gate));
+
+    harness
+        .probe
+        .script_settle(1, Step::Error(FailureKind::Transient));
+
+    harness.deliver(1, "indeterminate offset");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(1))))
+        .await;
+
+    harness.deliver(3, "next offset behind an unresolved advance");
+    drain_source_queue(&harness).await;
+
+    assert!(!running.is_finished());
+    gate.add_permits(1);
+
+    let error = expect_error(join(running).await);
+    assert_eq!(error.kind(), ConsumerErrorKind::PartitionOrder);
+
+    assert!(
+        !harness
+            .probe
+            .events_for(3)
+            .iter()
+            .any(|event| matches!(event, Event::Handle(3) | Event::Ack(3)))
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+/// Runs until the consumer stops, failing instead of hanging if it never does.
+async fn bounded_join(
+    running: tokio::task::JoinHandle<Result<ConsumerExit, sisa_messaging_consumer::ConsumerError>>,
+) -> Result<ConsumerExit, sisa_messaging_consumer::ConsumerError> {
+    tokio::time::timeout(Duration::from_secs(3_600), join(running))
+        .await
+        .unwrap_or_else(|_| panic!("the consumer stalled instead of stopping"))
+}
+
+async fn next_offset_after_unresolved_advance(timed_out: bool) {
+    let harness = Harness::new(SettlementMode::Broker);
+
+    harness.probe.script_settle(
+        1,
+        if timed_out {
+            Step::Hang
+        } else {
+            Step::Error(FailureKind::Transient)
+        },
+    );
+
+    harness.deliver(1, "unresolved offset");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(1))))
+        .await;
+
+    if timed_out {
+        tokio::time::advance(harness.settings.settlement_timeout + Duration::from_secs(1)).await;
+    }
+
+    // Let the coordinator observe the unresolved outcome and exit before the next offset.
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+
+    harness.deliver(3, "next offset behind an unresolved advance");
+
+    let error = expect_error(bounded_join(running).await);
+    assert_eq!(error.kind(), ConsumerErrorKind::PartitionOrder);
+
+    assert!(
+        !harness
+            .probe
+            .events_for(3)
+            .iter()
+            .any(|event| matches!(event, Event::Handle(3) | Event::Ack(3)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn next_offset_after_timed_out_advance_stops_without_handling() {
+    next_offset_after_unresolved_advance(true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn next_offset_after_transient_advance_error_stops_without_handling() {
+    next_offset_after_unresolved_advance(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn ownership_loss_after_deferred_next_offset_drops_it_unhandled() {
+    let harness = Harness::new(SettlementMode::Broker);
+    let gate = Arc::new(Semaphore::new(0));
+    harness.probe.gate_advance(1, Arc::clone(&gate));
+    harness.deliver(1, "advancing offset");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(1))))
+        .await;
+
+    // The next offset is deferred behind the running advance, then ownership is lost.
+    harness.deliver(3, "deferred then lost");
+    drain_source_queue(&harness).await;
+    harness.lose_partition(1);
+    drain_source_queue(&harness).await;
+
+    gate.add_permits(1);
+
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+
+    harness.close();
+
+    assert!(matches!(
+        bounded_join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    assert!(
+        !harness
+            .probe
+            .events_for(3)
+            .iter()
+            .any(|event| matches!(event, Event::Handle(3) | Event::Ack(3)))
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
 }

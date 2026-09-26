@@ -525,7 +525,10 @@ pub enum PartitionedLogReceive<D, P> {
     /// A record with a settlement handle bound to its partition and offset.
     Delivery(D),
 
-    /// The source lost ownership of this partition; no record was advanced.
+    /// Releases this partition without the runtime advancing it.
+    ///
+    /// The source has fenced any earlier advance and reconciled the authoritative committed
+    /// cursor, and will continue or replay from that cursor.
     OwnershipLost(P),
 
     /// The source closed cleanly.
