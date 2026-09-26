@@ -36,7 +36,8 @@ crates/
 ├── sisa-messaging-kafka/benches/
 │   └── mapping.rs
 ├── sisa-messaging-iggy/benches/
-│   └── mapping.rs
+│   ├── mapping.rs
+│   └── partition_progress.rs
 ├── sisa-messaging-rabbitmq/benches/
 │   ├── mapping.rs
 │   └── provider.rs
@@ -146,6 +147,25 @@ Iggy features): `cargo bench -p sisa-messaging-iggy --bench mapping -- --warm-up
 ordering-key fixture, Criterion estimated about 1.46 µs for encode (interval 1.4254–1.5134 µs)
 and about 2.92 µs for decode (2.9025–2.9458 µs). This is a starting measurement, not a release
 regression threshold.
+
+### Iggy partition progress
+
+`sisa-messaging-iggy/benches/partition_progress.rs` is the named hot-path benchmark for the
+replay-only consumer-group source and runs only when `SISA_IGGY_SERVER_ADDRESS` is set. Each
+iteration provisions a fresh topic and group, publishes, and opens the source before timing.
+`source_receive_advance_1_partition` drives the source directly (poll buffer, delivery, and offset
+store per record); `consumer_noop_{1,4}_partitions` runs the generic partitioned runtime with a
+no-I/O inbox and no-op handler, stops timing when every record committed, and then verifies each
+partition's stored cursor and that every record committed exactly once.
+
+Initial local run (2026-09-26, Apple M4 Pro, macOS arm64 Darwin 25.5.0, rustc 1.98.0,
+`apache/iggy:0.9.0` in OrbStack over loopback, 256 records per iteration):
+`cargo bench -p sisa-messaging-iggy --bench partition_progress`. Criterion estimated about
+51.9 ms for the direct source path (about 4.9k records/s), 53.1 ms for the runtime over one
+partition (about 4.8k records/s), and 137.9 ms over four partitions (about 1.9k records/s). Raw SDK
+stores over four partitions from one client took a similar 137–235 ms, so the four-partition
+figure is bounded by the server's store latency, not the source. These are loopback measurements,
+not network capacity or release thresholds.
 
 ### RabbitMQ mapping
 

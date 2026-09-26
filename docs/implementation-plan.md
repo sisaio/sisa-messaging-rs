@@ -39,6 +39,7 @@ sisa-messaging-rs/
 │   ├── axum-outbox/
 │   ├── nats-publish/
 │   ├── nats-postgres-consumer/
+│   ├── iggy-postgres-consumer/
 │   └── manual-inbox/
 ├── tests/
 │   ├── architecture/
@@ -73,7 +74,7 @@ multiple sources.
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox | messaging, outbox, inbox |
 | `sisa-messaging-nats` | JetStream publisher, delivery source, wire mapper and settlement | messaging |
 | `sisa-messaging-kafka` | Kafka publisher and wire mapper; partitioned-log delivery source and settlement in Phase 6a | messaging |
-| `sisa-messaging-iggy` | Apache Iggy publisher and wire mapper; partitioned-log delivery source deferred to Phase 6b's fencing decision | messaging |
+| `sisa-messaging-iggy` | Apache Iggy publisher, wire mapper, and replay-only partitioned-log delivery source | messaging |
 | `sisa-messaging-rabbitmq` | RabbitMQ AMQP 0-9-1 confirmed publisher, individual delivery source, wire mapper and settlement | messaging |
 
 Provider crates never depend on each other, including through dev-dependencies. Examples, system
@@ -206,18 +207,28 @@ outbox, inbox, and consumer crates. A provider may take `sisa-messaging-inbox` a
   enabled. The provider documents this rather than adding its own retries. Header names and
   values are capped at 255 bytes; an oversized `tracestate` is omitted and an oversized
   `traceparent` is rejected.
-- Defer the partitioned-log delivery source and settlement. Iggy offset stores carry no
-  consumer-group membership generation, ownership is checked only when a write is admitted, and
-  offset reads may come from a lagging follower, so the #23 fencing and reconciliation rules cannot
-  be met. An authored, opt-in real-broker test targets that gap; the inbound slice follows in a
-  separately approved issue once the fencing decision is made.
+- Deliver the partitioned-log delivery source as a replay-only provider (#60, owner decision
+  2026-09-26). Against `apache/iggy:0.9.0`, the server paired with SDK 0.11.0, a store from a
+  non-owner member is rejected with 5009, but a store from an owner whose revocation is draining is
+  admitted, a lower store is accepted and moves the cursor back, the stored offset is the last
+  processed record, and offset reads may come from a lagging follower. Because the SDK resends the
+  same request id, a rejection does not prove an earlier transmission did nothing, so the #23
+  fencing and reconciliation rules cannot be met; a late or lower store can only cause replay. The
+  source uses the SDK's low-level poll and store calls with auto-commit disabled, stores each
+  record's own offset only after the consumer resolves it, keeps one unresolved record per
+  partition, fails on an offset gap, and after an indeterminate store withdraws the partition and
+  replays. Applications compose `IggyDeliverySource` with `Consumer::run_partitioned`, as
+  `examples/iggy-postgres-consumer` shows; no facade wraps the consumer. A topic purge restarts
+  Iggy offsets at 0, so stop the group's consumers before purging; the source does not detect
+  offset reuse.
 - Exercise deterministic mapping, settings, resolver, and error-classification tests plus real
-  Iggy publish confirmation and offset-fencing tests. Record the Iggy mapping benchmark and its
-  measured environment and result before provider review completes. Open gate: the two opt-in
-  real-broker tests are authored but have no recorded run, because the pinned server image does
-  not start under Docker Desktop on macOS and CI has no Iggy broker job yet; the
-  success-after-reply guarantee and the fencing gap remain unproven against a live broker until a
-  Linux run or CI job records them.
+  Iggy publish confirmation, ordered progression, offset-gap, cancellation, rebalance, and
+  safe-error tests and an Iggy/PostgreSQL system test. Record the Iggy mapping and
+  `partition_progress` benchmarks with their measured environment and results. The CI quality job
+  runs the real-broker suites against `apache/iggy:0.9.0`, the server release paired with SDK
+  0.11.0; the server needs `--security-opt seccomp=unconfined` for io_uring and a capped
+  `IGGY_SHARDING_CPU_ALLOCATION` on hosts without full NUMA topology, and with both it also starts
+  under a macOS Docker host.
 
 ### Phase 6c — RabbitMQ AMQP 0-9-1 provider
 

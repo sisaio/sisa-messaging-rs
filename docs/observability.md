@@ -258,8 +258,10 @@ is known safe; otherwise record a stable category/type and retain the original a
 
 The redaction guarantee covers the `messaging.*` targets this repository emits. Transport SDKs
 emit their own targets: `async-nats` records raw protocol frames, including header values and
-payload bytes, at TRACE under `async_nats`. Applications must filter SDK targets below TRACE in
-their subscriber when payloads or headers are sensitive.
+payload bytes, at TRACE under `async_nats`, and the Iggy SDK logs the configured username during
+sign-in and raw I/O error text under `iggy`. Applications must filter SDK targets below TRACE in
+their subscriber when payloads or headers are sensitive, and suppress or scrub the `iggy` target
+when usernames or connection errors are.
 
 ## 8. Context propagation
 
