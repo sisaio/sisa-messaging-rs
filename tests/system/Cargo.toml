@@ -1,7 +1,7 @@
 [package]
 name = "sisa-messaging-system-tests"
 version = "0.0.0"
-description = "Real PostgreSQL and JetStream system proofs of the typed consumer"
+description = "Real PostgreSQL, JetStream, and Kafka system proofs of the typed consumer"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ publish = false
 sisa-messaging = { workspace = true, features = ["json"] }
 sisa-messaging-consumer = { workspace = true }
 sisa-messaging-inbox = { workspace = true }
+sisa-messaging-kafka = { workspace = true }
 sisa-messaging-nats = { workspace = true }
 sisa-messaging-postgres = { workspace = true }
 
@@ -22,12 +23,19 @@ sqlx = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-util = { workspace = true }
 
+# Test-owned Kafka group seeding and committed-cursor reads.
+rdkafka = { workspace = true }
+
 # Derives the JSON test message.
 serde = { workspace = true }
 
 [[test]]
 name = "nats_postgres"
 path = "nats_postgres.rs"
+
+[[test]]
+name = "kafka_postgres"
+path = "kafka_postgres.rs"
 
 [lints]
 workspace = true

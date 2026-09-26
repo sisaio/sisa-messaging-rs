@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/*",
+    "examples/kafka-postgres-consumer",
     "examples/nats-postgres-consumer",
     "examples/redis-postgres-consumer",
     "tests/architecture",

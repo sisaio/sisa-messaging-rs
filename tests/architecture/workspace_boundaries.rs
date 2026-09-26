@@ -440,6 +440,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-redis",
         "redis-postgres-consumer",
         "nats-postgres-consumer",
+        "kafka-postgres-consumer",
         "sisa-messaging-architecture-tests",
         "sisa-messaging-system-tests",
         "sisa-messaging-xtask",
@@ -816,6 +817,68 @@ fn provider_packages_stay_independent_in_every_dependency_section() {
                 "{provider} dev or build dependency {name} is not an allowed workspace crate"
             );
         }
+    }
+}
+
+/// Finds any path, import, or macro path whose first segment names a crate.
+struct CrateReferenceFinder<'a> {
+    crate_name: &'a str,
+
+    found: bool,
+}
+
+impl<'ast> Visit<'ast> for CrateReferenceFinder<'_> {
+    fn visit_path(&mut self, path: &'ast SynPath) {
+        let first = path
+            .segments
+            .first()
+            .map(|segment| ident_name(&segment.ident));
+
+        self.found |= first.as_deref() == Some(self.crate_name);
+        visit::visit_path(self, path);
+    }
+
+    fn visit_use_tree(&mut self, tree: &'ast UseTree) {
+        if let UseTree::Path(path) = tree {
+            self.found |= ident_name(&path.ident) == self.crate_name;
+        } else if let UseTree::Name(name) = tree {
+            self.found |= ident_name(&name.ident) == self.crate_name;
+        } else if let UseTree::Rename(rename) = tree {
+            self.found |= ident_name(&rename.ident) == self.crate_name;
+        }
+
+        visit::visit_use_tree(self, tree);
+    }
+}
+
+/// Verifies that the Kafka example composes the provider without importing rdkafka.
+#[test]
+fn kafka_example_never_imports_rdkafka() {
+    let example = workspace_root().join("examples/kafka-postgres-consumer");
+
+    assert!(
+        dependency_declarations(&read(&example.join("Cargo.toml")))
+            .iter()
+            .all(|dependency| dependency.actual_name != "rdkafka"),
+        "the Kafka example must not depend on rdkafka"
+    );
+
+    for source in rust_sources_under(&example.join("src")) {
+        let file = syn::parse_file(&read(&source))
+            .unwrap_or_else(|error| panic!("failed to parse {}: {error}", source.display()));
+
+        let mut finder = CrateReferenceFinder {
+            crate_name: "rdkafka",
+            found: false,
+        };
+
+        finder.visit_file(&file);
+
+        assert!(
+            !finder.found,
+            "{} must not import rdkafka",
+            source.display()
+        );
     }
 }
 

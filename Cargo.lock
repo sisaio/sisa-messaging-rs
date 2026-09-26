@@ -2213,6 +2213,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kafka-postgres-consumer"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
+ "sisa-messaging-kafka",
+ "sisa-messaging-postgres",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "lapin"
 version = "4.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3653,10 +3668,12 @@ name = "sisa-messaging-system-tests"
 version = "0.0.0"
 dependencies = [
  "async-nats",
+ "rdkafka",
  "serde",
  "sisa-messaging",
  "sisa-messaging-consumer",
  "sisa-messaging-inbox",
+ "sisa-messaging-kafka",
  "sisa-messaging-nats",
  "sisa-messaging-postgres",
  "sqlx",
