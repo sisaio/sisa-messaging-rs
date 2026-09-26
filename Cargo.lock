@@ -2342,6 +2342,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nats-postgres-consumer"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "serde",
+ "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
+ "sisa-messaging-nats",
+ "sisa-messaging-postgres",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3516,22 +3532,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "sisa-messaging-example-nats-postgres-consumer"
-version = "0.0.0"
-dependencies = [
- "async-nats",
- "serde",
- "sisa-messaging",
- "sisa-messaging-consumer",
- "sisa-messaging-inbox",
- "sisa-messaging-nats",
- "sisa-messaging-postgres",
- "sqlx",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
