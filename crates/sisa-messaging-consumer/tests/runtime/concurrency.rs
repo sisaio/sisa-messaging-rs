@@ -366,6 +366,44 @@ async fn a_handler_panic_never_commits_or_acknowledges() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_provider_panic_is_not_reported_as_a_handler_panic() {
+    for mode in [SettlementMode::Broker, SettlementMode::PendingRecovery] {
+        for in_commit in [false, true] {
+            let harness = Harness::new(mode);
+
+            if in_commit {
+                harness.probe.script_commit(1, Step::Panic);
+            } else {
+                harness.probe.script_claim(1, ClaimStep::Db(Step::Panic));
+            }
+
+            harness.deliver(1, "provider panics");
+
+            // `run` asserts that no transaction is live when it returns.
+            let error = expect_error(harness.run().await);
+
+            assert_eq!(error.kind(), ConsumerErrorKind::ProviderPanicked);
+            assert_eq!(error.failure_kind(), FailureKind::Permanent);
+            assert_eq!(error.to_string(), "consumer provider call panicked");
+            assert!(error.provider_source().is_none());
+            assert_redacted(&error);
+
+            let events = harness.probe.events_for(1);
+
+            assert!(events.contains(&Event::TxDropped(Some(1))));
+            assert!(events.contains(&Event::Left(1)));
+            assert!(!events.iter().any(is_settlement));
+            assert!(harness.probe.committed_writes().is_empty());
+
+            assert_eq!(
+                harness.probe.count(|event| *event == Event::Handle(1)),
+                usize::from(in_commit)
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn sentinel_values_never_reach_errors_or_captured_logs() {
     let capture = Capture::default();
     let _installed = capture.install();

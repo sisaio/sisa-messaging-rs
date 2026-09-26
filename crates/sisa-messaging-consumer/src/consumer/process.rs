@@ -8,6 +8,7 @@
 use std::error::Error;
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use sisa_messaging::{
@@ -209,9 +210,13 @@ where
 }
 
 /// Runs one delivery from wire value to resolution.
+///
+/// `in_handler` is set only while the application handler future is being awaited, so the
+/// coordinator can attribute a panic of this task to the handler or to a provider call.
 pub(super) async fn process<M, W, Map, Codec, Inbox, H>(
     shared: Arc<Shared<Map, Codec, Inbox, H>>,
     wire: W,
+    in_handler: Arc<AtomicBool>,
 ) -> Processed
 where
     M: Message,
@@ -300,7 +305,13 @@ where
 
     workflow.attempt = Some(receipt.recorded_failures().saturating_add(1));
 
-    match shared.handler.handle(&mut transaction, &envelope).await {
+    in_handler.store(true, Ordering::Release);
+
+    let handled = shared.handler.handle(&mut transaction, &envelope).await;
+
+    in_handler.store(false, Ordering::Release);
+
+    match handled {
         Ok(()) => {
             let completed =
                 bounded(timeout, shared.inbox.complete(&mut transaction, receipt)).await;

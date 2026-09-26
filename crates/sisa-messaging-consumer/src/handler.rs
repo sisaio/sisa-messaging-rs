@@ -19,7 +19,8 @@ use sisa_messaging::{Envelope, ErrorClassifier};
 /// emits handler error text to telemetry.
 ///
 /// The consumer does not time out or catch panics from handler code. A panic drops the
-/// transaction, leaves the delivery unsettled, and stops the consumer.
+/// transaction, leaves the delivery unsettled, and stops the consumer with
+/// [`ConsumerErrorKind::HandlerPanicked`](crate::ConsumerErrorKind::HandlerPanicked).
 pub trait ConsumerHandler<M, Tx>: Send + Sync {
     /// Application error with an explicit retry classification.
     type Error: Error + Send + Sync + 'static + ErrorClassifier;

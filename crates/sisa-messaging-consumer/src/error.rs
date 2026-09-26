@@ -123,8 +123,13 @@ pub enum ConsumerErrorKind {
     /// A delivery requires operator action; it was left unsettled.
     OperatorActionRequired(OperatorReason),
 
-    /// A processing task panicked; its transaction was dropped and its delivery left unsettled.
+    /// The application handler panicked; its transaction was dropped and its delivery left
+    /// unsettled.
     HandlerPanicked,
+
+    /// A mapper, codec, or inbox provider call panicked during processing; its transaction was
+    /// dropped and its delivery left unsettled.
+    ProviderPanicked,
 
     /// A consumer-internal task failed unexpectedly.
     Runtime,
@@ -213,7 +218,8 @@ impl fmt::Display for ConsumerError {
             ConsumerErrorKind::OperatorActionRequired(_) => {
                 "consumer delivery requires operator action"
             }
-            ConsumerErrorKind::HandlerPanicked => "consumer processing task panicked",
+            ConsumerErrorKind::HandlerPanicked => "consumer handler panicked",
+            ConsumerErrorKind::ProviderPanicked => "consumer provider call panicked",
             ConsumerErrorKind::Runtime => "consumer runtime failed",
         })
     }

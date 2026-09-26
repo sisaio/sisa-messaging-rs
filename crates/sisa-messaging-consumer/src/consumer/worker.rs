@@ -2,6 +2,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use sisa_messaging::{
@@ -157,19 +158,25 @@ where
 
     let (wire, settlement) = delivery.into_parts();
 
+    let in_handler = Arc::new(AtomicBool::new(false));
+
     let workflow = AbortOnDropHandle::new(tracker.spawn(process::process::<M, _, _, _, _, _>(
         Arc::clone(&shared),
         wire,
+        Arc::clone(&in_handler),
     )));
 
     let processed = match workflow.await {
         Ok(processed) => processed,
         Err(error) => {
-            // Never render the panic payload; the settlement handle is dropped unsettled.
-            let kind = if error.is_panic() {
+            // Never render the panic payload; the settlement handle is dropped unsettled. The
+            // join completing orders the workflow's last flag store before this load.
+            let kind = if !error.is_panic() {
+                ConsumerErrorKind::Runtime
+            } else if in_handler.load(Ordering::Acquire) {
                 ConsumerErrorKind::HandlerPanicked
             } else {
-                ConsumerErrorKind::Runtime
+                ConsumerErrorKind::ProviderPanicked
             };
 
             drop(settlement);

@@ -182,6 +182,7 @@ const fn error_label(kind: ConsumerErrorKind) -> &'static str {
         ConsumerErrorKind::Settlement => "settlement",
         ConsumerErrorKind::OperatorActionRequired(_) => "operator_action_required",
         ConsumerErrorKind::HandlerPanicked => "handler_panicked",
+        ConsumerErrorKind::ProviderPanicked => "provider_panicked",
         ConsumerErrorKind::Runtime => "runtime",
     }
 }

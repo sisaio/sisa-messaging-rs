@@ -497,11 +497,14 @@ first `ConsumerError`, including one observed during the drain, takes precedence
 or source close; otherwise the first of cancellation and close determines the exit. Any receive
 error is fatal.
 
-The framework never catches panics as business errors. A panicked handler task drops its
+The framework never catches panics as business errors. A panic anywhere in a delivery's
+processing, including the mapper, the codec, and every inbox and unit-of-work call, drops its
 transaction, leaves the delivery unacknowledged, emits a bounded error event, and lets the
-framework continue or exit according to a fixed documented policy. The initial policy is to exit
-the consumer with `ConsumerErrorKind::HandlerPanicked` so the application supervisor observes the
-programming fault; the panic payload is never rendered.
+framework continue or exit according to a fixed documented policy. The initial policy is to stop
+the consumer so the application supervisor observes the programming fault. A panic while the
+application handler runs returns `ConsumerErrorKind::HandlerPanicked`; a panic in a mapper, codec,
+or inbox provider call returns `ConsumerErrorKind::ProviderPanicked`. A panic in settlement or
+coordination returns `ConsumerErrorKind::Runtime`. The panic payload is never rendered.
 
 ## 8. Error surface
 
@@ -512,9 +515,9 @@ Errors are separated by decision boundary:
   source, provider, settlement, operator-action, panic, or runtime failure that ends `run`. It
   carries a `ConsumerErrorKind` (`SourceOpen`, `SourceOpenTimeout`, `Unsupported`,
   `AttemptBoundExceedsMaxDeliver`, `Source`, `Inbox`, `FailureNotRecorded`, `Settlement`,
-  `OperatorActionRequired`, `HandlerPanicked`, `Runtime`) and a `FailureKind`. Its `Display` and
-  `Debug` output are fixed text, `Error::source` is `None`, and the typed provider error is
-  available through `ConsumerError::provider_source`;
+  `OperatorActionRequired`, `HandlerPanicked`, `ProviderPanicked`, `Runtime`) and a
+  `FailureKind`. Its `Display` and `Debug` output are fixed text, `Error::source` is `None`, and
+  the typed provider error is available through `ConsumerError::provider_source`;
 - handler error: application-owned and classified as transient or permanent;
 - inbox/unit-of-work error: provider-owned and retained as a source;
 - mapping/codec error: mapped to a stable poison reason without rendering payload bytes;
@@ -560,7 +563,7 @@ inbox state remains authoritative; consumer counters describe activity observed 
   settlement; a source that lacks heartbeat cannot be configured to require it.
 - Cancellation stops pulls, drains resolved work, and leaves individual unresolved work for
   redelivery.
-- A handler panic cannot commit or acknowledge the delivery.
+- A handler or provider panic cannot commit or acknowledge the delivery.
 - Source closure and fatal source errors have distinct exit results.
 - Permanent provider/settlement errors stop receiving and retain their typed source.
 - Opening rejects an unsupported individual requirement, a heartbeat/ack-wait mismatch, and an
