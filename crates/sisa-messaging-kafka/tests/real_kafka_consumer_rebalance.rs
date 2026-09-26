@@ -163,9 +163,12 @@ async fn rebalance_mid_flight_emits_loss_and_new_owner_replays_once() {
 
     assert_eq!(inbox.live(), 0);
 
-    let outcome = tokio::time::timeout(TEST_TIMEOUT, new_shutdown)
-        .await
-        .unwrap_or_else(|_| panic!("Kafka source shutdown did not finish"));
+    let outcome = tokio::time::timeout(
+        TEST_TIMEOUT,
+        std::future::IntoFuture::into_future(new_shutdown),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("Kafka source shutdown did not finish"));
 
     assert_eq!(outcome, KafkaShutdownOutcome::Closed);
 }
@@ -255,9 +258,12 @@ async fn shutdown_completes_within_bound() {
     let started = Instant::now();
     drop(source);
 
-    let outcome = tokio::time::timeout(shutdown_timeout + Duration::from_secs(5), shutdown)
-        .await
-        .unwrap_or_else(|_| panic!("Kafka source shutdown exceeded its bound"));
+    let outcome = tokio::time::timeout(
+        shutdown_timeout + Duration::from_secs(5),
+        std::future::IntoFuture::into_future(shutdown),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("Kafka source shutdown exceeded its bound"));
 
     assert_eq!(outcome, KafkaShutdownOutcome::Closed);
     assert!(started.elapsed() <= shutdown_timeout);

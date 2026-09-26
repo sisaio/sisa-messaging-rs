@@ -79,9 +79,10 @@ async fn join(
 }
 
 async fn assert_closed(shutdown: KafkaSourceShutdown) {
-    let outcome = tokio::time::timeout(TEST_TIMEOUT, shutdown)
-        .await
-        .unwrap_or_else(|_| panic!("Kafka source shutdown did not finish"));
+    let outcome =
+        tokio::time::timeout(TEST_TIMEOUT, std::future::IntoFuture::into_future(shutdown))
+            .await
+            .unwrap_or_else(|_| panic!("Kafka source shutdown did not finish"));
 
     assert_eq!(outcome, KafkaShutdownOutcome::Closed);
 }

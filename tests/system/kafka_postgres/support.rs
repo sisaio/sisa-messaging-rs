@@ -496,9 +496,12 @@ impl Running {
             .expect("consumer did not stop")
             .expect("consumer task panicked");
 
-        let closed = tokio::time::timeout(PROGRESS_TIMEOUT, self.shutdown)
-            .await
-            .expect("Kafka member did not close");
+        let closed = tokio::time::timeout(
+            PROGRESS_TIMEOUT,
+            std::future::IntoFuture::into_future(self.shutdown),
+        )
+        .await
+        .expect("Kafka member did not close");
 
         assert_eq!(closed, KafkaShutdownOutcome::Closed);
 

@@ -252,7 +252,7 @@ async fn run() -> Result<(), ExampleError> {
 /// Waits for the Kafka member thread to finish; returns whether the consumer closed cleanly.
 async fn close_source(shutdown: KafkaSourceShutdown, bound: Duration) -> bool {
     matches!(
-        tokio::time::timeout(bound, shutdown).await,
+        tokio::time::timeout(bound, std::future::IntoFuture::into_future(shutdown)).await,
         Ok(KafkaShutdownOutcome::Closed)
     )
 }

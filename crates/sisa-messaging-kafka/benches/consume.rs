@@ -328,7 +328,13 @@ impl Bench {
 
         let closed = self
             .runtime
-            .block_on(async { tokio::time::timeout(Duration::from_secs(30), shutdown).await })
+            .block_on(async {
+                tokio::time::timeout(
+                    Duration::from_secs(30),
+                    std::future::IntoFuture::into_future(shutdown),
+                )
+                .await
+            })
             .unwrap();
 
         assert_eq!(closed, KafkaShutdownOutcome::Closed);
