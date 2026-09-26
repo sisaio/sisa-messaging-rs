@@ -282,10 +282,11 @@ let consumer = Consumer::<OrderCreated, _>::new(
 let task = tokio::spawn(consumer.run(cancel.child_token()));
 ```
 
-This is an intended integration sketch until the consumer runtime is implemented. The application
-supplies `subject_resolver` because the mapper also supports encoding. The future consumer runtime
-applies `source_timeout` to the whole source opening operation and `settlement_timeout` to each
-settlement operation. Direct users of the NATS provider apply their own time bounds.
+`Consumer::run` implements this individual-delivery path; heartbeat acknowledgement and the
+partitioned-log profile arrive with #11. The application supplies `subject_resolver` because the
+mapper also supports encoding. The consumer applies `source_timeout` to the whole source opening
+operation and `settlement_timeout` to each settlement operation. Direct users of the NATS
+provider apply their own time bounds.
 
 Constructors do no I/O. The application creates or looks up the JetStream stream and durable
 consumer before constructing `NatsDeliverySource`. It configures the same stable durable name and
@@ -361,7 +362,10 @@ Rules:
    prevents two terminal settlement calls through safe Rust.
 9. A transient provider error produces a delayed nak when settlement remains safe. A permanent
    unit-of-work/store error leaves the delivery unacknowledged and stops the runtime so an
-   application supervisor and operator can address the system failure.
+   application supervisor and operator can address the system failure. This includes a
+   permanent failure of the rollback that follows a duplicate, in-progress, or dead claim or a
+   failed claim or completion; a transient failure of that rollback is logged and keeps the
+   delivery's resolution.
 10. A transient settlement error leaves that attempt unresolved and allows the runtime to
     continue. A permanent settlement error stops the runtime rather than producing an unbounded
     stream of messages that cannot be settled.
@@ -402,7 +406,7 @@ The decision table maps each workflow resolution per mode:
 | Transient rollback or failure-record error after a handler failure or body-decode failure | delayed nak | leave pending; stop |
 | Durable dead claim or failure record | terminate | leave pending; stop for operator |
 | Malformed wire value without a trustworthy identity | terminate | leave pending; stop for operator |
-| Permanent or unknown provider failure | leave pending; stop | leave pending; stop |
+| Permanent or unknown provider failure, including a permanent cleanup rollback failure | leave pending; stop | leave pending; stop |
 
 A transient settlement error or timeout is logged and leaves that attempt to redelivery; a
 permanent or unsupported settlement error stops the consumer in both modes.
@@ -442,16 +446,19 @@ is not polled for more work when all permits are occupied. This bounds:
 - outstanding broker acknowledgements;
 - pressure on the database pool.
 
-Each in-flight delivery has one coordinator. The database/handler workflow runs in an owned task;
-the coordinator selects only over task readiness, cancellation, and an individual-profile
-heartbeat timer. A heartbeat acknowledgement is performed inside the selected arm, so externally
-visible I/O is not embedded in a cancellable `select!` branch future. The initial partitioned-log
-profile admits at most one unresolved record per partition while allowing separate partitions to
-make bounded concurrent progress.
+Each in-flight delivery has one coordinator. The database/handler workflow runs in an owned task.
+In this slice the coordinator has no heartbeat arm: it awaits the workflow task, then performs
+the settlement operation outside any `select!`. The #11 design adds an individual-profile
+heartbeat timer: the coordinator then selects only over task readiness, cancellation, and that
+timer, and performs each heartbeat acknowledgement inside the selected arm, so externally visible
+I/O is not embedded in a cancellable `select!` branch future. The partitioned-log profile, also
+planned for #11, admits at most one unresolved record per partition while allowing separate
+partitions to make bounded concurrent progress.
 
-Heartbeat acknowledgement covers database work and handler work. It reduces needless redelivery
-of slow messages but does not promise exclusivity; the inbox remains the correctness mechanism.
-Heartbeat failures are warnings and do not cancel a handler whose transaction is still healthy.
+When #11 adds it, heartbeat acknowledgement covers database work and handler work. It reduces
+needless redelivery of slow messages but does not promise exclusivity; the inbox remains the
+correctness mechanism. Heartbeat failures are warnings and do not cancel a handler whose
+transaction is still healthy.
 
 A delivery takes its permit when it is received and holds it until both its coordinator and its
 workflow task, the only owner of its transaction, have ended. Normally the coordinator ends only
@@ -522,10 +529,10 @@ available for telemetry and debugging.
 
 ## 9. Observability
 
-The framework creates one OTel-conformant `process {destination template}` span per delivery. It
-extracts remote trace context before opening the span and, for this single-message path, makes that
-context the parent. Safe fields include message type, message ID, scope, attempt, outcome, and
-bounded error category; payload and header values are never recorded.
+Planned for #11: the framework creates one OTel-conformant `process {destination template}` span
+per delivery. It extracts remote trace context before opening the span and, for this
+single-message path, makes that context the parent. Safe fields include message type, message ID,
+scope, attempt, outcome, and bounded error category; payload and header values are never recorded.
 
 The first runtime slice emits only bounded, redacted tracing events; the per-delivery span and
 consumer metrics are delivered by #11.

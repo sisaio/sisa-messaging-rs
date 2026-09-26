@@ -310,3 +310,73 @@ async fn source_failure_returns_a_source_error() {
 
     assert_redacted(&error);
 }
+
+#[tokio::test(start_paused = true)]
+async fn permanent_cleanup_rollback_failure_stops_without_settling() {
+    let completed = harness();
+    completed.probe.mark_completed(1);
+
+    completed
+        .probe
+        .script_rollback(Step::Error(FailureKind::Permanent));
+
+    completed.deliver(1, "duplicate");
+
+    let error = expect_error(completed.run().await);
+
+    assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+    assert_eq!(error.failure_kind(), FailureKind::Permanent);
+
+    assert!(
+        error
+            .provider_source()
+            .is_some_and(|source| source.is::<FakeError>())
+    );
+
+    assert_eq!(
+        trace(&completed, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
+    );
+
+    let claim = harness();
+
+    claim
+        .probe
+        .script_claim(1, ClaimStep::Db(Step::Error(FailureKind::Transient)));
+
+    claim
+        .probe
+        .script_rollback(Step::Error(FailureKind::Permanent));
+
+    claim.deliver(1, "claim");
+
+    let error = expect_error(claim.run().await);
+
+    assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+
+    assert_eq!(
+        trace(&claim, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
+    );
+
+    assert_never_naks_or_terminates(&claim);
+}
+
+#[tokio::test(start_paused = true)]
+async fn transient_cleanup_rollback_failure_keeps_the_resolution() {
+    let harness = harness();
+    harness.probe.mark_completed(1);
+
+    harness
+        .probe
+        .script_rollback(Step::Error(FailureKind::Transient));
+
+    harness.deliver(1, "duplicate");
+
+    closes_cleanly(&harness).await;
+
+    assert_eq!(
+        trace(&harness, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Ack(1)]
+    );
+}
