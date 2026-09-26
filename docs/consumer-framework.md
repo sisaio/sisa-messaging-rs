@@ -306,6 +306,37 @@ composition against a real JetStream server, including that a failed commit is n
 acknowledged. `tests/system` proves with `PostgresInboxStore` that committed effects are durable
 once acknowledged and that a failed attempt's effects roll back before the failure is recorded.
 
+Kafka composes the same way through the partitioned profile, compiled in
+[`examples/kafka-postgres-consumer`](../examples/kafka-postgres-consumer/src/main.rs):
+`KafkaClient::delivery_source` takes `KafkaConsumerSettings` (group id, a required static group
+instance id, and topics), and `Consumer::new_partitioned` composes the returned source with
+`KafkaEnvelopeMapper`; no Kafka consumer façade exists. The source satisfies the partition
+settlement contract in section 2 with a broker-authoritative fence:
+
+- An advance is committed only through a transactional offset commit that carries the
+  consumer-group metadata captured when the partition was assigned, never metadata refreshed at
+  settlement. The coordinator rejects it once the generation or member changed, which the source
+  reports as `OwnershipLost` after aborting the transaction.
+- A static group instance id is required because the broker does not validate a generation-less
+  commit from a member without one. The source forces read-committed isolation, eager range
+  assignment, the classic group protocol, and manual offsets, and derives one stable
+  transactional id per group instance.
+- An indeterminate advance is fenced by re-initializing the same transactional id, which aborts
+  or completes the old transaction and fences the old producer epoch, before the source reads
+  the read-committed cursor and continues or replays. A new owner cannot read a cursor while an
+  older transaction is pending.
+- The source pauses each partition while its record is unresolved and bounds its hand-off queue
+  to the runtime; librdkafka's own fetch queue keeps its configured limits. It seeks to the next
+  unresolved offset before resuming, so offsets are neither skipped nor reordered.
+
+The `real_kafka_transactional_fence` suite in `sisa-messaging-kafka` records this broker
+behavior, and the `real_kafka_rebalance` control shows why a plain consumer commit is not a
+fence. The `real_kafka_consumer` suites prove composition, rebalance, cancellation, and commit
+ambiguity; `tests/system` proves it with `PostgresInboxStore`. Deployments need brokers with
+transaction support and a unique instance id per running source. If the Kafka consumer does not
+close within its shutdown bound, the source abandons it rather than blocking shutdown, and group
+membership then expires with the session timeout.
+
 For long individual-delivery handlers, configure `heartbeat_interval` below half the broker's
 acknowledgement wait. The source reports its descriptor during `run` opening, so requirements
 are validated after I/O but before the consumer receives a delivery. `NatsDeliverySource`

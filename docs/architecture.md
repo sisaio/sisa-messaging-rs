@@ -34,7 +34,7 @@ not used.
 | `sisa-messaging-consumer` | Typed inbound receive/process/settle runtime |
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox |
 | `sisa-messaging-nats` | NATS JetStream mapping, subject resolution, publication, and inbound delivery |
-| `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, and outbound publication |
+| `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, publication, and fenced partitioned-log delivery |
 | `sisa-messaging-iggy` | Apache Iggy envelope mapping, stream/topic resolution, and outbound publication |
 | `sisa-messaging-rabbitmq` | RabbitMQ AMQP 0-9-1 mapping, exchange/routing-key resolution, confirmed publication, and inbound delivery |
 | `sisa-messaging-redis` | Redis Streams envelope mapping, publication, and individual inbound delivery |
@@ -71,8 +71,11 @@ Rules:
 - Consumer depends on messaging and inbox. It names neither SQLx nor a transport provider.
 - NATS depends only on messaging. It implements both outbound publication and inbound delivery
   contracts, and does not know an outbox or inbox exists.
-- Kafka depends only on messaging. It maps envelopes and implements outbound publication without
-  depending on the outbox or inbox.
+- Kafka depends only on messaging. It maps envelopes, implements outbound publication, and
+  implements the partitioned-log delivery source and settlement without depending on the outbox,
+  inbox, or consumer runtime. Offset advancement is a transactional offset commit fenced by the
+  consumer-group generation captured at assignment; see
+  [Consumer framework](consumer-framework.md) section 4.
 - Iggy depends only on messaging. It maps envelopes and implements outbound publication over the
   Iggy TCP protocol; its partitioned-log delivery source is deferred until Iggy can fence
   consumer-group offset stores by membership generation. Iggy limits each header name and value
