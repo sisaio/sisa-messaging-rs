@@ -19,6 +19,10 @@ const FOREIGN_DISPLAY_MARKERS: [&str; 3] = [
 ];
 const STORE_ERROR_DISPLAY_MARKER: &str = "foreign-store-display-marker-delta";
 
+// Both capture tests change tracing's process-wide callsite interest cache. Keep their scoped
+// subscribers and explicit cache rebuilds from overlapping while asserting captured events.
+static TRACING_CAPTURE_LOCK: Mutex<()> = Mutex::new(());
+
 #[derive(Clone)]
 struct MarkerStore(FakeStore);
 
@@ -94,6 +98,10 @@ async fn run_redacted_failure() -> FakeStore {
 
 #[test]
 fn instrumentation_and_persisted_failure_never_record_foreign_sensitive_text() {
+    let _capture_guard = TRACING_CAPTURE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
     let output = Arc::new(Mutex::new(Vec::new()));
 
     let subscriber = tracing_subscriber::fmt()
@@ -307,6 +315,10 @@ async fn permanent_cleanup_release_warning() {
 
 #[test]
 fn suppressed_persistence_failures_and_fencing_shortfalls_warn_once_at_the_decision_layer() {
+    let _capture_guard = TRACING_CAPTURE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
     let output = Arc::new(Mutex::new(Vec::new()));
 
     let subscriber = tracing_subscriber::fmt()
@@ -322,6 +334,17 @@ fn suppressed_persistence_failures_and_fencing_shortfalls_warn_once_at_the_decis
         .unwrap_or_else(|error| panic!("test runtime failed: {error}"));
 
     tracing::subscriber::with_default(subscriber, || {
+        // Register the shared warning callsite before asserting on it. A parallel dispatcher
+        // test can first register it on a thread without a subscriber while this scoped
+        // subscriber is active, caching no interest in WARN events. Rebuild under this scope.
+        runtime.block_on(complete_warning(COMPLETE_NONE, 0));
+        tracing::callsite::rebuild_interest_cache();
+
+        output
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+
         runtime.block_on(async {
             complete_warning(COMPLETE_NONE, 0).await;
             complete_warning(COMPLETE_TRANSIENT_ONCE, 0).await;
