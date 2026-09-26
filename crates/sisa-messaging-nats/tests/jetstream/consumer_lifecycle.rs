@@ -259,6 +259,18 @@ async fn assert_at_most_one_prefetched_delivery(broker: &Broker) {
         info.num_ack_pending as u64,
         info.delivered.consumer_sequence
     );
+
+    assert!(
+        info.num_pending >= 2,
+        "the rest of the backlog stays undelivered"
+    );
+}
+
+/// Publishes more messages than one pull fetches, so the prefetch bound is observable.
+async fn publish_backlog(broker: &Broker) {
+    for label in ["before-start-1", "before-start-2", "before-start-3"] {
+        broker.publish(label).await;
+    }
 }
 
 #[tokio::test]
@@ -266,7 +278,7 @@ async fn assert_at_most_one_prefetched_delivery(broker: &Broker) {
 async fn startup_rejects_unsafe_delivery_bounds_before_receiving() {
     // The durable stops delivering after three attempts; the inbox records dead at five.
     let (broker, pull_consumer) = Broker::new(Duration::from_secs(10), 3).await;
-    broker.publish("before-start").await;
+    publish_backlog(&broker).await;
     let inbox = FakeInbox::new(5);
     let handler = ScriptedHandler::default();
 
@@ -294,7 +306,7 @@ async fn startup_rejects_unsafe_delivery_bounds_before_receiving() {
 
     // Heartbeat every second cannot keep a two-second acknowledgement deadline safely alive.
     let (broker, pull_consumer) = Broker::new(Duration::from_secs(2), -1).await;
-    broker.publish("before-start").await;
+    publish_backlog(&broker).await;
     let mut settings = settings();
     settings.heartbeat_interval = Some(Duration::from_secs(1));
 

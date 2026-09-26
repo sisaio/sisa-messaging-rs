@@ -270,18 +270,31 @@ impl Bench {
 
             tokio::time::timeout(ITERATION_TIMEOUT, async {
                 while settled < scenario.messages {
-                    let message = settlements.next().await.unwrap();
+                    let message = settlements
+                        .next()
+                        .await
+                        .expect("settlement subscription closed before every message settled");
 
-                    if message
-                        .payload
-                        .starts_with(scenario.settled_with.as_bytes())
-                    {
+                    let payload = &message.payload[..];
+
+                    if payload.starts_with(scenario.settled_with.as_bytes()) {
                         settled += 1;
+                    } else if scenario.heartbeat_interval.is_some() && payload.starts_with(b"+WPI")
+                    {
+                        // Progress acknowledgements are expected only while heartbeating.
+                    } else {
+                        // Settlement verbs carry no message content, so a short prefix is safe.
+                        let verb = String::from_utf8_lossy(&payload[..payload.len().min(8)]);
+
+                        panic!(
+                            "unexpected settlement {verb:?} while expecting {}",
+                            scenario.settled_with
+                        );
                     }
                 }
             })
             .await
-            .unwrap();
+            .expect("messages were not all settled within the iteration timeout");
 
             let elapsed = started.elapsed();
             cancel.cancel();
