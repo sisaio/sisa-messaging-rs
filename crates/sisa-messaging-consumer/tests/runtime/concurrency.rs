@@ -350,6 +350,8 @@ async fn a_handler_panic_never_commits_or_acknowledges() {
         let error = expect_error(harness.run().await);
 
         assert_eq!(error.kind(), ConsumerErrorKind::HandlerPanicked);
+        assert_eq!(error.failure_kind(), FailureKind::Permanent);
+        assert_eq!(error.to_string(), "consumer handler panicked");
         assert!(error.provider_source().is_none());
         assert_redacted(&error);
 
@@ -384,7 +386,7 @@ async fn a_provider_panic_is_not_reported_as_a_handler_panic() {
 
             assert_eq!(error.kind(), ConsumerErrorKind::ProviderPanicked);
             assert_eq!(error.failure_kind(), FailureKind::Permanent);
-            assert_eq!(error.to_string(), "consumer provider call panicked");
+            assert_eq!(error.to_string(), "consumer processing task panicked");
             assert!(error.provider_source().is_none());
             assert_redacted(&error);
 
@@ -452,6 +454,17 @@ async fn sentinel_values_never_reach_errors_or_captured_logs() {
     let pending_error = expect_error(pending.run().await);
     assert_redacted(&pending_error);
 
+    let provider_panic = Harness::new(SettlementMode::Broker);
+
+    provider_panic
+        .probe
+        .script_claim(1, ClaimStep::Db(Step::Panic));
+
+    provider_panic.deliver(1, "provider panic");
+    let provider_error = expect_error(provider_panic.run().await);
+    assert_eq!(provider_error.kind(), ConsumerErrorKind::ProviderPanicked);
+    assert_redacted(&provider_error);
+
     let lines = capture.lines();
 
     assert!(
@@ -462,6 +475,7 @@ async fn sentinel_values_never_reach_errors_or_captured_logs() {
 
     assert!(lines.iter().any(|line| line.contains("delivery resolved")));
     assert!(lines.iter().any(|line| line.contains("consumer stopping")));
+    assert!(lines.iter().any(|line| line.contains("provider_panicked")));
 
     // Settlement failures name the static transport error type, never its rendering.
     assert!(

@@ -68,6 +68,8 @@ publish {destination template}
 ```
 
 The destination suffix is omitted when no stable, low-cardinality name or template is available.
+The typed consumer uses its static message type as the suffix when no stable destination template
+is available, producing `process {message type}`.
 Messaging-facing receive, process, publish, and settlement spans follow the current OTel messaging
 span convention; internal outbox/inbox spans retain fixed library operation names.
 
@@ -210,14 +212,15 @@ environment.
 
 Per-message publish and claim spans default to `debug`, not `info`.
 
-The consumer creates one `process {destination template}` span with consumer span kind. For the
-single-message typed path, it captures the extracted remote context and any valid ambient HTTP or
-scheduler context before creating the span. When the extracted remote `SpanContext` is valid, the
-consumer creates the span with that remote context as parent and supplies the valid ambient context
-as a creation-time link. Otherwise, it creates the span with the valid ambient context as parent,
-or starts a new trace when neither context contains a valid span. This permitted remote-parent
-choice is documented by the instrumentation. Database processing and handler execution are
-children, while broker settlement uses its own client-kind settle span.
+The consumer creates one `process {message type}` span with consumer span kind, using the typed
+consumer's static message contract as the suffix. For the single-message typed path, it captures
+the extracted remote context and any valid ambient HTTP or scheduler context before creating the
+span. When the extracted remote `SpanContext` is valid, the consumer creates the span with that
+remote context as parent and supplies the valid ambient context as a creation-time link. Otherwise,
+it creates the span with the valid ambient context as parent, or starts a new trace when neither
+context contains a valid span. This permitted remote-parent choice is documented by the
+instrumentation. Database processing and handler execution are children, while broker settlement
+uses its own client-kind settle span.
 
 Safe structured fields include:
 

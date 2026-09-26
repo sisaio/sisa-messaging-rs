@@ -687,6 +687,7 @@ async fn unsupported_requirement_starts_no_consumer() {
     assert_eq!(descriptor.ack_wait(), None);
     assert_eq!(descriptor.max_deliver(), None);
     assert!(!descriptor.supports_delayed_retry());
+    assert!(descriptor.supports_immediate_requeue());
     assert!(descriptor.supports_terminal_discard());
     assert!(!descriptor.supports_heartbeat());
     assert_eq!(fixture.counts().await.1, 1);
