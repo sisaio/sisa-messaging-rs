@@ -24,6 +24,9 @@ pub trait Delivery: Send + 'static {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum IndividualCapability {
+    /// Immediate requeue without a caller-selected delay.
+    ImmediateRequeue,
+
     /// Redelivery after a caller-selected delay.
     DelayedRetry,
 
@@ -38,6 +41,9 @@ pub enum IndividualCapability {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum IndividualSourceRequirement {
+    /// Immediate requeue is supported.
+    ImmediateRequeue,
+
     /// A finite acknowledgement deadline is available.
     AckWait,
 
@@ -91,6 +97,8 @@ pub struct IndividualSourceRequirements {
 
     delayed_retry: bool,
 
+    immediate_requeue: bool,
+
     terminal_discard: bool,
 
     heartbeat: bool,
@@ -104,6 +112,7 @@ impl IndividualSourceRequirements {
             ack_wait: false,
             max_deliver: false,
             delayed_retry: false,
+            immediate_requeue: false,
             terminal_discard: false,
             heartbeat: false,
         }
@@ -129,6 +138,14 @@ impl IndividualSourceRequirements {
     #[must_use]
     pub const fn requiring_delayed_retry(mut self) -> Self {
         self.delayed_retry = true;
+
+        self
+    }
+
+    /// Requires immediate requeue.
+    #[must_use]
+    pub const fn requiring_immediate_requeue(mut self) -> Self {
+        self.immediate_requeue = true;
 
         self
     }
@@ -159,6 +176,8 @@ pub struct IndividualSourceDescriptor {
 
     supports_delayed_retry: bool,
 
+    supports_immediate_requeue: bool,
+
     supports_terminal_discard: bool,
 
     supports_heartbeat: bool,
@@ -181,6 +200,7 @@ impl IndividualSourceDescriptor {
             ack_wait,
             max_deliver,
             supports_delayed_retry,
+            supports_immediate_requeue: false,
             supports_terminal_discard,
             supports_heartbeat,
         })
@@ -202,6 +222,20 @@ impl IndividualSourceDescriptor {
     #[must_use]
     pub const fn supports_delayed_retry(self) -> bool {
         self.supports_delayed_retry
+    }
+
+    /// Advertises existing support for immediate requeue on this source.
+    #[must_use]
+    pub const fn with_immediate_requeue(mut self) -> Self {
+        self.supports_immediate_requeue = true;
+
+        self
+    }
+
+    /// Reports whether immediate requeue is supported.
+    #[must_use]
+    pub const fn supports_immediate_requeue(self) -> bool {
+        self.supports_immediate_requeue
     }
 
     /// Reports whether terminal discard is supported.
@@ -227,6 +261,8 @@ impl IndividualSourceDescriptor {
             Some(IndividualSourceRequirement::MaxDeliver)
         } else if requirements.delayed_retry && !self.supports_delayed_retry {
             Some(IndividualSourceRequirement::DelayedRetry)
+        } else if requirements.immediate_requeue && !self.supports_immediate_requeue {
+            Some(IndividualSourceRequirement::ImmediateRequeue)
         } else if requirements.terminal_discard && !self.supports_terminal_discard {
             Some(IndividualSourceRequirement::TerminalDiscard)
         } else if requirements.heartbeat && !self.supports_heartbeat {

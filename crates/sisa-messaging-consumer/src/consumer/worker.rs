@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use opentelemetry::context::FutureExt;
+use opentelemetry::trace::SpanKind;
 use sisa_messaging::{
     Delivery, EnvelopeMapper, ErrorClassifier, FailureKind, IndividualSettlement,
     IndividualSettlementError, Message, Serializer,
@@ -71,7 +73,14 @@ impl Workers {
     where
         F: Future<Output = CoordinatorResult> + Send + 'static,
     {
-        self.coordinators.spawn(coordinator);
+        // Count admission before spawning so an unpolled task aborted during drain is balanced.
+        let in_flight = telemetry::InFlightGuard::new();
+
+        self.coordinators.spawn(async move {
+            let _in_flight = in_flight;
+
+            coordinator.await
+        });
     }
 
     /// Records every coordinator that has already finished without waiting.
@@ -156,17 +165,52 @@ where
     // signal at once instead of only when the join set is next reaped.
     let _panic_stop = StopOnPanic(stop.clone());
 
-    let (wire, settlement) = delivery.into_parts();
+    let (wire, mut settlement) = delivery.into_parts();
 
     let in_handler = Arc::new(AtomicBool::new(false));
 
-    let workflow = AbortOnDropHandle::new(tracker.spawn(process::process::<M, _, _, _, _, _>(
+    let mut workflow = AbortOnDropHandle::new(tracker.spawn(process::process::<M, _, _, _, _, _>(
         Arc::clone(&shared),
         wire,
         Arc::clone(&in_handler),
     )));
 
-    let processed = match workflow.await {
+    // Only readiness is selected. Heartbeat I/O is awaited outside the cancellable select so
+    // dropping a select branch cannot abandon a broker operation with unknown effect.
+    let joined = if let Some(interval) = shared.settings.heartbeat_interval {
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut workflow => break result,
+                () = tokio::time::sleep(interval) => {}
+            }
+
+            let heartbeat =
+                tokio::time::timeout(shared.settings.settlement_timeout, settlement.heartbeat())
+                    .await;
+
+            match heartbeat {
+                Ok(Ok(())) => {}
+                Ok(Err(IndividualSettlementError::Unsupported(_))) => {
+                    telemetry::heartbeat_failed(
+                        shared.labels,
+                        "unsupported",
+                        FailureKind::Permanent,
+                    );
+                }
+                Ok(Err(error)) => {
+                    telemetry::heartbeat_failed(shared.labels, "failed", error.classify());
+                }
+                Err(_) => {
+                    telemetry::heartbeat_failed(shared.labels, "timeout", FailureKind::Transient);
+                }
+            }
+        }
+    } else {
+        workflow.await
+    };
+
+    let processed = match joined {
         Ok(processed) => processed,
         Err(error) => {
             // Never render the panic payload; the settlement handle is dropped unsettled. The
@@ -206,9 +250,16 @@ where
         plan.action,
     );
 
-    if let Err((failure, source)) =
-        settle(plan.action, settlement, shared.settings.settlement_timeout).await
-    {
+    let settlement_span =
+        telemetry::OperationSpan::from_parent("settle", SpanKind::Client, &shared.ambient);
+
+    let settlement_result = settle(plan.action, settlement, shared.settings.settlement_timeout)
+        .with_context(settlement_span.context())
+        .await;
+
+    drop(settlement_span);
+
+    if let Err((failure, source)) = settlement_result {
         telemetry::settlement_failed(
             labels,
             plan.action,
@@ -246,7 +297,7 @@ where
 }
 
 /// Cancels the stop signal when dropped during a panic unwind.
-struct StopOnPanic(CancellationToken);
+pub(super) struct StopOnPanic(pub(super) CancellationToken);
 
 impl Drop for StopOnPanic {
     fn drop(&mut self) {

@@ -2458,7 +2458,11 @@ version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0142c63252a9e054e68a4c61a5778f7b14f576274d593f8ce883d191a099682"
 dependencies = [
+ "futures-core",
+ "futures-sink",
  "js-sys",
+ "pin-project-lite",
+ "thiserror",
 ]
 
 [[package]]
@@ -3489,6 +3493,8 @@ dependencies = [
 name = "sisa-messaging-consumer"
 version = "0.1.0"
 dependencies = [
+ "criterion",
+ "opentelemetry",
  "sisa-messaging",
  "sisa-messaging-inbox",
  "tokio",

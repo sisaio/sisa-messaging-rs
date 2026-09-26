@@ -19,6 +19,9 @@ pub enum SettingsField {
     /// [`ConsumerSettings::settlement_timeout`](crate::ConsumerSettings::settlement_timeout).
     SettlementTimeout,
 
+    /// [`ConsumerSettings::heartbeat_interval`](crate::ConsumerSettings::heartbeat_interval).
+    HeartbeatInterval,
+
     /// [`ConsumerSettings::nak_delay`](crate::ConsumerSettings::nak_delay).
     NakDelay,
 
@@ -34,6 +37,7 @@ impl SettingsField {
             Self::SourceTimeout => "source_timeout",
             Self::DatabaseTimeout => "database_timeout",
             Self::SettlementTimeout => "settlement_timeout",
+            Self::HeartbeatInterval => "heartbeat_interval",
             Self::NakDelay => "nak_delay",
             Self::DrainTimeout => "drain_timeout",
         }
@@ -46,6 +50,12 @@ impl SettingsField {
 pub enum ConsumerConfigError {
     /// A duration that must bound an operation or delay was zero.
     ZeroDuration(SettingsField),
+
+    /// Immediate requeue was selected with a nonzero negative-acknowledgement delay.
+    ImmediateRequeueRequiresZeroDelay,
+
+    /// Individual acknowledgement heartbeat was selected for a partitioned source.
+    HeartbeatRequiresIndividualSource,
 }
 
 impl fmt::Display for ConsumerConfigError {
@@ -57,6 +67,12 @@ impl fmt::Display for ConsumerConfigError {
                     "consumer setting {} must be non-zero",
                     field.as_str()
                 )
+            }
+            Self::ImmediateRequeueRequiresZeroDelay => {
+                formatter.write_str("immediate requeue requires a zero nak_delay")
+            }
+            Self::HeartbeatRequiresIndividualSource => {
+                formatter.write_str("heartbeat requires an individual delivery source")
             }
         }
     }
@@ -108,6 +124,9 @@ pub enum ConsumerErrorKind {
     /// The inbox attempt bound exceeds the source's finite delivery bound.
     AttemptBoundExceedsMaxDeliver,
 
+    /// The opened acknowledgement deadline is too short for the heartbeat interval.
+    HeartbeatDeadlineTooShort,
+
     /// Receiving from the source failed.
     Source,
 
@@ -120,6 +139,15 @@ pub enum ConsumerErrorKind {
     /// A settlement operation failed permanently or is unsupported.
     Settlement,
 
+    /// A later record arrived while its partition still had an unresolved record.
+    PartitionOrder,
+
+    /// An ordered record could not be durably resolved.
+    PartitionUnresolved,
+
+    /// Advance timed out or failed; the provider must fence and reconcile the cursor.
+    PartitionAdvanceUncertain,
+
     /// A delivery requires operator action; it was left unsettled.
     OperatorActionRequired(OperatorReason),
 
@@ -127,8 +155,8 @@ pub enum ConsumerErrorKind {
     /// unsettled.
     HandlerPanicked,
 
-    /// A mapper, codec, or inbox provider call panicked during processing; its transaction was
-    /// dropped and its delivery left unsettled.
+    /// A processing task panicked outside handler execution, including framework and message
+    /// drop code. Its transaction was dropped and its delivery left unsettled.
     ProviderPanicked,
 
     /// A consumer-internal task failed unexpectedly.
@@ -211,15 +239,21 @@ impl fmt::Display for ConsumerError {
             ConsumerErrorKind::AttemptBoundExceedsMaxDeliver => {
                 "inbox attempt bound exceeds the source delivery bound"
             }
+            ConsumerErrorKind::HeartbeatDeadlineTooShort => {
+                "source acknowledgement deadline is too short for heartbeat"
+            }
             ConsumerErrorKind::Source => "consumer source failed",
             ConsumerErrorKind::Inbox => "consumer inbox operation failed",
             ConsumerErrorKind::FailureNotRecorded => "consumer could not record a handler failure",
             ConsumerErrorKind::Settlement => "consumer settlement failed",
+            ConsumerErrorKind::PartitionOrder => "partition delivered an overlapping record",
+            ConsumerErrorKind::PartitionUnresolved => "partition record remains unresolved",
+            ConsumerErrorKind::PartitionAdvanceUncertain => "partition advancement is uncertain",
             ConsumerErrorKind::OperatorActionRequired(_) => {
                 "consumer delivery requires operator action"
             }
             ConsumerErrorKind::HandlerPanicked => "consumer handler panicked",
-            ConsumerErrorKind::ProviderPanicked => "consumer provider call panicked",
+            ConsumerErrorKind::ProviderPanicked => "consumer processing task panicked",
             ConsumerErrorKind::Runtime => "consumer runtime failed",
         })
     }

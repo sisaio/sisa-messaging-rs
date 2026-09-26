@@ -151,7 +151,9 @@ pub(crate) fn decide_individual(
     resolution: Resolution,
 ) -> IndividualPlan {
     let retry = match mode {
-        SettlementMode::Broker => IndividualAction::Nak { delay: nak_delay },
+        SettlementMode::Broker | SettlementMode::BrokerImmediateRequeue => {
+            IndividualAction::Nak { delay: nak_delay }
+        }
         SettlementMode::PendingRecovery => IndividualAction::Leave,
     };
 
@@ -166,19 +168,29 @@ pub(crate) fn decide_individual(
             }
         }
         Resolution::NotRecorded { kind } => match mode {
-            SettlementMode::Broker if kind.is_retryable() => IndividualPlan::settle(retry),
-            SettlementMode::Broker | SettlementMode::PendingRecovery => {
+            SettlementMode::Broker | SettlementMode::BrokerImmediateRequeue
+                if kind.is_retryable() =>
+            {
+                IndividualPlan::settle(retry)
+            }
+            SettlementMode::Broker
+            | SettlementMode::BrokerImmediateRequeue
+            | SettlementMode::PendingRecovery => {
                 IndividualPlan::stop(StopCause::FailureNotRecorded)
             }
         },
         Resolution::Dead(reason) => match mode {
-            SettlementMode::Broker => IndividualPlan::settle(IndividualAction::Terminate),
+            SettlementMode::Broker | SettlementMode::BrokerImmediateRequeue => {
+                IndividualPlan::settle(IndividualAction::Terminate)
+            }
             SettlementMode::PendingRecovery => {
                 IndividualPlan::stop(StopCause::Operator(OperatorReason::Dead(reason)))
             }
         },
         Resolution::Malformed => match mode {
-            SettlementMode::Broker => IndividualPlan::settle(IndividualAction::Terminate),
+            SettlementMode::Broker | SettlementMode::BrokerImmediateRequeue => {
+                IndividualPlan::settle(IndividualAction::Terminate)
+            }
             SettlementMode::PendingRecovery => {
                 IndividualPlan::stop(StopCause::Operator(OperatorReason::Malformed))
             }

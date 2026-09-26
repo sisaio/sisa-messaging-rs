@@ -19,10 +19,16 @@ tokio-util = { workspace = true }
 
 # Bounded diagnostic events; applications retain subscriber ownership.
 tracing = { workspace = true }
+opentelemetry = { workspace = true, default-features = false, features = ["metrics", "trace", "futures"] }
 
 [dev-dependencies]
 # Deterministic paused-time tests and bounded multi-thread interleaving tests.
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "consumer"
+harness = false
 
 [lints]
 workspace = true

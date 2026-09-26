@@ -1,5 +1,6 @@
 //! Public consumer façade and the profile-generic receive loop.
 
+mod partitioned;
 mod process;
 mod receive;
 pub(crate) mod settlement;
@@ -10,7 +11,10 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sisa_messaging::{Delivery, EnvelopeMapper, IndividualDeliverySource, Message, Serializer};
+use sisa_messaging::{
+    Delivery, EnvelopeMapper, IndividualDeliverySource, Message, PartitionedLogDeliverySource,
+    Serializer,
+};
 use sisa_messaging_inbox::{InboxScope, InboxStore, InboxUnitOfWork};
 use tokio_util::sync::CancellationToken;
 
@@ -35,6 +39,9 @@ pub(crate) struct Shared<Map, Codec, Inbox, H> {
     pub(crate) settings: ConsumerSettings,
 
     pub(crate) labels: MessageLabels,
+
+    /// Caller context captured before workflow tasks are spawned.
+    pub(crate) ambient: opentelemetry::Context,
 }
 
 /// A typed, bounded individual-delivery consumer for one message type.
@@ -62,8 +69,8 @@ where
 {
     /// Validates settings once and constructs an idle consumer without performing I/O.
     ///
-    /// Rejects a zero source, database, settlement, or drain timeout, and a zero `nak_delay` in
-    /// [`SettlementMode::Broker`](crate::SettlementMode::Broker).
+    /// Rejects a zero source, database, settlement, or drain timeout. Broker mode requires a
+    /// nonzero `nak_delay`; immediate-requeue mode requires zero.
     pub fn new(
         source: S,
         mapper: Map,
@@ -100,6 +107,7 @@ where
         };
 
         telemetry::started(labels);
+        let ambient = opentelemetry::Context::current();
 
         let (mut source, mapper, codec, inbox, handler) = self.components;
         let settings = self.settings;
@@ -118,6 +126,7 @@ where
                         scope: self.scope,
                         settings,
                         labels,
+                        ambient,
                     });
 
                     let intake = IndividualIntake::<M, _, _, _, _, _>::new(source, shared);
@@ -139,6 +148,48 @@ where
         );
 
         result
+    }
+}
+
+impl<M, S, Map, Codec, Inbox, H> Consumer<M, (S, Map, Codec, Inbox, H)>
+where
+    M: Message,
+    S: PartitionedLogDeliverySource,
+    Map: EnvelopeMapper<<S::Delivery as Delivery>::Wire> + 'static,
+    Codec: Serializer<M> + 'static,
+    Inbox: InboxUnitOfWork + InboxStore<Inbox::Transaction>,
+    H: ConsumerHandler<M, Inbox::Transaction> + 'static,
+{
+    /// Constructs a partitioned-log consumer with one active record per partition.
+    pub fn new_partitioned(
+        source: S,
+        mapper: Map,
+        codec: Codec,
+        inbox: Inbox,
+        scope: InboxScope,
+        handler: H,
+        settings: ConsumerSettings,
+    ) -> Result<Self, ConsumerConfigError> {
+        settings.validate()?;
+
+        if settings.heartbeat_interval.is_some() {
+            return Err(ConsumerConfigError::HeartbeatRequiresIndividualSource);
+        }
+
+        Ok(Self {
+            components: (source, mapper, codec, inbox, handler),
+            scope,
+            settings,
+            message: PhantomData,
+        })
+    }
+
+    /// Opens and runs the partitioned source until cancellation, close, or a fatal failure.
+    pub async fn run_partitioned(
+        self,
+        cancel: CancellationToken,
+    ) -> Result<ConsumerExit, ConsumerError> {
+        partitioned::run::<M, _, _, _, _, _>(self, cancel).await
     }
 }
 
@@ -168,7 +219,9 @@ async fn run_loop<I: Intake>(
                 () = cancel.cancelled() => break Some(ConsumerExit::Cancelled),
                 () = stop.cancelled() => break None,
                 received = intake.receive() => match received {
-                    Ok(Some(item)) => intake.dispatch(item, &mut workers),
+                    Ok(Some(item)) => if intake.dispatch(item, &mut workers) {
+                        break Some(ConsumerExit::SourceClosed);
+                    },
                     Ok(None) => break Some(ConsumerExit::SourceClosed),
                     Err(error) => {
                         workers.fail(error);

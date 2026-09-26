@@ -31,7 +31,8 @@ pub(super) trait Intake: Send {
     -> impl Future<Output = Result<Option<Self::Item>, ConsumerError>> + Send;
 
     /// Starts the coordinator that owns this item until it is settled or left.
-    fn dispatch(&self, item: Self::Item, workers: &mut Workers);
+    /// Returns true when the item represents a clean source close.
+    fn dispatch(&self, item: Self::Item, workers: &mut Workers) -> bool;
 }
 
 /// The individual-delivery profile.
@@ -72,7 +73,7 @@ where
         })
     }
 
-    fn dispatch(&self, item: Self::Item, workers: &mut Workers) {
+    fn dispatch(&self, item: Self::Item, workers: &mut Workers) -> bool {
         let shared = Arc::clone(&self.shared);
         let tracker = workers.tracker();
         let stop = workers.stop_token();
@@ -80,6 +81,8 @@ where
         workers.spawn(worker::coordinate::<M, _, _, _, _, _>(
             shared, item, tracker, stop,
         ));
+
+        false
     }
 }
 
@@ -97,7 +100,11 @@ pub(super) async fn open<S: IndividualDeliverySource>(
     cancel: &CancellationToken,
     labels: MessageLabels,
 ) -> Result<Opened, ConsumerError> {
-    let requirements = settings.mode.requirements();
+    let mut requirements = settings.mode.requirements();
+
+    if settings.heartbeat_interval.is_some() {
+        requirements = requirements.requiring_ack_wait().requiring_heartbeat();
+    }
 
     let opened = tokio::select! {
         biased;
@@ -142,6 +149,21 @@ pub(super) async fn open<S: IndividualDeliverySource>(
     descriptor
         .validate(requirements)
         .map_err(|unsupported| unsupported_error(labels, unsupported))?;
+
+    if let Some(interval) = settings.heartbeat_interval
+        && descriptor.ack_wait().is_none_or(|wait| {
+            interval
+                .checked_mul(2)
+                .is_none_or(|minimum| wait <= minimum)
+        })
+    {
+        return Err(startup_error(
+            labels,
+            ConsumerErrorKind::HeartbeatDeadlineTooShort,
+            FailureKind::Permanent,
+            None,
+        ));
+    }
 
     if let Some(max_deliver) = descriptor.max_deliver()
         && max_deliver.get() < u64::from(max_attempts.get())

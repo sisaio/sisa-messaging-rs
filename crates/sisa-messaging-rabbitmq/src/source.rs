@@ -125,6 +125,7 @@ impl RabbitMqDeliverySource {
     fn descriptor() -> Result<IndividualSourceDescriptor, RabbitMqError> {
         // Arguments: no ack wait, no max deliver, no delayed retry, terminal discard, no heartbeat.
         IndividualSourceDescriptor::new(None, None, false, true, false)
+            .map(IndividualSourceDescriptor::with_immediate_requeue)
             .map_err(|_| RabbitMqError::Settings)
     }
 

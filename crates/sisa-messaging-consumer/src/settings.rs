@@ -10,7 +10,7 @@ use crate::{ConsumerConfigError, SettingsField};
 /// How an individual-delivery consumer settles deliveries that did not complete.
 ///
 /// The mode is always selected by the application and is never inferred from a source
-/// descriptor. Both modes acknowledge only after a committed success or a durable completion
+/// descriptor. All modes acknowledge only after a committed success or a durable completion
 /// observed through the inbox.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -21,6 +21,10 @@ pub enum SettlementMode {
     /// Opening requires delayed retry and terminal discard from the source.
     #[default]
     Broker,
+
+    /// Requests immediate requeue with `nak(Duration::ZERO)` and terminally discards dead or
+    /// malformed deliveries. Opening requires immediate requeue and terminal discard.
+    BrokerImmediateRequeue,
 
     /// Leaves unresolved deliveries unsettled for the source's bounded pending recovery.
     ///
@@ -38,6 +42,9 @@ impl SettlementMode {
         match self {
             Self::Broker => IndividualSourceRequirements::new()
                 .requiring_delayed_retry()
+                .requiring_terminal_discard(),
+            Self::BrokerImmediateRequeue => IndividualSourceRequirements::new()
+                .requiring_immediate_requeue()
                 .requiring_terminal_discard(),
             Self::PendingRecovery => IndividualSourceRequirements::new(),
         }
@@ -64,7 +71,13 @@ pub struct ConsumerSettings {
     /// Bound for each acknowledgement, negative acknowledgement, and termination.
     pub settlement_timeout: Duration,
 
-    /// Broker redelivery delay for retryable or in-progress work in [`SettlementMode::Broker`].
+    /// Optional interval for extending an individual delivery deadline while work runs.
+    /// Requires a source heartbeat capability and an acknowledgement deadline greater than twice
+    /// this interval. Partitioned logs use group ownership instead.
+    pub heartbeat_interval: Option<Duration>,
+
+    /// Broker redelivery delay in [`SettlementMode::Broker`]. Must be zero in
+    /// [`SettlementMode::BrokerImmediateRequeue`].
     pub nak_delay: Duration,
 
     /// Bound for the whole graceful drain after receiving stops for any cause.
@@ -81,6 +94,7 @@ impl Default for ConsumerSettings {
             source_timeout: Duration::from_secs(10),
             database_timeout: Duration::from_secs(5),
             settlement_timeout: Duration::from_secs(10),
+            heartbeat_interval: None,
             nak_delay: Duration::from_secs(5),
             drain_timeout: Duration::from_secs(20),
             mode: SettlementMode::Broker,
@@ -93,11 +107,20 @@ impl ConsumerSettings {
         non_zero(SettingsField::SourceTimeout, self.source_timeout)?;
         non_zero(SettingsField::DatabaseTimeout, self.database_timeout)?;
         non_zero(SettingsField::SettlementTimeout, self.settlement_timeout)?;
+
+        if let Some(interval) = self.heartbeat_interval {
+            non_zero(SettingsField::HeartbeatInterval, interval)?;
+        }
+
         non_zero(SettingsField::DrainTimeout, self.drain_timeout)?;
 
         match self.mode {
             // Zero-delay retry is a separate, explicitly selected policy (#11).
             SettlementMode::Broker => non_zero(SettingsField::NakDelay, self.nak_delay),
+            SettlementMode::BrokerImmediateRequeue if self.nak_delay.is_zero() => Ok(()),
+            SettlementMode::BrokerImmediateRequeue => {
+                Err(ConsumerConfigError::ImmediateRequeueRequiresZeroDelay)
+            }
             SettlementMode::PendingRecovery => Ok(()),
         }
     }
