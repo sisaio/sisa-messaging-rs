@@ -396,6 +396,7 @@ async fn append_read_ack_reclaim_and_cancel() {
 
 mod typed_consumer {
     use super::{SourceSettings, connection, pending, settings};
+    use futures_util::FutureExt;
     use redis::aio::MultiplexedConnection;
     use redis::streams::StreamPendingCountReply;
     use serde::{Deserialize, Serialize};
@@ -413,6 +414,7 @@ mod typed_consumer {
     use std::{
         collections::HashSet,
         num::NonZeroU32,
+        panic::AssertUnwindSafe,
         sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -686,124 +688,156 @@ mod typed_consumer {
         let suffix = MessageId::new().to_string().replace('-', "");
         let stream = format!("sisa-typed-{suffix}");
         let group = format!("group-{suffix}");
-        create_stream_and_group(&mut commands, &stream, &group).await;
-
-        let publisher = RedisPublisher::new(
-            connection(&client).await,
-            stream.clone(),
-            Duration::from_secs(2),
-        )
-        .unwrap();
-
-        let envelope = Envelope::new(
-            MessageId::new(),
-            TestMessage { value: 7 },
-            Default::default(),
-        )
-        .unwrap();
-
-        publisher
-            .append(&JsonSerializer.serialize(&envelope).unwrap())
-            .await
-            .unwrap();
-
-        let inbox = TestInbox::default();
-        let fail = Arc::new(AtomicBool::new(true));
         let first_cancel = CancellationToken::new();
-        let mut first_settings = settings();
-        first_settings.min_idle = Duration::from_secs(3600);
-
-        let first_task = tokio::spawn(run(
-            source(&client, &stream, &group, "first", first_settings).await,
-            inbox.clone(),
-            fail.clone(),
-            first_cancel.clone(),
-        ));
-
-        tokio::time::timeout(Duration::from_secs(3), inbox.0.failure_recorded.notified())
-            .await
-            .unwrap();
-
-        assert_eq!(pending(&mut commands, &stream, &group).await, 1);
-        assert_eq!(pending_owner(&mut commands, &stream, &group).await, "first");
-        first_cancel.cancel();
-
-        assert!(matches!(
-            tokio::time::timeout(Duration::from_secs(3), first_task)
-                .await
-                .unwrap()
-                .unwrap(),
-            Ok(ConsumerExit::Cancelled)
-        ));
-
-        tokio::time::sleep(Duration::from_millis(75)).await;
         let second_cancel = CancellationToken::new();
+        let mut first_task = None;
+        let mut second_task = None;
 
-        let second_task = tokio::spawn(run(
-            source(&client, &stream, &group, "second", settings()).await,
-            inbox.clone(),
-            fail,
-            second_cancel.clone(),
-        ));
+        let scenario = AssertUnwindSafe(async {
+            create_stream_and_group(&mut commands, &stream, &group).await;
 
-        tokio::time::timeout(Duration::from_secs(3), inbox.0.commit_started.notified())
+            let publisher = RedisPublisher::new(
+                connection(&client).await,
+                stream.clone(),
+                Duration::from_secs(2),
+            )
+            .unwrap();
+
+            let envelope = Envelope::new(
+                MessageId::new(),
+                TestMessage { value: 7 },
+                Default::default(),
+            )
+            .unwrap();
+
+            publisher
+                .append(&JsonSerializer.serialize(&envelope).unwrap())
+                .await
+                .unwrap();
+
+            let inbox = TestInbox::default();
+            let fail = Arc::new(AtomicBool::new(true));
+            let mut first_settings = settings();
+            first_settings.min_idle = Duration::from_secs(3600);
+
+            first_task = Some(tokio::spawn(run(
+                source(&client, &stream, &group, "first", first_settings).await,
+                inbox.clone(),
+                fail.clone(),
+                first_cancel.clone(),
+            )));
+
+            tokio::time::timeout(Duration::from_secs(3), inbox.0.failure_recorded.notified())
+                .await
+                .unwrap();
+
+            assert_eq!(pending(&mut commands, &stream, &group).await, 1);
+            assert_eq!(pending_owner(&mut commands, &stream, &group).await, "first");
+            first_cancel.cancel();
+
+            let first_exit =
+                tokio::time::timeout(Duration::from_secs(3), first_task.as_mut().unwrap()).await;
+
+            if first_exit.is_ok() {
+                first_task = None;
+            }
+
+            assert!(matches!(first_exit, Ok(Ok(Ok(ConsumerExit::Cancelled)))));
+
+            tokio::time::sleep(Duration::from_millis(75)).await;
+
+            second_task = Some(tokio::spawn(run(
+                source(&client, &stream, &group, "second", settings()).await,
+                inbox.clone(),
+                fail,
+                second_cancel.clone(),
+            )));
+
+            tokio::time::timeout(Duration::from_secs(3), inbox.0.commit_started.notified())
+                .await
+                .unwrap();
+
+            assert_eq!(pending(&mut commands, &stream, &group).await, 1);
+
+            assert_eq!(
+                pending_owner(&mut commands, &stream, &group).await,
+                "second"
+            );
+
+            assert!(
+                !inbox
+                    .0
+                    .completed
+                    .lock()
+                    .unwrap()
+                    .contains(&envelope.message_id())
+            );
+
+            inbox.0.commit_gate.add_permits(1);
+
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if pending(&mut commands, &stream, &group).await == 0 {
+                        break;
+                    }
+
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
             .await
             .unwrap();
 
-        assert_eq!(pending(&mut commands, &stream, &group).await, 1);
+            assert!(
+                inbox
+                    .0
+                    .completed
+                    .lock()
+                    .unwrap()
+                    .contains(&envelope.message_id())
+            );
 
-        assert_eq!(
-            pending_owner(&mut commands, &stream, &group).await,
-            "second"
-        );
+            second_cancel.cancel();
 
-        assert!(
-            !inbox
-                .0
-                .completed
-                .lock()
-                .unwrap()
-                .contains(&envelope.message_id())
-        );
+            let second_exit =
+                tokio::time::timeout(Duration::from_secs(3), second_task.as_mut().unwrap()).await;
 
-        inbox.0.commit_gate.add_permits(1);
-
-        tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                if pending(&mut commands, &stream, &group).await == 0 {
-                    break;
-                }
-
-                tokio::time::sleep(Duration::from_millis(10)).await;
+            if second_exit.is_ok() {
+                second_task = None;
             }
+
+            assert!(matches!(second_exit, Ok(Ok(Ok(ConsumerExit::Cancelled)))));
         })
-        .await
-        .unwrap();
+        .catch_unwind()
+        .await;
 
-        assert!(
-            inbox
-                .0
-                .completed
-                .lock()
-                .unwrap()
-                .contains(&envelope.message_id())
-        );
-
+        first_cancel.cancel();
         second_cancel.cancel();
 
-        assert!(matches!(
-            tokio::time::timeout(Duration::from_secs(3), second_task)
-                .await
-                .unwrap()
-                .unwrap(),
-            Ok(ConsumerExit::Cancelled)
-        ));
+        for task in [first_task, second_task].into_iter().flatten() {
+            let mut task = task;
 
-        let _: i64 = redis::cmd("DEL")
-            .arg(&stream)
-            .query_async(&mut commands)
-            .await
-            .unwrap();
+            if tokio::time::timeout(Duration::from_secs(3), &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = tokio::time::timeout(Duration::from_secs(3), task).await;
+            }
+        }
+
+        let deleted = tokio::time::timeout(
+            Duration::from_secs(3),
+            redis::cmd("DEL")
+                .arg(&stream)
+                .query_async::<i64>(&mut commands),
+        )
+        .await;
+
+        if let Err(panic) = scenario {
+            std::panic::resume_unwind(panic);
+        }
+
+        deleted.unwrap().unwrap();
     }
 }
 
