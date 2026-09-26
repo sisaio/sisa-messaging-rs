@@ -2,7 +2,8 @@
 //!
 //! The application composes the generic `Consumer` with the NATS delivery source and mapper and
 //! the PostgreSQL inbox, as described in `docs/consumer-framework.md` section 4. It reads
-//! `NATS_URL` and `DATABASE_URL` and provisions nothing. Before it starts, the operator creates:
+//! `SISA_NATS_URL` and `SISA_POSTGRES_URL` and provisions nothing. Before it starts, the
+//! operator creates:
 //!
 //! - the `ORDERS` stream capturing `orders.>` and its durable pull consumer `orders-projection`
 //!   with explicit acknowledgement and an unlimited `max_deliver` or one of at least the inbox
@@ -18,6 +19,7 @@
 use std::error::Error;
 use std::fmt;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use async_nats::jetstream::{self, consumer::PullConsumer};
 use serde::{Deserialize, Serialize};
@@ -45,6 +47,14 @@ const SUBJECT_PREFIX: &str = "orders";
 /// One connection per in-flight transaction at the default `max_in_flight` of 32, plus one for
 /// failure recording after a rollback.
 const POOL_CONNECTIONS: u32 = 33;
+
+/// Bound for closing the pool after a forced abort. The operator asked to stop immediately;
+/// aborted workflows return their connections as they unwind, and PostgreSQL rolls back any
+/// transaction whose connection closes at process exit, so a short wait loses nothing.
+const FORCED_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Exit status after a forced abort, following the shell convention for an interrupt.
+const FORCED_ABORT_EXIT: u8 = 130;
 
 /// Sample message contract carried as JSON.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -118,6 +128,7 @@ enum ExampleError {
     Signal,
     Consumer(ConsumerErrorKind),
     ConsumerTask,
+    ForcedAbort,
 }
 
 impl fmt::Display for ExampleError {
@@ -133,6 +144,9 @@ impl fmt::Display for ExampleError {
             Self::Signal => formatter.write_str("shutdown signal listener failed"),
             Self::Consumer(kind) => write!(formatter, "consumer stopped: {kind:?}"),
             Self::ConsumerTask => formatter.write_str("consumer task failed"),
+            Self::ForcedAbort => formatter.write_str(
+                "consumer aborted by a second interrupt; unfinished deliveries remain unacknowledged",
+            ),
         }
     }
 }
@@ -163,14 +177,17 @@ async fn main() -> ExitCode {
         Err(error) => {
             eprintln!("{error}");
 
-            ExitCode::FAILURE
+            match error {
+                ExampleError::ForcedAbort => ExitCode::from(FORCED_ABORT_EXIT),
+                _ => ExitCode::FAILURE,
+            }
         }
     }
 }
 
 async fn run() -> Result<(), ExampleError> {
-    let nats_url = required_env("NATS_URL")?;
-    let database_url = required_env("DATABASE_URL")?;
+    let nats_url = required_env("SISA_NATS_URL")?;
+    let database_url = required_env("SISA_POSTGRES_URL")?;
 
     let client = async_nats::connect(nats_url)
         .await
@@ -211,7 +228,12 @@ async fn run() -> Result<(), ExampleError> {
     let task = tokio::spawn(consumer.run(cancel.child_token()));
 
     let result = supervise(task, &cancel).await;
-    pool.close().await;
+
+    if matches!(result, Err(ExampleError::ForcedAbort)) {
+        let _ = tokio::time::timeout(FORCED_CLOSE_TIMEOUT, pool.close()).await;
+    } else {
+        pool.close().await;
+    }
 
     result
 }
@@ -234,7 +256,12 @@ async fn supervise(mut task: ConsumerTask, cancel: &CancellationToken) -> Result
         joined = &mut task => joined,
         Ok(()) = tokio::signal::ctrl_c(), if signal.is_ok() => {
             task.abort();
-            task.await
+
+            match task.await {
+                Err(error) if error.is_cancelled() => return Err(ExampleError::ForcedAbort),
+                // The consumer finished before the abort took effect.
+                joined => joined,
+            }
         }
     };
 

@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging-example-nats-postgres-consumer"
-version = "0.0.0"
+name = "nats-postgres-consumer"
+version = "0.1.0"
 description = "Typed NATS JetStream consumer with a PostgreSQL inbox"
 edition.workspace = true
 rust-version.workspace = true

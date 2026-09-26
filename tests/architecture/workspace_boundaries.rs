@@ -439,8 +439,8 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-rabbitmq",
         "sisa-messaging-redis",
         "redis-postgres-consumer",
+        "nats-postgres-consumer",
         "sisa-messaging-architecture-tests",
-        "sisa-messaging-example-nats-postgres-consumer",
         "sisa-messaging-system-tests",
         "sisa-messaging-xtask",
     ]);
