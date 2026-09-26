@@ -309,8 +309,8 @@ commits.
 Broker settlement (`SettlementMode::Broker`, the default) follows the flow below, which uses both
 delayed retry and terminal discard. It requires both capabilities in
 `IndividualSourceRequirements` when it opens the source; if either is absent, opening fails before
-the first receive. Heartbeat support and its `ack_wait` check arrive with `heartbeat_interval` in
-#11. A mode may omit an optional requirement only if none of its reachable paths invokes that
+the first receive. Heartbeat support and its `ack_wait` check arrive with `heartbeat_interval`
+in #11. A mode may omit an optional requirement only if none of its reachable paths invokes that
 operation; pending recovery below is the only defined policy for a source lacking delay or
 terminal discard. Unsupported operations are never emulated with acknowledgement, immediate
 retry, or offset skip.
