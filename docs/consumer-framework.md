@@ -311,8 +311,8 @@ acknowledgement wait. The source reports its descriptor during `run` opening, so
 are validated after I/O but before the consumer receives a delivery. `NatsDeliverySource`
 currently starts its pull stream while opening, so a rejected start can consume one broker
 delivery attempt; that delivery is never processed and is redelivered after the acknowledgement
-wait. Inbox `max_attempts` must not exceed a finite
-reported `max_deliver`; otherwise the broker can stop delivery before the inbox records its dead
+wait; removing the gap is tracked by #88. Inbox `max_attempts` must not exceed a finite reported
+`max_deliver`; otherwise the broker can stop delivery before the inbox records its dead
 transition.
 
 ## 5. Individual-delivery state machine
