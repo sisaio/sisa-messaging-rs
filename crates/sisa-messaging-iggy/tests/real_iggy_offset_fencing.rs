@@ -1,144 +1,273 @@
-//! Authored, opt-in negative feasibility test: it checks whether the consumer-offset store
-//! accepts a write from a group member that provably does not own the partition.
+//! Opt-in record of the raw consumer-offset facts the replay-only delivery source relies on,
+//! against `apache/iggy:0.9.0` with the `=0.11.0` SDK.
 //!
-//! The finding for issue #23's deferred inbound slice is recorded in
-//! <https://github.com/sisaio/sisa-messaging-rs/issues/60>: Iggy's consumer-offset store carries
-//! no membership generation, so a member's offset store for a partition it does not own is
-//! expected to be accepted the same way as one from the owning member. A fencing-correct
-//! implementation of the shared partitioned-log delivery source profile is therefore not possible
-//! against the current server, which is why this crate ships publisher-only. No recorded run of
-//! this test exists yet; its execution against a real broker is tracked in
-//! <https://github.com/sisaio/sisa-messaging-rs/issues/63>.
+//! The server fences an offset store by partition ownership at admission: a member that does not
+//! own the partition is rejected with `ConsumerGroupPartitionNotOwned` (5009). It still admits a
+//! store from an owner whose revocation is draining, stores are absolute (a lower store moves the
+//! cursor back), and the stored offset is the last processed record, so `PollingStrategy::next`
+//! resumes after it. The store request carries no membership generation (see
+//! <https://github.com/sisaio/sisa-messaging-rs/issues/60>).
+//!
+//! These facts are why `IggySettlement::advance` never returns `OwnershipLost`: a draining owner is
+//! admitted, and the SDK re-sends the same request id when it does not observe a reply, so a 5009
+//! does not prove that an earlier transmission of the same store did nothing. The source stays
+//! correct because a late or lower store can only cause replay.
+//!
+//! Group member ids reported by `get_consumer_group` are not the members' `get_me` client ids, so
+//! these tests identify a partition's owner through the server's own poll fence.
 
 mod support;
 
 use std::time::Duration;
 
 use iggy::prelude::{
-    Consumer, ConsumerGroupClient, ConsumerOffsetClient, Identifier, SystemClient, TopicClient,
+    Client, Consumer, ConsumerGroupClient, ConsumerOffsetClient, Identifier,
+    IggyClient as RawIggyClient, IggyError, MessageClient, PollingStrategy,
 };
 
-use support::{new_raw_client, provision_stream_and_topic, test_stream, unique_name};
+use support::{GroupTopic, identifier, new_raw_client};
+
+/// Bound for waiting on an assignment change.
+const ASSIGNMENT_TIMEOUT: Duration = Duration::from_secs(20);
+
+struct Ids {
+    stream: Identifier,
+
+    topic: Identifier,
+
+    consumer: Consumer,
+}
+
+impl Ids {
+    fn new(fixture: &GroupTopic) -> Self {
+        Self {
+            stream: identifier(&fixture.stream),
+            topic: identifier(&fixture.topic),
+            consumer: Consumer::group(identifier(&fixture.group)),
+        }
+    }
+}
+
+async fn join(fixture: &GroupTopic, ids: &Ids) -> RawIggyClient {
+    let member = new_raw_client().await;
+
+    member
+        .join_consumer_group(&ids.stream, &ids.topic, &identifier(&fixture.group))
+        .await
+        .unwrap_or_else(|error| panic!("raw member failed to join: {error}"));
+
+    member
+}
+
+/// Polls explicitly without committing and returns the served offsets, or `None` when the
+/// server fenced the poll because the member does not own the partition.
+async fn poll(
+    member: &RawIggyClient,
+    ids: &Ids,
+    partition: u32,
+    strategy: PollingStrategy,
+) -> Option<Vec<u64>> {
+    let polled = member
+        .poll_messages(
+            &ids.stream,
+            &ids.topic,
+            Some(partition),
+            &ids.consumer,
+            &strategy,
+            10,
+            false,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("raw poll failed: {error}"));
+
+    (polled.partition_id == partition).then(|| {
+        polled
+            .messages
+            .iter()
+            .map(|message| message.header.offset)
+            .collect()
+    })
+}
+
+async fn store(
+    member: &RawIggyClient,
+    ids: &Ids,
+    partition: u32,
+    offset: u64,
+) -> Result<(), IggyError> {
+    member
+        .store_consumer_offset(
+            &ids.consumer,
+            &ids.stream,
+            &ids.topic,
+            Some(partition),
+            offset,
+        )
+        .await
+}
+
+/// Waits until `member`'s poll of `partition` is answered (`owned`) or fenced (`!owned`).
+async fn wait_ownership(member: &RawIggyClient, ids: &Ids, partition: u32, owned: bool) {
+    let deadline = tokio::time::Instant::now() + ASSIGNMENT_TIMEOUT;
+
+    while poll(member, ids, partition, PollingStrategy::next())
+        .await
+        .is_some()
+        != owned
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "partition {partition} ownership never became {owned}"
+        );
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
 
 #[tokio::test]
-#[ignore = "requires a real Iggy broker; provisions its own stream and topic"]
-async fn broker_accepts_an_offset_store_from_a_member_that_does_not_own_the_partition() {
-    let stream = test_stream();
-    let topic = unique_name("sisa-iggy-fencing-topic");
-    let group_name = unique_name("sisa-iggy-fencing-group");
+#[ignore = "requires a real Iggy broker; provisions its own topic and consumer group"]
+async fn a_member_that_does_not_own_the_partition_is_refused_an_offset_store() {
+    let fixture = GroupTopic::create(1).await;
+    fixture.publish(0, 3).await;
+    let ids = Ids::new(&fixture);
 
-    let provisioning_client = new_raw_client().await;
-    provision_stream_and_topic(&provisioning_client, &stream, &topic).await;
+    let first = join(&fixture, &ids).await;
+    wait_ownership(&first, &ids, 0, true).await;
 
-    let stream_id = Identifier::from_str_value(&stream).expect("valid test stream identifier");
-    let topic_id = Identifier::from_str_value(&topic).expect("valid test topic identifier");
-    let group_id = Identifier::from_str_value(&group_name).expect("valid test group identifier");
+    // One partition, two members: the second member owns nothing.
+    let second = join(&fixture, &ids).await;
+    wait_ownership(&second, &ids, 0, false).await;
 
-    provisioning_client
-        .create_consumer_group(&stream_id, &topic_id, &group_name)
+    let refused = store(&second, &ids, 0, 1).await;
+
+    assert!(
+        matches!(refused, Err(IggyError::ConsumerGroupPartitionNotOwned(..))),
+        "a non-owner's store must be refused with 5009"
+    );
+
+    assert_eq!(fixture.stored_offset(0).await, None);
+
+    Client::shutdown(&second).await.unwrap();
+    Client::shutdown(&first).await.unwrap();
+    fixture.delete().await;
+}
+
+#[tokio::test]
+#[ignore = "requires a real Iggy broker; provisions its own topic and consumer group"]
+async fn an_owner_whose_revocation_is_draining_is_still_admitted() {
+    let fixture = GroupTopic::create(2).await;
+    fixture.publish(0, 5).await;
+    fixture.publish(1, 5).await;
+    let ids = Ids::new(&fixture);
+
+    let first = join(&fixture, &ids).await;
+
+    // The first member alone owns and is served both partitions, then stores nothing.
+    for partition in 0..2 {
+        wait_ownership(&first, &ids, partition, true).await;
+    }
+
+    let second = join(&fixture, &ids).await;
+
+    // One partition's revocation starts: its owner's polls are fenced, but the partition does
+    // not move until the owner stores what it was served.
+    let deadline = tokio::time::Instant::now() + ASSIGNMENT_TIMEOUT;
+
+    let draining = loop {
+        let mut fenced = None;
+
+        for partition in 0..2 {
+            if poll(&first, &ids, partition, PollingStrategy::offset(0))
+                .await
+                .is_none()
+            {
+                fenced = Some(partition);
+            }
+        }
+
+        if let Some(partition) = fenced {
+            break partition;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no revocation started"
+        );
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    assert!(
+        poll(&second, &ids, draining, PollingStrategy::next())
+            .await
+            .is_none(),
+        "the target member must not own a partition that is still draining"
+    );
+
+    // The draining owner's store is admitted and completes the revocation.
+    store(&first, &ids, draining, 4)
         .await
-        .unwrap_or_else(|error| panic!("Iggy test consumer group creation failed: {error}"));
+        .unwrap_or_else(|error| panic!("a draining owner's store must be admitted: {error}"));
 
-    let member_a = new_raw_client().await;
-    let member_b = new_raw_client().await;
+    assert_eq!(fixture.stored_offset(draining).await, Some(4));
+    wait_ownership(&second, &ids, draining, true).await;
 
-    member_a
-        .join_consumer_group(&stream_id, &topic_id, &group_id)
-        .await
-        .unwrap_or_else(|error| panic!("first Iggy test member failed to join: {error}"));
+    Client::shutdown(&second).await.unwrap();
+    Client::shutdown(&first).await.unwrap();
+    fixture.delete().await;
+}
 
-    member_b
-        .join_consumer_group(&stream_id, &topic_id, &group_id)
-        .await
-        .unwrap_or_else(|error| panic!("second Iggy test member failed to join: {error}"));
+#[tokio::test]
+#[ignore = "requires a real Iggy broker; provisions its own topic and consumer group"]
+async fn stores_are_absolute_and_a_lower_store_moves_the_cursor_back() {
+    let fixture = GroupTopic::create(1).await;
+    fixture.publish(0, 5).await;
+    let ids = Ids::new(&fixture);
 
-    // Give the coordinator time to settle both members' assignments before reading them back.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let owner = join(&fixture, &ids).await;
+    wait_ownership(&owner, &ids, 0, true).await;
 
-    let member_a_client_id = member_a
-        .get_me()
-        .await
-        .unwrap_or_else(|error| {
-            panic!("first Iggy test member failed to read its own client id: {error}")
-        })
-        .client_id;
+    store(&owner, &ids, 0, 3).await.unwrap();
+    assert_eq!(fixture.stored_offset(0).await, Some(3));
 
-    let member_b_client_id = member_b
-        .get_me()
-        .await
-        .unwrap_or_else(|error| {
-            panic!("second Iggy test member failed to read its own client id: {error}")
-        })
-        .client_id;
-
-    let group_details = provisioning_client
-        .get_consumer_group(&stream_id, &topic_id, &group_id)
-        .await
-        .unwrap_or_else(|error| panic!("Iggy test consumer group lookup failed: {error}"))
-        .expect("the just-created consumer group must exist");
+    store(&owner, &ids, 0, 1).await.unwrap();
+    assert_eq!(fixture.stored_offset(0).await, Some(1));
 
     assert_eq!(
-        group_details.members.len(),
-        2,
-        "expected exactly two members in the single-partition test group"
+        poll(&owner, &ids, 0, PollingStrategy::next()).await,
+        Some(vec![2, 3, 4]),
+        "after a lower store the group replays from the regressed cursor"
     );
 
-    let owns_partition_zero = |client_id: u32| {
-        group_details
-            .members
-            .iter()
-            .find(|member| member.id == client_id)
-            .is_some_and(|member| member.partitions.contains(&0))
-    };
+    Client::shutdown(&owner).await.unwrap();
+    fixture.delete().await;
+}
 
-    let a_owns = owns_partition_zero(member_a_client_id);
-    let b_owns = owns_partition_zero(member_b_client_id);
+#[tokio::test]
+#[ignore = "requires a real Iggy broker; provisions its own topic and consumer group"]
+async fn the_stored_offset_is_the_last_processed_record_and_next_resumes_after_it() {
+    let fixture = GroupTopic::create(1).await;
+    fixture.publish(0, 5).await;
+    let ids = Ids::new(&fixture);
 
-    assert_ne!(
-        a_owns, b_owns,
-        "expected exactly one member to own the single partition"
+    let owner = join(&fixture, &ids).await;
+    wait_ownership(&owner, &ids, 0, true).await;
+
+    // Nothing stored: `next` starts at the first record, and an uncommitted poll moves nothing.
+    assert_eq!(
+        poll(&owner, &ids, 0, PollingStrategy::next()).await,
+        Some(vec![0, 1, 2, 3, 4])
     );
 
-    let (non_owner, non_owner_client_id) = if a_owns {
-        (&member_b, member_b_client_id)
-    } else {
-        (&member_a, member_a_client_id)
-    };
+    assert_eq!(fixture.stored_offset(0).await, None);
 
-    assert!(
-        !owns_partition_zero(non_owner_client_id),
-        "the selected member must provably not own partition 0"
+    store(&owner, &ids, 0, 2).await.unwrap();
+
+    assert_eq!(
+        poll(&owner, &ids, 0, PollingStrategy::next()).await,
+        Some(vec![3, 4])
     );
 
-    let consumer = Consumer::group(group_id.clone());
-
-    let result = non_owner
-        .store_consumer_offset(&consumer, &stream_id, &topic_id, Some(0), 1)
-        .await;
-
-    assert!(
-        result.is_ok(),
-        "expected the broker to accept an offset store from a member that does not own \
-         partition 0; a rejection here would mean Iggy now fences by partition ownership and \
-         https://github.com/sisaio/sisa-messaging-rs/issues/60 must be revisited",
-    );
-
-    let stored = provisioning_client
-        .get_consumer_offset(&consumer, &stream_id, &topic_id, Some(0))
-        .await
-        .unwrap_or_else(|error| panic!("Iggy test offset read-back failed: {error}"));
-
-    assert!(
-        stored.is_some_and(|offset| offset.stored_offset == 1),
-        "expected the non-owner's offset store to be visible through the offset read"
-    );
-
-    // Best-effort cleanup: this test provisions its own throwaway consumer group and topic.
-    let _ = provisioning_client
-        .delete_consumer_group(&stream_id, &topic_id, &group_id)
-        .await;
-
-    let _ = provisioning_client
-        .delete_topic(&stream_id, &topic_id)
-        .await;
+    Client::shutdown(&owner).await.unwrap();
+    fixture.delete().await;
 }
