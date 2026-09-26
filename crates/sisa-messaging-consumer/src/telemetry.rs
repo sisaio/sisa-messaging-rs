@@ -486,7 +486,6 @@ const fn error_label(kind: ConsumerErrorKind) -> &'static str {
         ConsumerErrorKind::Settlement => "settlement",
         ConsumerErrorKind::PartitionOrder => "partition_order",
         ConsumerErrorKind::PartitionUnresolved => "partition_unresolved",
-        ConsumerErrorKind::PartitionAdvanceUncertain => "partition_advance_uncertain",
         ConsumerErrorKind::OperatorActionRequired(_) => "operator_action_required",
         ConsumerErrorKind::HandlerPanicked => "handler_panicked",
         ConsumerErrorKind::ProviderPanicked => "provider_panicked",

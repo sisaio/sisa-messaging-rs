@@ -228,6 +228,133 @@ async fn timed_out_advance_pauses_partition_but_allows_another_partition() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn returned_advance_errors_follow_their_failure_classification() {
+    for failure in [
+        sisa_messaging::FailureKind::Transient,
+        sisa_messaging::FailureKind::Permanent,
+    ] {
+        let harness = Harness::new(SettlementMode::Broker);
+        harness.probe.script_settle(1, Step::Error(failure));
+        harness.deliver(1, "advance error");
+
+        let consumer = harness
+            .partitioned_consumer()
+            .unwrap_or_else(|error| panic!("settings: {error}"));
+
+        let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+        harness
+            .probe
+            .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(1))))
+            .await;
+
+        if failure == sisa_messaging::FailureKind::Transient {
+            harness.deliver(2, "independent partition");
+
+            harness
+                .probe
+                .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(2))))
+                .await;
+
+            harness.close();
+
+            assert!(matches!(
+                join(running).await,
+                Ok(ConsumerExit::SourceClosed)
+            ));
+        } else {
+            let error = expect_error(join(running).await);
+            assert_eq!(error.kind(), ConsumerErrorKind::Settlement);
+            assert_eq!(error.failure_kind(), sisa_messaging::FailureKind::Permanent);
+            assert!(error.provider_source().is_some());
+            assert_redacted(&error);
+        }
+
+        assert_eq!(harness.probe.live_tx(), 0);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn replacement_waits_for_old_transaction_drop_after_ownership_loss() {
+    let harness = Harness::new(SettlementMode::Broker);
+    harness.probe.script_handler(1, HandlerStep::Hang);
+    harness.deliver(1, "old generation");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Handle(1))))
+        .await;
+
+    harness.lose_partition(1);
+    harness.deliver(3, "reconciled replacement");
+    harness.deliver(2, "independent partition");
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(3))))
+        .await;
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    let events = harness.probe.events();
+
+    let dropped = events
+        .iter()
+        .position(|event| matches!(event, Event::TxDropped(Some(1))));
+
+    let replacement_claim = events
+        .iter()
+        .position(|event| matches!(event, Event::Claim(3)));
+
+    assert!(dropped.is_some() && replacement_claim.is_some() && dropped < replacement_claim);
+    assert!(events.iter().any(|event| matches!(event, Event::Ack(2))));
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_replacement_on_the_same_partition_stops_without_skipping() {
+    let harness = Harness::new(SettlementMode::Broker);
+    harness.probe.script_handler(1, HandlerStep::Hang);
+    harness.deliver(1, "old generation");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Handle(1))))
+        .await;
+
+    harness.lose_partition(1);
+    harness.deliver(3, "first replacement");
+    harness.deliver(5, "overlapping replacement");
+
+    let error = expect_error(join(running).await);
+    assert_eq!(error.kind(), ConsumerErrorKind::PartitionOrder);
+
+    assert_eq!(
+        harness.probe.count(|event| matches!(event, Event::Ack(5))),
+        0
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
 async fn ownership_loss_after_uncertain_advance_releases_finished_token_for_replay() {
     let harness = Harness::new(SettlementMode::Broker);
     harness.probe.script_settle(1, Step::Hang);
@@ -399,7 +526,7 @@ async fn cancellation_during_advance_waits_for_uncertain_partition_to_pause() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn ownership_loss_during_advance_cannot_release_local_partition() {
+async fn ownership_loss_during_advance_defers_reconciled_delivery_until_old_guard_exits() {
     let harness = Harness::new(SettlementMode::Broker);
     harness.probe.script_settle(1, Step::Hang);
     harness.deliver(1, "advance under old ownership");
@@ -416,12 +543,33 @@ async fn ownership_loss_during_advance_cannot_release_local_partition() {
         .await;
 
     harness.lose_partition(1);
-    harness.deliver(3, "later offset on lost partition");
-    let error = expect_error(join(running).await);
-    assert!(matches!(error.kind(), ConsumerErrorKind::PartitionOrder));
+    harness.deliver(3, "reconciled next generation");
+    harness.deliver(2, "independent partition");
+
+    tokio::time::advance(harness.settings.settlement_timeout + Duration::from_secs(1)).await;
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Ack(3))))
+        .await;
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
 
     assert!(
-        !harness
+        harness
+            .probe
+            .events_for(2)
+            .iter()
+            .any(|event| matches!(event, Event::Ack(2)))
+    );
+
+    assert!(
+        harness
             .probe
             .events_for(3)
             .iter()
