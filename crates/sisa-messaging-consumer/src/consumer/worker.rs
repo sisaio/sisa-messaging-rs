@@ -270,15 +270,17 @@ async fn settle<St: IndividualSettlement>(
 
     match result {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => {
-            let failure = if matches!(error, IndividualSettlementError::Unsupported(_)) {
-                SettlementFailure::Unsupported
-            } else {
-                SettlementFailure::Failed(error.classify())
-            };
+        // Retain the provider error itself so `ConsumerError::provider_source` downcasts to it; an
+        // unsupported operation has no provider error.
+        Ok(Err(IndividualSettlementError::Unsupported(_))) => {
+            Err((SettlementFailure::Unsupported, None))
+        }
+        Ok(Err(IndividualSettlementError::Operation(error))) => {
+            let failure = SettlementFailure::Failed(error.classify());
 
             Err((failure, Some(Box::new(error))))
         }
+        Ok(Err(error)) => Err((SettlementFailure::Failed(error.classify()), None)),
         Err(_elapsed) => Err((SettlementFailure::TimedOut, None)),
     }
 }

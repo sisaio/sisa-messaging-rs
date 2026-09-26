@@ -151,14 +151,26 @@ where
 
     /// Rolls back a transaction whose claim did not lead to a handler success or failure record.
     ///
-    /// The resolution is already decided; a failed rollback is logged and the transaction is
-    /// dropped either way.
-    async fn discard(&self, transaction: Inbox::Transaction, stage: Stage) {
+    /// The transaction is dropped either way. A transient rollback failure or timeout is logged
+    /// and keeps the caller's resolution. A permanent or unknown rollback failure is a permanent
+    /// unit-of-work error, so it replaces the resolution with a permanent unresolved result that
+    /// leaves the delivery unsettled and stops the consumer, retaining the rollback error.
+    async fn discard(&self, transaction: Inbox::Transaction, stage: Stage) -> Option<Processed> {
         let rollback = self.shared.inbox.rollback(transaction);
 
-        if let Err(failure) = bounded(self.timeout(), rollback).await {
-            telemetry::cleanup_failed(self.labels(), stage.as_str(), failure.kind());
+        let failure = bounded(self.timeout(), rollback).await.err()?;
+
+        telemetry::cleanup_failed(self.labels(), stage.as_str(), failure.kind());
+
+        if failure.kind().is_retryable() {
+            return None;
         }
+
+        Some(
+            self.failed(Stage::Rollback, failure, |_| Resolution::Unresolved {
+                kind: FailureKind::Permanent,
+            }),
+        )
     }
 
     fn labels(&self) -> DeliveryLabels {
@@ -269,12 +281,16 @@ where
                 },
             };
 
-            workflow.discard(transaction, Stage::Claim).await;
+            if let Some(escalated) = workflow.discard(transaction, Stage::Claim).await {
+                return escalated;
+            }
 
             return workflow.finish(resolution, Stage::Claim);
         }
         Err(failure) => {
-            workflow.discard(transaction, Stage::Claim).await;
+            if let Some(escalated) = workflow.discard(transaction, Stage::Claim).await {
+                return escalated;
+            }
 
             return workflow.failed(Stage::Claim, failure, |kind| Resolution::Unresolved {
                 kind,
@@ -290,7 +306,9 @@ where
                 bounded(timeout, shared.inbox.complete(&mut transaction, receipt)).await;
 
             if let Err(failure) = completed {
-                workflow.discard(transaction, Stage::Complete).await;
+                if let Some(escalated) = workflow.discard(transaction, Stage::Complete).await {
+                    return escalated;
+                }
 
                 return workflow.failed(Stage::Complete, failure, |kind| Resolution::Unresolved {
                     kind,

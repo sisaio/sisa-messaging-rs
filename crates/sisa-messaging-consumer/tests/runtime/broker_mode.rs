@@ -413,9 +413,9 @@ async fn transient_settlement_failures_continue() {
 
 #[tokio::test(start_paused = true)]
 async fn permanent_or_unsupported_settlement_stops() {
-    for (step, failure) in [
-        (Step::Error(FailureKind::Permanent), FailureKind::Permanent),
-        (Step::Unsupported, FailureKind::Permanent),
+    for (step, typed_source) in [
+        (Step::Error(FailureKind::Permanent), true),
+        (Step::Unsupported, false),
     ] {
         let harness = Harness::new(MODE);
         harness.probe.script_settle(1, step);
@@ -424,8 +424,88 @@ async fn permanent_or_unsupported_settlement_stops() {
         let error = expect_error(harness.run().await);
 
         assert_eq!(error.kind(), ConsumerErrorKind::Settlement);
-        assert_eq!(error.failure_kind(), failure);
-        assert!(error.provider_source().is_some());
+        assert_eq!(error.failure_kind(), FailureKind::Permanent);
+
+        // The provider error itself is retained, not the settlement-contract wrapper; an
+        // unsupported operation has no provider error.
+        let downcast = error
+            .provider_source()
+            .and_then(|source| source.downcast_ref::<FakeError>())
+            .map(FakeError::kind);
+
+        assert_eq!(downcast, typed_source.then_some(FailureKind::Permanent));
+        assert_eq!(error.provider_source().is_some(), typed_source);
         assert_redacted(&error);
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn permanent_cleanup_rollback_failure_stops_without_settling() {
+    // A completed duplicate would otherwise be acknowledged.
+    let completed = Harness::new(MODE);
+    completed.probe.mark_completed(1);
+
+    completed
+        .probe
+        .script_rollback(Step::Error(FailureKind::Permanent));
+
+    completed.deliver(1, "duplicate");
+
+    let error = expect_error(completed.run().await);
+
+    assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+    assert_eq!(error.failure_kind(), FailureKind::Permanent);
+
+    assert!(
+        error
+            .provider_source()
+            .is_some_and(|source| source.is::<FakeError>())
+    );
+
+    assert_eq!(
+        trace(&completed, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
+    );
+
+    // A transient claim failure would otherwise be negatively acknowledged.
+    let claim = Harness::new(MODE);
+
+    claim
+        .probe
+        .script_claim(1, ClaimStep::Db(Step::Error(FailureKind::Transient)));
+
+    claim
+        .probe
+        .script_rollback(Step::Error(FailureKind::Permanent));
+
+    claim.deliver(1, "claim");
+
+    let error = expect_error(claim.run().await);
+
+    assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+    assert_eq!(error.failure_kind(), FailureKind::Permanent);
+
+    assert_eq!(
+        trace(&claim, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn transient_cleanup_rollback_failure_keeps_the_resolution() {
+    let harness = Harness::new(MODE);
+    harness.probe.mark_completed(1);
+
+    harness
+        .probe
+        .script_rollback(Step::Error(FailureKind::Transient));
+
+    harness.deliver(1, "duplicate");
+
+    closes_cleanly(&harness).await;
+
+    assert_eq!(
+        trace(&harness, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Ack(1)]
+    );
 }
