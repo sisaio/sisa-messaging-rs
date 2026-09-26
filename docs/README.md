@@ -10,10 +10,14 @@ The project is a set of Rust libraries for durable message publication, transact
 deduplication, a typed consumer runtime, PostgreSQL persistence, NATS JetStream transport, Kafka
 and Apache Iggy publication, RabbitMQ AMQP 0-9-1 confirmed publication and individual delivery,
 and Redis Streams publication and individual delivery for servers with the required stream
-commands. Redis 7, Valkey 8, and Dragonfly 2.0.0 pass the provider suite; Garnet is tracked
-separately in [#75](https://github.com/sisaio/sisa-messaging-rs/issues/75) because the tested 2.1.8
-image lacks `XADD`. It is not a service and does not own application startup, configuration
-loading, database pools, broker connection lifecycles, telemetry exporters, or process shutdown.
+commands. Redis 7, Valkey 8, and Dragonfly 2.0.0 pass the provider suite. Garnet is explicitly
+unsupported: its latest official release, [v2.1.8](https://github.com/microsoft/garnet/releases/tag/v2.1.8),
+and the current upstream [Streams compatibility table](https://github.com/microsoft/garnet/blob/main/website/docs/commands/api-compatibility.md#stream)
+do not implement the required commands. The pinned image also returns `ERR unknown command` for
+`XADD`; [#75](https://github.com/sisaio/sisa-messaging-rs/issues/75) tracks reevaluation when a
+pinned build can pass the real-server provider suite. It is not a service and does not own
+application startup, configuration loading, database pools, broker connection lifecycles,
+telemetry exporters, or process shutdown.
 
 ## Read in this order
 

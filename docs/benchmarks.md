@@ -196,7 +196,14 @@ measurement includes a 2 ms idle wait, and cancellation uses a 1 ms timeout.
 The tested `ghcr.io/microsoft/garnet` image at digest
 `sha256:880565c0c4186d0127846511174c732e60ba6dcb56f5bd8ac81fe78f1f34d753`
 (Garnet 2.1.8) returns `ERR unknown command` for plain `XADD`. Its provider benchmark cannot run,
-and no latency value is reported for that server image. Garnet support is tracked in #75.
+and no latency value is reported for that server image. Garnet is explicitly unsupported: the
+latest official release is [v2.1.8](https://github.com/microsoft/garnet/releases/tag/v2.1.8), and
+the [upstream Streams compatibility table](https://github.com/microsoft/garnet/blob/v2.1.8/website/docs/commands/api-compatibility.md#stream)
+marks the required commands unsupported, including `XADD`, `XGROUP CREATE`, `XREADGROUP`, `XACK`,
+`XPENDING`, `XCLAIM`, and `XINFO GROUPS`. The upstream implementation remains in a
+[draft pull request](https://github.com/microsoft/garnet/pull/1461); no viable pinned build has
+been identified. Issue [#75](https://github.com/sisaio/sisa-messaging-rs/issues/75) tracks
+reevaluation when a build passes the real-server provider suite. No Garnet latency is reported.
 
 ## 5. PostgreSQL benchmarks
 
