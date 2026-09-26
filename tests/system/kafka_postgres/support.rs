@@ -6,7 +6,7 @@ use std::fmt;
 use std::future::Future;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use rdkafka::ClientConfig;
@@ -521,6 +521,9 @@ pub(super) struct Fixture {
     pub(super) scope: InboxScope,
 }
 
+/// Serializes the Kafka scenarios within this test process; the lock never poisons.
+static SCENARIOS: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 /// Runs `body` with a fresh pool, consumer group, and scope, and removes the scope's rows even
 /// when it panics.
 ///
@@ -531,6 +534,10 @@ where
     F: FnOnce(Fixture) -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
+    // The scenarios share one partition, so a concurrent scenario's records would reach this
+    // scenario's consumer group; run them one at a time, cleanup included.
+    let _serial = SCENARIOS.lock().await;
+
     let pool = pool().await;
     let broker = Arc::new(Broker::new());
     let scope = scope();
