@@ -489,6 +489,40 @@ fn reassigned_partition_is_withheld_until_the_old_handle_drops() {
     assert_eq!(table.resumable(), vec![(0, Some(5))]);
 }
 
+/// A handed record at offset 5 is revoked, the partition returns to the same source, and the old
+/// handle is released before any record of the new assignment is polled. No seek target is kept:
+/// librdkafka resets its consumed position when the old assignment stops fetching, and the new
+/// assignment starts at the committed offset, which the old generation could not advance. A seek
+/// is needed only when a polled record was discarded while withheld, as covered above.
+#[test]
+fn released_withheld_partition_without_discards_resumes_at_the_committed_start() {
+    let mut table = assigned(&[0]);
+    assert!(table.on_record(&0, 5, || "old generation").emitted);
+    let (_, _, old_generation) = pop_record(&mut table);
+
+    let _ = table.revoke();
+    assert_eq!(pop_loss(&mut table), 0);
+    let (_, withheld) = table.assign([0]);
+    assert_eq!(withheld, vec![0]);
+    assert_eq!(table.next_position(&0), None);
+
+    // The old generation's advance is fenced locally, so the committed offset stays at or
+    // below 5, and releasing its handle resumes the partition from that committed start.
+    assert!(matches!(
+        table.admit(&0, old_generation, 5, LIVE),
+        Admission::OwnershipLost(_)
+    ));
+
+    assert_eq!(table.resumable(), vec![(0, None)]);
+    table.resumed(&[0]);
+
+    // The committed start re-fetches the revoked record, which replays in the new generation.
+    assert!(table.on_record(&0, 5, || "replayed").emitted);
+    let (key, offset, generation) = pop_record(&mut table);
+    assert_eq!((key, offset), (0, 5));
+    assert_eq!(generation, old_generation + 1);
+}
+
 #[test]
 fn stale_generation_advance_is_ownership_lost_and_releases_the_withheld_partition() {
     let mut table = assigned(&[0]);
