@@ -76,8 +76,10 @@ multiple sources.
 | `sisa-messaging-iggy` | Apache Iggy publisher and wire mapper; partitioned-log delivery source deferred to Phase 6b's fencing decision | messaging |
 | `sisa-messaging-rabbitmq` | RabbitMQ AMQP 0-9-1 confirmed publisher, individual delivery source, wire mapper and settlement | messaging |
 
-Provider crates never depend on each other. Examples, system tests, and the system benchmark are
-the only workspace members that compose PostgreSQL, NATS, outbox, inbox, and consumer crates.
+Provider crates never depend on each other, including through dev-dependencies. Examples, system
+tests, and the system benchmark are the only workspace members that compose PostgreSQL, NATS,
+outbox, inbox, and consumer crates. A provider may take `sisa-messaging-inbox` and
+`sisa-messaging-consumer` as dev-dependencies only, for its own integration tests and benchmarks.
 
 ## 4. Implementation sequence
 

@@ -31,7 +31,7 @@ crates/
 │   └── inbox.rs
 ├── sisa-messaging-nats/benches/
 │   ├── mapping.rs
-│   ├── publish.rs
+│   ├── provider.rs
 │   └── consume.rs
 ├── sisa-messaging-kafka/benches/
 │   └── mapping.rs
@@ -44,7 +44,7 @@ crates/
 │   ├── mapping.rs
 │   └── provider.rs
 └── sisa-messaging-consumer/benches/
-    └── processing.rs
+    └── consumer.rs
 benchmarks/
 └── system/
     ├── Cargo.toml
@@ -289,6 +289,20 @@ Measure both the generic runtime overhead and the real integration:
 
 The no-I/O processor benchmark identifies framework overhead. The PostgreSQL/NATS benchmark is the
 number users care about operationally. Keep the two results distinct.
+
+`sisa-messaging-consumer/benches/consumer.rs` is the no-I/O processor benchmark.
+`sisa-messaging-nats/benches/consume.rs` runs the generic consumer over a real JetStream server
+with an in-memory inbox when `NATS_URL` is set, so it measures runtime plus NATS settlement but
+not PostgreSQL. Timing starts at the source's first pull request, so source opening is excluded,
+and every iteration verifies afterwards that no delivery was redelivered. Initial local run
+(2026-09-26, `nats:2.11.8-alpine` in Docker on macOS arm64, loopback): 64 messages at
+concurrency 1 took about 13–14 ms for ack, completed-duplicate ack, delayed nak, and terminate
+alike (about 4.5k–4.9k messages/s). 256 independent no-op messages reached about 4.6k, 7.5k, 7.8k,
+and 7.5k messages/s at concurrency 1, 8, 32, and 128; the plateau above 8 is consistent with the
+source's single-message pull batches. A 600 ms handler with a 500 ms `ack_wait` and 200 ms
+heartbeat completed without redelivery. These are loopback software-overhead
+measurements, not network capacity or release thresholds; the PostgreSQL/NATS number remains owed
+to the system benchmark.
 
 ## 8. End-to-end system scenarios
 

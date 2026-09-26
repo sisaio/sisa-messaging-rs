@@ -256,6 +256,11 @@ Log once at the layer that makes a decision:
 Use structured fields rather than interpolated prose. Record foreign error text only when its type
 is known safe; otherwise record a stable category/type and retain the original as an error source.
 
+The redaction guarantee covers the `messaging.*` targets this repository emits. Transport SDKs
+emit their own targets: `async-nats` records raw protocol frames, including header values and
+payload bytes, at TRACE under `async_nats`. Applications must filter SDK targets below TRACE in
+their subscriber when payloads or headers are sensitive.
+
 ## 8. Context propagation
 
 The NATS mapper forwards W3C `traceparent` and `tracestate` in framework-owned headers. Consumer
