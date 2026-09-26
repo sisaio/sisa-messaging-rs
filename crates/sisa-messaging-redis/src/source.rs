@@ -130,16 +130,24 @@ impl IndividualSettlement for RedisSettlement {
         }
     }
 
-    async fn nak(self, _delay: Duration) -> Result<(), IndividualSettlementError<Self::Error>> {
-        Err(IndividualSettlementError::Unsupported(
-            IndividualCapability::DelayedRetry,
-        ))
+    async fn nak(self, delay: Duration) -> Result<(), IndividualSettlementError<Self::Error>> {
+        Err(IndividualSettlementError::Unsupported(nak_capability(
+            delay,
+        )))
     }
 
     async fn terminate(self) -> Result<(), IndividualSettlementError<Self::Error>> {
         Err(IndividualSettlementError::Unsupported(
             IndividualCapability::TerminalDiscard,
         ))
+    }
+}
+
+fn nak_capability(delay: Duration) -> IndividualCapability {
+    if delay.is_zero() {
+        IndividualCapability::ImmediateRequeue
+    } else {
+        IndividualCapability::DelayedRetry
     }
 }
 
@@ -406,5 +414,23 @@ impl IndividualDeliverySource for RedisDeliverySource {
                 return Ok(Some(delivery));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::{Duration, IndividualCapability, nak_capability};
+
+    #[test]
+    fn zero_delay_reports_immediate_requeue() {
+        assert_eq!(
+            nak_capability(Duration::ZERO),
+            IndividualCapability::ImmediateRequeue
+        );
+
+        assert_eq!(
+            nak_capability(Duration::from_nanos(1)),
+            IndividualCapability::DelayedRetry
+        );
     }
 }

@@ -11,12 +11,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use opentelemetry::context::FutureExt;
+use opentelemetry::trace::SpanKind;
 use sisa_messaging::{
     EnvelopeMapper, ErrorClassifier, ErrorSummary, FailureKind, Message, MessageId, Serializer,
 };
 use sisa_messaging_inbox::{
-    InboxClaimOutcome, InboxFailure, InboxFailureOutcome, InboxReceipt, InboxRecord, InboxStore,
-    InboxUnitOfWork,
+    DeadReason, InboxClaimOutcome, InboxFailure, InboxFailureOutcome, InboxReceipt, InboxRecord,
+    InboxStore, InboxUnitOfWork,
 };
 
 use crate::ConsumerHandler;
@@ -55,6 +57,38 @@ impl Stage {
             Self::Rollback => "rollback",
             Self::Fail => "fail",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ClaimMetric {
+    Duplicate(&'static str),
+    Dead(DeadReason),
+}
+
+fn claim_metric<R: InboxReceipt>(outcome: &InboxClaimOutcome<R>) -> Option<ClaimMetric> {
+    match outcome {
+        InboxClaimOutcome::CompletedDuplicate => Some(ClaimMetric::Duplicate("completed")),
+        InboxClaimOutcome::InProgressDuplicate => Some(ClaimMetric::Duplicate("in_progress")),
+        InboxClaimOutcome::DeadDuplicate { reason } => Some(ClaimMetric::Dead(*reason)),
+        _ => None,
+    }
+}
+
+fn emit_claim_metric<R: InboxReceipt>(outcome: &InboxClaimOutcome<R>) {
+    match claim_metric(outcome) {
+        Some(ClaimMetric::Duplicate(state)) => telemetry::duplicate(state),
+        Some(ClaimMetric::Dead(reason)) => telemetry::dead(reason),
+        None => {}
+    }
+}
+
+fn process_error_type(processed: &Processed) -> Option<&'static str> {
+    match processed.resolution {
+        Resolution::Completed | Resolution::InProgress if processed.stage == Stage::Claim => None,
+        Resolution::Completed if processed.stage == Stage::Commit => None,
+        Resolution::Dead(_) if processed.stage == Stage::Claim => None,
+        _ => Some(processed.stage.as_str()),
     }
 }
 
@@ -192,6 +226,8 @@ where
         match bounded(self.timeout(), self.shared.inbox.fail(record, failure)).await {
             Ok(InboxFailureOutcome::Retry { .. }) => self.finish(Resolution::RetryRecorded, stage),
             Ok(InboxFailureOutcome::Dead { reason, .. }) => {
+                telemetry::dead(reason);
+
                 self.finish(Resolution::Dead(reason), stage)
             }
             Ok(InboxFailureOutcome::CompletedDuplicate) => {
@@ -226,6 +262,37 @@ where
     Inbox: InboxUnitOfWork + InboxStore<Inbox::Transaction>,
     H: ConsumerHandler<M, Inbox::Transaction>,
 {
+    let timer = telemetry::ProcessingTimer::new();
+    let mapped = shared.mapper.decode(wire).map_err(|_| ());
+
+    let span = telemetry::ProcessingSpan::new(
+        shared.labels,
+        mapped.as_ref().ok().map(|serialized| &serialized.metadata),
+        &shared.ambient,
+    );
+
+    let processed = process_inner::<M, W, _, _, _, _>(shared, mapped, in_handler)
+        .with_context(span.context())
+        .await;
+
+    timer.finish(process_error_type(&processed));
+
+    processed
+}
+
+async fn process_inner<M, W, Map, Codec, Inbox, H>(
+    shared: Arc<Shared<Map, Codec, Inbox, H>>,
+    mapped: Result<sisa_messaging::SerializedEnvelope, ()>,
+    in_handler: Arc<AtomicBool>,
+) -> Processed
+where
+    M: Message,
+    W: Send + 'static,
+    Map: EnvelopeMapper<W>,
+    Codec: Serializer<M>,
+    Inbox: InboxUnitOfWork + InboxStore<Inbox::Transaction>,
+    H: ConsumerHandler<M, Inbox::Transaction>,
+{
     let mut workflow = Workflow {
         shared: &shared,
         message_id: None,
@@ -233,7 +300,7 @@ where
     };
 
     // Mapper errors may render wire bytes; they are dropped without being retained or emitted.
-    let Ok(serialized) = shared.mapper.decode(wire) else {
+    let Ok(serialized) = mapped else {
         return workflow.finish(Resolution::Malformed, Stage::Map);
     };
 
@@ -271,11 +338,19 @@ where
         }
     };
 
-    let claimed = bounded(timeout, shared.inbox.claim(&mut transaction, &record)).await;
+    let claim_span = telemetry::OperationSpan::child("inbox.claim", SpanKind::Internal);
+
+    let claimed = bounded(timeout, shared.inbox.claim(&mut transaction, &record))
+        .with_context(claim_span.context())
+        .await;
+
+    drop(claim_span);
 
     let receipt = match claimed {
         Ok(InboxClaimOutcome::Claimed(receipt)) => receipt,
         Ok(outcome) => {
+            emit_claim_metric(&outcome);
+
             let resolution = match outcome {
                 InboxClaimOutcome::CompletedDuplicate => Resolution::Completed,
                 InboxClaimOutcome::InProgressDuplicate => Resolution::InProgress,
@@ -307,7 +382,15 @@ where
 
     in_handler.store(true, Ordering::Release);
 
-    let handled = shared.handler.handle(&mut transaction, &envelope).await;
+    let handler_span = telemetry::OperationSpan::child("handler", SpanKind::Internal);
+
+    let handled = shared
+        .handler
+        .handle(&mut transaction, &envelope)
+        .with_context(handler_span.context())
+        .await;
+
+    drop(handler_span);
 
     in_handler.store(false, Ordering::Release);
 
@@ -326,8 +409,20 @@ where
                 });
             }
 
-            match bounded(timeout, shared.inbox.commit(transaction)).await {
-                Ok(()) => workflow.finish(Resolution::Completed, Stage::Commit),
+            let commit_span = telemetry::OperationSpan::child("inbox.commit", SpanKind::Internal);
+
+            let committed = bounded(timeout, shared.inbox.commit(transaction))
+                .with_context(commit_span.context())
+                .await;
+
+            drop(commit_span);
+
+            match committed {
+                Ok(()) => {
+                    telemetry::processed();
+
+                    workflow.finish(Resolution::Completed, Stage::Commit)
+                }
                 // A commit error or timeout is ambiguous; no failure is recorded.
                 Err(failure) => workflow.failed(Stage::Commit, failure, |kind| {
                     Resolution::CommitAmbiguous { kind }
@@ -350,5 +445,66 @@ where
 
             workflow.record_failure(&record, failure, Stage::Fail).await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sisa_messaging_inbox::{DeadReason, InboxClaimOutcome, InboxId, InboxReceipt};
+
+    use super::{ClaimMetric, Processed, Stage, claim_metric, process_error_type};
+    use crate::consumer::settlement::Resolution;
+
+    struct Receipt;
+
+    impl InboxReceipt for Receipt {
+        fn id(&self) -> InboxId {
+            unreachable!("classification never reads a receipt")
+        }
+
+        fn recorded_failures(&self) -> u32 {
+            unreachable!("classification never reads a receipt")
+        }
+    }
+
+    #[test]
+    fn claim_metrics_only_cover_handler_free_duplicate_and_dead_outcomes() {
+        assert_eq!(
+            claim_metric(&InboxClaimOutcome::<Receipt>::CompletedDuplicate),
+            Some(ClaimMetric::Duplicate("completed"))
+        );
+
+        assert_eq!(
+            claim_metric(&InboxClaimOutcome::<Receipt>::InProgressDuplicate),
+            Some(ClaimMetric::Duplicate("in_progress"))
+        );
+
+        assert_eq!(
+            claim_metric(&InboxClaimOutcome::<Receipt>::DeadDuplicate {
+                reason: DeadReason::Permanent
+            }),
+            Some(ClaimMetric::Dead(DeadReason::Permanent))
+        );
+    }
+
+    #[test]
+    fn process_duration_uses_only_closed_error_categories() {
+        let mut processed = Processed {
+            resolution: Resolution::Completed,
+            stage: Stage::Commit,
+            error: None,
+            message_id: None,
+            attempt: None,
+        };
+
+        assert_eq!(process_error_type(&processed), None);
+        processed.stage = Stage::Claim;
+        assert_eq!(process_error_type(&processed), None);
+        processed.resolution = Resolution::InProgress;
+        assert_eq!(process_error_type(&processed), None);
+        processed.resolution = Resolution::Dead(DeadReason::Exhausted);
+        assert_eq!(process_error_type(&processed), None);
+        processed.stage = Stage::Fail;
+        assert_eq!(process_error_type(&processed), Some("fail"));
     }
 }
