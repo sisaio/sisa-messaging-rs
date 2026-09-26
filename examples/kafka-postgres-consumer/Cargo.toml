@@ -1,0 +1,33 @@
+[package]
+name = "kafka-postgres-consumer"
+version = "0.1.0"
+description = "Typed Kafka partitioned consumer with a PostgreSQL inbox"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# Transport-neutral envelope contracts and the JSON payload codec.
+sisa-messaging = { workspace = true, features = ["json"] }
+
+# Generic bounded consumer runtime and the inbox settings and scope it uses.
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+
+# Concrete providers composed only by applications, examples, and system tests. The Kafka
+# provider owns its rdkafka client; the application never imports rdkafka.
+sisa-messaging-kafka = { workspace = true }
+sisa-messaging-postgres = { workspace = true }
+
+# Application-owned pool, runtime, and shutdown signal.
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio-util = { workspace = true }
+
+# Derives the sample message payload codec.
+serde = { workspace = true }
+
+[lints]
+workspace = true
