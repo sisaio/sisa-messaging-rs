@@ -192,7 +192,7 @@ where
     /// A partition advances only after a committed success or durable terminal dead record.
     /// A timed-out, transient, or otherwise ambiguous advance pauses only that partition without
     /// failing the run; unrelated partitions may continue. A returned permanent provider error
-    /// stops the run with [`ConsumerErrorKind::Settlement`]. An overlapping live record stops the
+    /// stops the run with [`crate::ConsumerErrorKind::Settlement`]. An overlapping live record stops the
     /// run. On every exit, active work drains for at most the configured `drain_timeout` before
     /// its transactions are released.
     pub async fn run_partitioned(
