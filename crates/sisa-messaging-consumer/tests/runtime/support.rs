@@ -139,6 +139,32 @@ struct Script {
     settle: HashMap<u8, VecDeque<Step>>,
 
     fenced_advance: HashSet<u8>,
+
+    gated_advance: HashMap<u8, AdvanceGate>,
+}
+
+/// What a gated partition advance reports once its gate opens.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GateOutcome {
+    Advanced,
+    Error(FailureKind),
+}
+
+/// A source step a gated advance publishes the instant it reports.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Then {
+    Deliver(u8),
+    Lose(u8),
+}
+
+/// Scripts one advance to publish source steps as it reports, then hold until the source has
+/// returned every published step and been polled again, so each step's dispatch has run.
+struct AdvanceGate {
+    then: Vec<SourceStep>,
+
+    outcome: GateOutcome,
+
+    hold: Option<Arc<Semaphore>>,
 }
 
 /// Shared observation and scripting state for every fake.
@@ -167,6 +193,13 @@ pub struct Probe {
     outstanding: AtomicUsize,
 
     max_outstanding_at_receive: AtomicUsize,
+
+    /// Partitioned-source receive calls started, and the call that last returned a step.
+    receive_calls: AtomicUsize,
+
+    last_step_call: AtomicUsize,
+
+    receive_entered: Notify,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -591,6 +624,44 @@ pub struct FakePartitionedSettlement {
     partition: u8,
 
     inner: FakeSettlement,
+
+    queue: Arc<Queue>,
+}
+
+/// Publishes a gate's steps, then waits until the source returned all of them and was polled
+/// again. The runtime dispatches a returned step before it polls the source again.
+async fn open_gate(probe: &Probe, queue: &Queue, tag: u8, gate: AdvanceGate) {
+    lock(&queue.steps).extend(gate.then);
+    // Recorded after publishing, so a test that observes the advance also sees the steps queued.
+    probe.push(Event::Ack(tag));
+    queue.ready.notify_one();
+
+    wait_dispatched(probe, queue).await;
+
+    if let Some(hold) = gate.hold
+        && let Ok(permit) = hold.acquire().await
+    {
+        permit.forget();
+    }
+}
+
+/// Waits until the partitioned source returned every queued step and was polled again.
+async fn wait_dispatched(probe: &Probe, queue: &Queue) {
+    loop {
+        let entered = probe.receive_entered.notified();
+        tokio::pin!(entered);
+        entered.as_mut().enable();
+
+        let drained = lock(&queue.steps).is_empty();
+        let calls = probe.receive_calls.load(Ordering::SeqCst);
+        let last = probe.last_step_call.load(Ordering::SeqCst);
+
+        if drained && calls > last {
+            break;
+        }
+
+        entered.await;
+    }
 }
 
 impl PartitionedLogSettlement for FakePartitionedSettlement {
@@ -598,6 +669,22 @@ impl PartitionedLogSettlement for FakePartitionedSettlement {
     type Error = FakeError;
 
     async fn advance(self) -> Result<PartitionAdvance, Self::Error> {
+        let gate = lock(&self.inner.probe.script)
+            .gated_advance
+            .remove(&self.inner.tag);
+
+        if let Some(gate) = gate {
+            let outcome = gate.outcome;
+            let mut inner = self.inner;
+            inner.invoked = true;
+            open_gate(&inner.probe, &self.queue, inner.tag, gate).await;
+
+            return match outcome {
+                GateOutcome::Advanced => Ok(PartitionAdvance::Advanced),
+                GateOutcome::Error(kind) => Err(FakeError { kind }),
+            };
+        }
+
         let mut inner = self.inner;
         let fenced = lock(&inner.probe.script).fenced_advance.remove(&inner.tag);
 
@@ -658,8 +745,15 @@ impl PartitionedLogDeliverySource for FakePartitionedSource {
     async fn receive(
         &mut self,
     ) -> Result<PartitionedLogReceive<Self::Delivery, Self::Partition>, Self::Error> {
+        let call = self.probe.receive_calls.fetch_add(1, Ordering::SeqCst) + 1;
+        self.probe.receive_entered.notify_waiters();
+
         loop {
             let step = lock(&self.queue.steps).pop_front();
+
+            if step.is_some() {
+                self.probe.last_step_call.store(call, Ordering::SeqCst);
+            }
 
             match step {
                 Some(SourceStep::Deliver { tag, wire }) => {
@@ -675,6 +769,7 @@ impl PartitionedLogDeliverySource for FakePartitionedSource {
                                 invoked: false,
                                 supports_heartbeat: false,
                             },
+                            queue: Arc::clone(&self.queue),
                         },
                     }));
                 }
@@ -1180,6 +1275,47 @@ impl Harness {
 
     pub fn lose_partition(&self, partition: u8) {
         self.enqueue(SourceStep::OwnershipLost(partition));
+    }
+
+    /// Waits until the partitioned source returned every queued step and was polled again, so
+    /// the runtime has dispatched each of them.
+    pub async fn wait_dispatched(&self) {
+        wait_dispatched(&self.probe, &self.queue).await;
+    }
+
+    /// Gates the advance of `tag`: as it reports `outcome`, the source publishes `then`, and the
+    /// advance returns only after the runtime dispatched every published step and, when `hold`
+    /// is set, a permit is added to it.
+    pub fn gate_advance(
+        &self,
+        tag: u8,
+        outcome: GateOutcome,
+        then: &[Then],
+        hold: Option<Arc<Semaphore>>,
+    ) {
+        let then = then
+            .iter()
+            .map(|step| match *step {
+                Then::Deliver(tag) => SourceStep::Deliver {
+                    tag,
+                    wire: FakeWire::Valid {
+                        id: self.probe.id(tag),
+                        message_type: Order::TYPE,
+                        body: format!("gated {PAYLOAD_SENTINEL}"),
+                    },
+                },
+                Then::Lose(partition) => SourceStep::OwnershipLost(partition),
+            })
+            .collect();
+
+        lock(&self.probe.script).gated_advance.insert(
+            tag,
+            AdvanceGate {
+                then,
+                outcome,
+                hold,
+            },
+        );
     }
 
     /// Number of source steps not yet received.

@@ -658,3 +658,418 @@ async fn provider_continuation_after_reconciled_advance_accepts_next_offset() {
             .any(|event| matches!(event, Event::Ack(3)))
     );
 }
+
+/// Bound for a handoff scenario; exceeding it means the runtime stopped or stalled.
+const HANDOFF_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn handoff_harness() -> Harness {
+    let mut harness = Harness::new(SettlementMode::Broker);
+    // Bounds the drain when a held advance never returns.
+    harness.settings.drain_timeout = Duration::from_millis(200);
+
+    harness
+}
+
+/// Waits for `condition`, or fails with the run's own result if it ended first.
+async fn wait_or_report(
+    harness: &Harness,
+    running: &mut tokio::task::JoinHandle<
+        Result<ConsumerExit, sisa_messaging_consumer::ConsumerError>,
+    >,
+    what: &str,
+    condition: impl Fn(&[Event]) -> bool,
+) {
+    tokio::select! {
+        () = harness.probe.wait_until(condition) => {}
+        ended = &mut *running => panic!("{what}: the run ended first with {ended:?}"),
+        () = tokio::time::sleep(HANDOFF_TIMEOUT) => panic!("{what}: timed out"),
+    }
+}
+
+/// A source may report a partition's next record as soon as the previous advance reports
+/// success, before that record's coordinator has released the partition.
+async fn next_record_after_a_reported_advance_waits_for_the_releasing_coordinator() {
+    let harness = handoff_harness();
+    harness.gate_advance(1, GateOutcome::Advanced, &[Then::Deliver(3)], None);
+    harness.deliver(1, "first");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let mut running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    wait_or_report(&harness, &mut running, "next record", |events| {
+        events.iter().any(|event| matches!(event, Event::Ack(3)))
+    })
+    .await;
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    let events = harness.probe.events();
+    let position = |wanted: Event| events.iter().position(|event| *event == wanted);
+
+    assert!(position(Event::Ack(1)) < position(Event::Handle(3)));
+    assert!(position(Event::Handle(3)) < position(Event::Ack(3)));
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(1))),
+        1
+    );
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(3))),
+        1
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn next_record_after_a_reported_advance_is_processed_in_order_current_thread() {
+    next_record_after_a_reported_advance_waits_for_the_releasing_coordinator().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn next_record_after_a_reported_advance_is_processed_in_order_multi_thread() {
+    next_record_after_a_reported_advance_waits_for_the_releasing_coordinator().await;
+}
+
+/// A replay-only source withdraws an indeterminate advance and replays the record at once.
+async fn withdrawn_indeterminate_advance_replays_with_one_effect() {
+    let harness = handoff_harness();
+
+    harness.gate_advance(
+        1,
+        GateOutcome::Error(sisa_messaging::FailureKind::Transient),
+        &[Then::Lose(1), Then::Deliver(1)],
+        None,
+    );
+
+    harness.deliver(1, "first attempt");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let mut running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    wait_or_report(&harness, &mut running, "replayed advance", |events| {
+        events
+            .iter()
+            .filter(|event| matches!(event, Event::Ack(1)))
+            .count()
+            == 2
+    })
+    .await;
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    // The replay found the committed receipt: one handler effect, two advances.
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(1))),
+        1
+    );
+
+    assert_eq!(harness.probe.committed_writes().len(), 1);
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn withdrawn_indeterminate_advance_replays_with_one_effect_current_thread() {
+    withdrawn_indeterminate_advance_replays_with_one_effect().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn withdrawn_indeterminate_advance_replays_with_one_effect_multi_thread() {
+    withdrawn_indeterminate_advance_replays_with_one_effect().await;
+}
+
+/// An ownership loss that arrives while a record is held behind a reported advance cancels the
+/// held record too.
+async fn ownership_loss_cancels_a_held_record() {
+    let harness = handoff_harness();
+
+    harness.gate_advance(
+        1,
+        GateOutcome::Advanced,
+        &[Then::Deliver(3), Then::Lose(1)],
+        None,
+    );
+
+    harness.deliver(1, "first");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let mut running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    wait_or_report(&harness, &mut running, "held record release", |events| {
+        events.iter().any(|event| matches!(event, Event::Left(3)))
+    })
+    .await;
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    assert!(
+        harness
+            .probe
+            .events_for(3)
+            .iter()
+            .all(|event| matches!(event, Event::Left(3)))
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn ownership_loss_cancels_a_held_record_current_thread() {
+    ownership_loss_cancels_a_held_record().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ownership_loss_cancels_a_held_record_multi_thread() {
+    ownership_loss_cancels_a_held_record().await;
+}
+
+/// Shutdown while a record is held behind an unfinished advance neither handles nor advances
+/// the held record.
+async fn shutdown_while_a_record_is_held_exits_cleanly() {
+    let harness = handoff_harness();
+    let hold = Arc::new(Semaphore::new(0));
+
+    harness.gate_advance(
+        1,
+        GateOutcome::Advanced,
+        &[Then::Deliver(3)],
+        Some(Arc::clone(&hold)),
+    );
+
+    harness.deliver(1, "first");
+    let cancel = CancellationToken::new();
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let mut running = tokio::spawn(consumer.run_partitioned(cancel.clone()));
+
+    wait_or_report(&harness, &mut running, "first advance", |events| {
+        events.iter().any(|event| matches!(event, Event::Ack(1)))
+    })
+    .await;
+
+    tokio::select! {
+        () = harness.wait_dispatched() => {}
+        ended = &mut running => panic!("held record: the run ended first with {ended:?}"),
+    }
+
+    cancel.cancel();
+    assert!(matches!(join(running).await, Ok(ConsumerExit::Cancelled)));
+
+    assert!(
+        harness
+            .probe
+            .events_for(3)
+            .iter()
+            .all(|event| matches!(event, Event::Left(3)))
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+    drop(hold);
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_while_a_record_is_held_exits_cleanly_current_thread() {
+    shutdown_while_a_record_is_held_exits_cleanly().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shutdown_while_a_record_is_held_exits_cleanly_multi_thread() {
+    shutdown_while_a_record_is_held_exits_cleanly().await;
+}
+
+/// A record for a partition whose advance finished unconfirmed, with no withdrawal, overlaps the
+/// unresolved record and stops the run at once instead of waiting on a release that never comes.
+async fn a_record_after_an_unconfirmed_advance_fails_fast() {
+    let mut harness = handoff_harness();
+    harness.settings.settlement_timeout = Duration::from_millis(100);
+    harness.probe.script_settle(1, Step::Hang);
+    harness.deliver(1, "first");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let mut running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    wait_or_report(&harness, &mut running, "first advance", |events| {
+        events.iter().any(|event| matches!(event, Event::Ack(1)))
+    })
+    .await;
+
+    // Past the settlement timeout, the coordinator has finished with the advance unconfirmed.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    harness.deliver(3, "later record without withdrawal");
+
+    let ended = tokio::time::timeout(HANDOFF_TIMEOUT, running)
+        .await
+        .unwrap_or_else(|_| panic!("an overlapping record stalled the run"));
+
+    let error = expect_error(ended.unwrap_or_else(|error| panic!("run panicked: {error}")));
+    assert_eq!(error.kind(), ConsumerErrorKind::PartitionOrder);
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(3))),
+        0
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_record_after_an_unconfirmed_advance_fails_fast_current_thread() {
+    a_record_after_an_unconfirmed_advance_fails_fast().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_after_an_unconfirmed_advance_fails_fast_multi_thread() {
+    a_record_after_an_unconfirmed_advance_fails_fast().await;
+}
+
+/// A record held behind an advance that then finishes unconfirmed, with no withdrawal, is
+/// rejected when released and never reaches the handler.
+async fn a_record_held_behind_an_unconfirmed_advance_is_rejected() {
+    let harness = handoff_harness();
+
+    harness.gate_advance(
+        1,
+        GateOutcome::Error(sisa_messaging::FailureKind::Transient),
+        &[Then::Deliver(3)],
+        None,
+    );
+
+    harness.deliver(1, "first");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    let ended = tokio::time::timeout(HANDOFF_TIMEOUT, running)
+        .await
+        .unwrap_or_else(|_| panic!("a rejected held record stalled the run"));
+
+    let error = expect_error(ended.unwrap_or_else(|error| panic!("run panicked: {error}")));
+    assert_eq!(error.kind(), ConsumerErrorKind::PartitionOrder);
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(3))),
+        0
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_record_held_behind_an_unconfirmed_advance_is_rejected_current_thread() {
+    a_record_held_behind_an_unconfirmed_advance_is_rejected().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_held_behind_an_unconfirmed_advance_is_rejected_multi_thread() {
+    a_record_held_behind_an_unconfirmed_advance_is_rejected().await;
+}
+
+/// Ownership churn while a record is held: the second loss cancels the held record, and the
+/// replacement that follows supersedes it instead of stopping the run.
+async fn a_replacement_supersedes_a_held_record_cancelled_by_a_second_loss() {
+    let harness = handoff_harness();
+
+    harness.gate_advance(
+        1,
+        GateOutcome::Error(sisa_messaging::FailureKind::Transient),
+        &[
+            Then::Lose(1),
+            Then::Deliver(3),
+            Then::Lose(1),
+            Then::Deliver(5),
+        ],
+        None,
+    );
+
+    harness.deliver(1, "first");
+
+    let consumer = harness
+        .partitioned_consumer()
+        .unwrap_or_else(|error| panic!("settings: {error}"));
+
+    let mut running = tokio::spawn(consumer.run_partitioned(CancellationToken::new()));
+
+    wait_or_report(&harness, &mut running, "replacement", |events| {
+        events.iter().any(|event| matches!(event, Event::Ack(5)))
+            && events.iter().any(|event| matches!(event, Event::Left(3)))
+    })
+    .await;
+
+    harness.close();
+
+    assert!(matches!(
+        join(running).await,
+        Ok(ConsumerExit::SourceClosed)
+    ));
+
+    assert_eq!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Handle(5))),
+        1
+    );
+
+    assert!(
+        harness
+            .probe
+            .events_for(3)
+            .iter()
+            .all(|event| matches!(event, Event::Left(3)))
+    );
+
+    assert_eq!(harness.probe.live_tx(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_replacement_supersedes_a_held_record_cancelled_by_a_second_loss_current_thread() {
+    a_replacement_supersedes_a_held_record_cancelled_by_a_second_loss().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replacement_supersedes_a_held_record_cancelled_by_a_second_loss_multi_thread() {
+    a_replacement_supersedes_a_held_record_cancelled_by_a_second_loss().await;
+}
