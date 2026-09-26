@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/*", "examples/redis-postgres-consumer", "tests/architecture", "xtask"]
+members = [
+    "crates/*",
+    "examples/nats-postgres-consumer",
+    "examples/redis-postgres-consumer",
+    "tests/architecture",
+    "tests/system",
+    "xtask",
+]
 resolver = "3"
 
 [workspace.package]
