@@ -162,20 +162,36 @@ pub(super) async fn wait_for_receipt(
     }
 }
 
-/// Removes this test's rows; every test uses its own scope.
-async fn cleanup(pool: &PgPool, scope: &InboxScope) {
+/// Removes this test's rows through a short-lived pool; every test uses its own scope.
+///
+/// Failures are returned rather than raised so they never replace a test body's own panic.
+async fn cleanup(scope: &InboxScope) -> Result<(), &'static str> {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(connect_options())
+        .await
+        .map_err(|_| "PostgreSQL system test cleanup connection failed")?;
+
+    let mut result = Ok(());
+
     for statement in [
         "DELETE FROM system_test_effects WHERE scope = $1",
         "DELETE FROM inbox_receipts WHERE scope = $1",
     ] {
-        sqlx::query(statement)
+        if sqlx::query(statement)
             .bind(scope.as_str())
-            .execute(pool)
+            .execute(&pool)
             .await
-            .unwrap();
+            .is_err()
+        {
+            result = Err("PostgreSQL system test cleanup delete failed");
+            break;
+        }
     }
 
     pool.close().await;
+
+    result
 }
 
 pub(super) fn scope() -> InboxScope {
@@ -499,12 +515,31 @@ where
     .await;
 
     broker.delete().await;
-    cleanup(&pool, &scope).await;
 
+    // An aborted consumer drops its transactions only as its workflows unwind. Closing the test
+    // pool waits until no checked-out connection remains, so aborted transactions are rolled
+    // back or finished before the deletes run on a separate pool. A COMMIT already written to
+    // the socket before the abort can still race the deletes; that race is confined to this
+    // test's unique scope.
+    let drained = tokio::time::timeout(PROGRESS_TIMEOUT, pool.close())
+        .await
+        .is_ok();
+
+    let cleaned = if drained {
+        cleanup(&scope).await
+    } else {
+        Err("test connections did not return to the pool; cleanup was skipped")
+    };
+
+    // The body's own failure takes precedence over any cleanup failure.
     if let Err(error) = outcome {
         match error.try_into_panic() {
             Ok(panic) => std::panic::resume_unwind(panic),
             Err(_) => panic!("system test body was cancelled"),
         }
+    }
+
+    if let Err(message) = cleaned {
+        panic!("{message}");
     }
 }
