@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::future::Future;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -25,8 +26,8 @@ use sisa_messaging_postgres::{PostgresInboxStore, PostgresInboxTransaction};
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::AbortOnDropHandle;
 
 /// Bound for every wait on broker, database, or consumer progress.
 pub(super) const PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
@@ -162,7 +163,7 @@ pub(super) async fn wait_for_receipt(
 }
 
 /// Removes this test's rows; every test uses its own scope.
-pub(super) async fn cleanup(pool: &PgPool, scope: &InboxScope) {
+async fn cleanup(pool: &PgPool, scope: &InboxScope) {
     for statement in [
         "DELETE FROM system_test_effects WHERE scope = $1",
         "DELETE FROM inbox_receipts WHERE scope = $1",
@@ -400,7 +401,7 @@ impl Broker {
         }
     }
 
-    pub(super) async fn delete(self) {
+    pub(super) async fn delete(&self) {
         let _ = self.context.delete_stream(&self.stream_name).await;
     }
 }
@@ -421,7 +422,8 @@ pub(super) fn settings(nak_delay: Duration) -> ConsumerSettings {
 pub(super) struct Running {
     cancel: CancellationToken,
 
-    task: JoinHandle<Result<ConsumerExit, ConsumerError>>,
+    /// Aborted if a failing test unwinds, releasing its transactions before cleanup.
+    task: AbortOnDropHandle<Result<ConsumerExit, ConsumerError>>,
 }
 
 impl Running {
@@ -448,7 +450,7 @@ impl Running {
         .unwrap();
 
         let cancel = CancellationToken::new();
-        let task = tokio::spawn(consumer.run(cancel.child_token()));
+        let task = AbortOnDropHandle::new(tokio::spawn(consumer.run(cancel.child_token())));
 
         Self { cancel, task }
     }
@@ -460,5 +462,49 @@ impl Running {
             .await
             .expect("consumer did not stop")
             .expect("consumer task panicked")
+    }
+}
+
+/// Per-test resources handed to a test body.
+pub(super) struct Fixture {
+    pub(super) pool: PgPool,
+
+    pub(super) broker: Arc<Broker>,
+
+    pub(super) pull_consumer: PullConsumer,
+
+    pub(super) scope: InboxScope,
+}
+
+/// Runs `body` with a fresh pool, stream, durable, and scope, and removes them even when it panics.
+///
+/// Asynchronous cleanup cannot run in `Drop`, so the body runs as a task: a panic surfaces as a
+/// `JoinError`, cleanup runs, and the original panic then resumes.
+pub(super) async fn run_with_cleanup<F, Fut>(ack_wait: Duration, body: F)
+where
+    F: FnOnce(Fixture) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let pool = pool().await;
+    let (broker, pull_consumer) = Broker::new(ack_wait).await;
+    let broker = Arc::new(broker);
+    let scope = scope();
+
+    let outcome = tokio::spawn(body(Fixture {
+        pool: pool.clone(),
+        broker: Arc::clone(&broker),
+        pull_consumer,
+        scope: scope.clone(),
+    }))
+    .await;
+
+    broker.delete().await;
+    cleanup(&pool, &scope).await;
+
+    if let Err(error) = outcome {
+        match error.try_into_panic() {
+            Ok(panic) => std::panic::resume_unwind(panic),
+            Err(_) => panic!("system test body was cancelled"),
+        }
     }
 }
