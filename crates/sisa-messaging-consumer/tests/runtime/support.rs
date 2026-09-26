@@ -379,7 +379,7 @@ async fn perform(step: Step) -> Result<(), FakeError> {
             kind: FailureKind::Permanent,
         }),
         Step::Hang => std::future::pending().await,
-        Step::Panic => panic!("scripted operation panic"),
+        Step::Panic => panic!("scripted operation panic {PROVIDER_SENTINEL}"),
     }
 }
 
