@@ -2876,6 +2876,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis-postgres-consumer"
+version = "0.1.0"
+dependencies = [
+ "redis",
+ "serde",
+ "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
+ "sisa-messaging-postgres",
+ "sisa-messaging-redis",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3601,7 +3617,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

@@ -21,6 +21,10 @@ tracing = { workspace = true, features = ["attributes"] }
 
 [dev-dependencies]
 criterion = { workspace = true }
+sisa-messaging = { workspace = true, features = ["json"] }
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+tokio-util = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [[bench]]
