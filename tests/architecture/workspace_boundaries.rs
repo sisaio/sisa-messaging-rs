@@ -440,6 +440,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-redis",
         "redis-postgres-consumer",
         "nats-postgres-consumer",
+        "iggy-postgres-consumer",
         "sisa-messaging-architecture-tests",
         "sisa-messaging-system-tests",
         "sisa-messaging-xtask",
