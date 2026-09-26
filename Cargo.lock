@@ -3563,7 +3563,10 @@ dependencies = [
  "criterion",
  "rdkafka",
  "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
