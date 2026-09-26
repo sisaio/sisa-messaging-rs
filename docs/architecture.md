@@ -196,9 +196,13 @@ One consumer handles one message type/version by default. See
 - `RabbitMqDeliverySource`, `RabbitMqDelivery`, and `RabbitMqSettlement` implement inbound
   receive and settlement contracts; `RabbitMqMapper<R>` implements `EnvelopeMapper`.
 - The Redis Streams publisher and delivery source implement outbound publication, envelope
-  mapping, and individual inbound delivery on servers that implement the required stream commands.
-  The tested Garnet 2.1.8 image returns `ERR unknown command` for `XADD`, so it cannot run this
-  delivery path; support is tracked separately in #75.
+  mapping, and individual inbound delivery only on servers that implement the required stream
+  commands, including `XINFO GROUPS` and bounded `XPENDING`/`XCLAIM` reclaim. Garnet is explicitly
+  unsupported: the latest official release, [v2.1.8](https://github.com/microsoft/garnet/releases/tag/v2.1.8),
+  and the [upstream Streams compatibility table](https://github.com/microsoft/garnet/blob/v2.1.8/website/docs/commands/api-compatibility.md#stream)
+  mark the required commands unsupported, and the pinned image returns `ERR unknown command` for
+  `XADD`. No viable pinned build has been identified; #75 tracks reevaluation after a build passes
+  the real-server provider suite.
 
 ## 6. Canonical construction
 
