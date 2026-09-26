@@ -218,7 +218,10 @@ async fn run() -> Result<(), ExampleError> {
 
 type ConsumerTask = JoinHandle<Result<ConsumerExit, ConsumerError>>;
 
-/// Waits for Ctrl-C or an early consumer exit, then returns only after the consumer has drained.
+/// Waits for Ctrl-C or an early consumer exit, then returns only after the consumer has stopped.
+///
+/// The first Ctrl-C starts the consumer's drain, which `drain_timeout` bounds. A second Ctrl-C
+/// aborts the drain; deliveries still in flight stay unacknowledged for broker redelivery.
 async fn supervise(mut task: ConsumerTask, cancel: &CancellationToken) -> Result<(), ExampleError> {
     let signal = tokio::select! {
         joined = &mut task => return exit(joined),
@@ -226,7 +229,15 @@ async fn supervise(mut task: ConsumerTask, cancel: &CancellationToken) -> Result
     };
 
     cancel.cancel();
-    let joined = task.await;
+
+    let joined = tokio::select! {
+        joined = &mut task => joined,
+        Ok(()) = tokio::signal::ctrl_c(), if signal.is_ok() => {
+            task.abort();
+            task.await
+        }
+    };
+
     signal.map_err(|_| ExampleError::Signal)?;
 
     exit(joined)
