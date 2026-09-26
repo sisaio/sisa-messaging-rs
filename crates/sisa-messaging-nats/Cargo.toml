@@ -20,12 +20,25 @@ tracing = { workspace = true }
 criterion = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
+# Consumer composition tests and benchmarks run the generic runtime over this provider with a
+# test-local inbox; the runtime dependency graph stays messaging-only.
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+tokio-util = { workspace = true }
+
+# Captures instrumentation output to assert payload and header redaction.
+tracing-subscriber = { workspace = true }
+
 [[bench]]
 name = "mapping"
 harness = false
 
 [[bench]]
 name = "provider"
+harness = false
+
+[[bench]]
+name = "consume"
 harness = false
 
 [lints]
