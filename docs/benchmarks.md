@@ -34,7 +34,8 @@ crates/
 │   ├── provider.rs
 │   └── consume.rs
 ├── sisa-messaging-kafka/benches/
-│   └── mapping.rs
+│   ├── mapping.rs
+│   └── consume.rs
 ├── sisa-messaging-iggy/benches/
 │   └── mapping.rs
 ├── sisa-messaging-rabbitmq/benches/
@@ -303,6 +304,21 @@ source's single-message pull batches. A 600 ms handler with a 500 ms `ack_wait` 
 heartbeat completed without redelivery. These are loopback software-overhead
 measurements, not network capacity or release thresholds; the PostgreSQL/NATS number remains owed
 to the system benchmark.
+
+`sisa-messaging-kafka/benches/consume.rs` runs the generic partitioned consumer over a real Kafka
+broker with an in-memory inbox when `SISA_KAFKA_BOOTSTRAP_SERVERS` and `SISA_KAFKA_BENCH_TOPIC`
+(eight partitions) are set, so it measures runtime plus fenced transactional offset settlement but
+not PostgreSQL. Each iteration uses a fresh group positioned at the high watermark; timing starts
+at the first record decode and ends when a read-committed observer sees the last committed offset,
+and every iteration verifies that no record was handled twice. Initial local run (2026-09-26,
+`apache/kafka:4.0.0` single-node KRaft in Docker on macOS 26.5.2 arm64, rustc 1.98.0, loopback):
+64 records on one partition took a median of about 903 ms for advance and 913 ms for
+completed-duplicate advance; 256 records over eight partitions took about 1.37 s, 894 ms, 902 ms,
+and 803 ms at `max_in_flight` 1, 8, 32, and 128. Criterion intervals were wide. Throughput
+plateaus above eight in flight because every record pauses, seeks, and resumes its partition and
+commits its offset in a transaction; commits of concurrently resolved partitions are grouped into
+one transaction. These are loopback software-overhead measurements, not network capacity or
+release thresholds.
 
 ## 8. End-to-end system scenarios
 
