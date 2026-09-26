@@ -177,8 +177,8 @@ lower-level caller uses `claim`/`complete`/`fail` explicitly and owns every oper
 ### `sisa-messaging-consumer`
 
 - `ConsumerHandler<M, Tx>`: application business logic over a typed envelope and transaction.
-- `ConsumerSettings`: concurrency, timeout, negative-ack, drain, and settlement-mode policy;
-  heartbeat policy is deferred to #11.
+- `ConsumerSettings`: concurrency, timeout, negative-ack, heartbeat, drain, and settlement-mode
+  policy.
 - `Consumer`: bounded typed receive/process/settle loop.
 - `ConsumerExit` and `ConsumerError`: clean source/cancellation exits versus fatal supervision
   failures.
@@ -230,8 +230,10 @@ let consumer = Consumer::new(
 )?;
 ```
 
-The consumer lines are an intended integration sketch until the consumer runtime is implemented.
-The application supplies `inbound_subject_resolver` because the mapper also supports encoding.
+The consumer lines correspond to the compiled call site in
+[`examples/nats-postgres-consumer`](../examples/nats-postgres-consumer/src/main.rs), quoted in
+[Consumer framework](consumer-framework.md) section 4. The application supplies
+`inbound_subject_resolver` because the mapper also supports encoding.
 
 Defaults are applied by the application:
 
