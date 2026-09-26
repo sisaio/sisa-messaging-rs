@@ -582,6 +582,27 @@ pub fn seed_group_at_end(brokers: &str, group: &str, topic: &str) -> HashMap<i32
     seeded
 }
 
+/// The group's committed cursor, or `None` while the group coordinator cannot answer yet.
+pub fn try_committed_cursor(
+    brokers: &str,
+    group: &str,
+    topic: &str,
+    partition: i32,
+) -> Option<Offset> {
+    let reader = group_reader(brokers, group);
+    let mut partitions = TopicPartitionList::new();
+    partitions.add_partition(topic, partition);
+
+    reader
+        .committed_offsets(partitions, TEST_TIMEOUT)
+        .ok()
+        .and_then(|committed| {
+            committed
+                .find_partition(topic, partition)
+                .map(|entry| entry.offset())
+        })
+}
+
 /// The group's committed cursor, read stably under `read_committed`.
 pub fn committed_cursor(brokers: &str, group: &str, topic: &str, partition: i32) -> Offset {
     let reader = group_reader(brokers, group);

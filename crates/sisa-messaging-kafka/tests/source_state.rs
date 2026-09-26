@@ -822,7 +822,23 @@ fn settings() -> KafkaConsumerSettings {
 
 #[test]
 fn transactional_identity_is_derived_from_group_and_instance() {
-    assert_eq!(settings().transactional_id(), "sisa.orders-group.member-7");
+    assert_eq!(
+        settings().transactional_id(),
+        "sisa.12.orders-group.member-7"
+    );
+}
+
+#[test]
+fn transactional_identity_keeps_dotted_pairs_distinct() {
+    let identity = |group: &str, instance: &str| {
+        KafkaConsumerSettings::new(group, instance, ["orders"])
+            .unwrap_or_else(|_| panic!("settings are valid"))
+            .transactional_id()
+    };
+
+    assert_eq!(identity("a.b", "c"), "sisa.3.a.b.c");
+    assert_eq!(identity("a", "b.c"), "sisa.1.a.b.c");
+    assert_ne!(identity("a.b", "c"), identity("a", "b.c"));
 }
 
 #[test]
@@ -867,6 +883,7 @@ fn identity_and_conflicting_fencing_properties_cannot_be_overridden() {
         ("group.instance.id", "other"),
         ("transactional.id", "other"),
         ("isolation.level", "read_uncommitted"),
+        ("auto.offset.reset", "latest"),
         ("partition.assignment.strategy", "cooperative-sticky"),
         ("group.protocol", "consumer"),
         ("enable.auto.commit", "true"),
@@ -892,6 +909,7 @@ fn identity_and_conflicting_fencing_properties_cannot_be_overridden() {
 fn matching_fencing_properties_and_unrelated_properties_are_accepted() {
     let client = client(&[
         ("isolation.level", "read_committed"),
+        ("auto.offset.reset", "earliest"),
         ("enable.idempotence", "true"),
         ("allow.auto.create.topics", "false"),
         ("session.timeout.ms", "6000"),

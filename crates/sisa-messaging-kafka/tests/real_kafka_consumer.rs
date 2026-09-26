@@ -27,7 +27,7 @@ use support::{
     BROKERS_ENV, PARTITIONED_TOPIC_ENV, ScriptedHandler, Step, TEST_TIMEOUT, TOPIC_ENV,
     committed_cursor, consumer_client, consumer_settings, delivery_source, eventually,
     new_producer, partitioned_consumer, publish_order, required_env, scope, seed_group_at_end,
-    send_in_transaction, transactional_record_producer, unique,
+    send_in_transaction, transactional_record_producer, try_committed_cursor, unique,
 };
 
 struct Fixture {
@@ -476,6 +476,67 @@ async fn advance_timeout_reconciles_and_continues_once() {
         running.cancel().await,
         Ok(ConsumerExit::Cancelled)
     ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a real Kafka broker that permits topic creation through the admin API"]
+async fn fresh_group_consumes_records_published_before_first_assignment() {
+    use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+    use rdkafka::client::DefaultClientContext;
+
+    // A dedicated topic holds only this test's records, so a group with no committed offset
+    // can be observed consuming from the start of the log. Automatic topic creation stays off.
+    let brokers = required_env(BROKERS_ENV);
+    let topic = unique("sisa-kafka-fresh-group");
+
+    let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
+        .set("bootstrap.servers", &brokers)
+        .create()
+        .unwrap_or_else(|_| panic!("admin client construction failed"));
+
+    let created = admin
+        .create_topics(
+            [&NewTopic::new(&topic, 1, TopicReplication::Fixed(1))],
+            &AdminOptions::new(),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("topic creation request failed"));
+
+    assert!(created.iter().all(Result::is_ok), "topic creation failed");
+
+    let producer = new_producer(&brokers);
+    let labels = ["early-1", "early-2", "early-3", "early-4", "early-5"];
+    let mut last = 0;
+
+    // Every record exists before any member of the brand-new, unseeded group joins.
+    for label in labels {
+        let (_, offset) = publish_order(&producer, &topic, Some(0), MessageId::new(), label).await;
+        last = offset;
+    }
+
+    let group = unique("sisa-kafka-fresh-group");
+    let inbox = FakeInbox::new(3);
+    let handler = ScriptedHandler::default();
+    let client = consumer_client(&brokers);
+    let source = delivery_source(&client, &group, "member-a", &topic);
+    let shutdown = source.shutdown_handle();
+    let consumer = partitioned_consumer(source, &inbox, &handler, consumer_settings(4));
+    let cancel = CancellationToken::new();
+    let handle = tokio::spawn(consumer.run_partitioned(cancel.clone()));
+
+    eventually("the fresh group committed past its last record", || {
+        try_committed_cursor(&brokers, &group, &topic, 0) == Some(Offset::Offset(last + 1))
+    })
+    .await;
+
+    assert_eq!(handler.log(), labels.to_vec());
+    assert_eq!(inbox.effects(), labels.to_vec());
+
+    cancel.cancel();
+    assert!(matches!(join(handle).await, Ok(ConsumerExit::Cancelled)));
+    assert_closed(shutdown).await;
+
+    let _ = admin.delete_topics(&[&topic], &AdminOptions::new()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

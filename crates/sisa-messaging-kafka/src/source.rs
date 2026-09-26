@@ -37,9 +37,12 @@ const CONSUMER_IDENTITY: [&str; 2] = ["group.id", "group.instance.id"];
 /// Producer properties that identify the offset-commit producer.
 const PRODUCER_IDENTITY: [&str; 1] = ["transactional.id"];
 
-/// Consumer properties the fencing protocol depends on.
-const CONSUMER_FORCED: [(&str, &str); 7] = [
+/// Consumer properties the fencing and at-least-once protocols depend on. A group without a
+/// committed offset, or with one outside the retained log, starts at the earliest retained
+/// record rather than skipping records at librdkafka's `latest` default.
+const CONSUMER_FORCED: [(&str, &str); 8] = [
     ("isolation.level", "read_committed"),
+    ("auto.offset.reset", "earliest"),
     ("partition.assignment.strategy", "range"),
     ("group.protocol", "classic"),
     ("enable.auto.commit", "false"),

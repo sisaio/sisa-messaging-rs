@@ -9,8 +9,13 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Consumer-group identity and bounds for a Kafka partitioned delivery source.
 ///
 /// The group, static instance, and topics are validated at construction without I/O. The
-/// provider derives the stable transactional identity `sisa.{group_id}.{group_instance_id}`
-/// from them, so every instance must use a distinct static identity within its group.
+/// provider derives the stable transactional identity from them (see
+/// [`Self::transactional_id`]), so every instance must use a distinct static identity within its
+/// group.
+///
+/// A group without a committed offset starts at the earliest retained record, so no record
+/// published before the first assignment is skipped. An application that wants a new group to
+/// start at the log end commits that position for the group before the source opens.
 #[derive(Clone)]
 pub struct KafkaConsumerSettings {
     pub(crate) group_id: String,
@@ -95,11 +100,19 @@ impl KafkaConsumerSettings {
 
     /// Returns the stable transactional identity the source's offset-commit producer uses.
     ///
-    /// Operators grant transactional-identity ACLs for this value. Two live instances with the
-    /// same identity fence each other.
+    /// The format is `sisa.{group_len}.{group_id}.{group_instance_id}`, where `group_len` is the
+    /// group identifier's length in bytes, in decimal. The length prefix keeps distinct
+    /// group and instance pairs distinct even when either contains dots. Operators grant
+    /// transactional-identity ACLs for this value. Two live instances with the same identity
+    /// fence each other.
     #[must_use]
     pub fn transactional_id(&self) -> String {
-        format!("sisa.{}.{}", self.group_id, self.group_instance_id)
+        format!(
+            "sisa.{}.{}.{}",
+            self.group_id.len(),
+            self.group_id,
+            self.group_instance_id
+        )
     }
 }
 

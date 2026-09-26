@@ -320,7 +320,12 @@ settlement contract in section 2 with a broker-authoritative fence:
 - A static group instance id is required because the broker does not validate a generation-less
   commit from a member without one. The source forces read-committed isolation, eager range
   assignment, the classic group protocol, and manual offsets, and derives one stable
-  transactional id per group instance.
+  transactional id per group instance, `sisa.{group id byte length}.{group id}.{instance id}`,
+  so distinct identities never share it.
+- A group without a committed offset, or whose committed offset is no longer retained, starts at
+  the earliest retained record; the source forces this reset policy so no existing record is
+  skipped. An application that wants a new group to start at the end commits that position
+  before starting the source.
 - An indeterminate advance is fenced by re-initializing the same transactional id, which aborts
   or completes the old transaction and fences the old producer epoch, before the source reads
   the read-committed cursor and continues or replays. A new owner cannot read a cursor while an
