@@ -1,0 +1,33 @@
+[package]
+name = "sisa-messaging-example-nats-postgres-consumer"
+version = "0.0.0"
+description = "Typed NATS JetStream consumer with a PostgreSQL inbox"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# Transport-neutral envelope contracts and the JSON payload codec.
+sisa-messaging = { workspace = true, features = ["json"] }
+
+# Generic bounded consumer runtime and the inbox settings and scope it uses.
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+
+# Concrete providers composed only by applications, examples, and system tests.
+sisa-messaging-nats = { workspace = true }
+sisa-messaging-postgres = { workspace = true }
+
+# Application-owned broker connection, pool, runtime, and shutdown signal.
+async-nats = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio-util = { workspace = true }
+
+# Derives the sample message payload codec.
+serde = { workspace = true }
+
+[lints]
+workspace = true

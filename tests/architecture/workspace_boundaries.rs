@@ -440,6 +440,8 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-redis",
         "redis-postgres-consumer",
         "sisa-messaging-architecture-tests",
+        "sisa-messaging-example-nats-postgres-consumer",
+        "sisa-messaging-system-tests",
         "sisa-messaging-xtask",
     ]);
 
@@ -768,6 +770,53 @@ fn provider_packages_never_depend_on_each_other() {
     let graph = dependency_graph();
     assert!(!graph["sisa-messaging-postgres"].contains("sisa-messaging-nats"));
     assert!(!graph["sisa-messaging-nats"].contains("sisa-messaging-postgres"));
+}
+
+/// Provider crates that implement transport or persistence capabilities.
+const PROVIDER_CRATES: [&str; 6] = [
+    "sisa-messaging-postgres",
+    "sisa-messaging-nats",
+    "sisa-messaging-kafka",
+    "sisa-messaging-iggy",
+    "sisa-messaging-rabbitmq",
+    "sisa-messaging-redis",
+];
+
+/// Workspace crates a provider may name as a dev or build dependency.
+const PROVIDER_TEST_WORKSPACE_DEPENDENCIES: [&str; 3] = [
+    "sisa-messaging",
+    "sisa-messaging-inbox",
+    "sisa-messaging-consumer",
+];
+
+/// Verifies provider independence across runtime, dev, and build dependency sections.
+#[test]
+fn provider_packages_stay_independent_in_every_dependency_section() {
+    let root_manifest = read(&workspace_root().join("Cargo.toml"));
+    let workspace_dependencies = workspace_dependencies(&root_manifest);
+
+    for provider in PROVIDER_CRATES {
+        for dependency in dependency_declarations(&crate_manifest(provider)) {
+            let name = workspace_dependencies
+                .get(&dependency.actual_name)
+                .cloned()
+                .unwrap_or(dependency.actual_name);
+
+            if !name.starts_with("sisa-messaging") {
+                continue;
+            }
+
+            assert!(
+                !PROVIDER_CRATES.contains(&name.as_str()),
+                "{provider} must not depend on provider {name} in any dependency section"
+            );
+
+            assert!(
+                dependency.runtime || PROVIDER_TEST_WORKSPACE_DEPENDENCIES.contains(&name.as_str()),
+                "{provider} dev or build dependency {name} is not an allowed workspace crate"
+            );
+        }
+    }
 }
 
 /// Verifies that library dependencies are inherited from the workspace manifest.
