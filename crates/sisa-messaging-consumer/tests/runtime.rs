@@ -4,6 +4,8 @@
 mod broker_mode;
 #[path = "runtime/concurrency.rs"]
 mod concurrency;
+#[path = "runtime/partitioned.rs"]
+mod partitioned;
 #[path = "runtime/pending_recovery.rs"]
 mod pending_recovery;
 #[path = "runtime/startup.rs"]

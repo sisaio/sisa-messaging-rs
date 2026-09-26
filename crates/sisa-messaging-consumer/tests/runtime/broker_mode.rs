@@ -1,6 +1,7 @@
 //! Broker settlement: acknowledge, delayed negative acknowledgement, and terminal discard.
 
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use sisa_messaging::FailureKind;
 use sisa_messaging_consumer::{ConsumerErrorKind, ConsumerExit, SettlementMode};
@@ -9,6 +10,33 @@ use sisa_messaging_inbox::DeadReason;
 use super::support::*;
 
 const MODE: SettlementMode = SettlementMode::Broker;
+
+#[tokio::test(start_paused = true)]
+async fn immediate_requeue_uses_zero_delay_for_retry_and_in_progress() {
+    let retry = Harness::new(SettlementMode::BrokerImmediateRequeue);
+
+    retry
+        .probe
+        .script_handler(1, HandlerStep::Fail(FailureKind::Transient));
+
+    retry.deliver(1, "retry");
+    closes_cleanly(&retry).await;
+    assert!(trace(&retry, 1).contains(&Event::Nak(1, Duration::ZERO)));
+
+    let duplicate = Harness::new(SettlementMode::BrokerImmediateRequeue);
+    duplicate.probe.script_claim(1, ClaimStep::InProgress);
+    duplicate.deliver(1, "in progress");
+    closes_cleanly(&duplicate).await;
+
+    assert_eq!(
+        trace(&duplicate, 1),
+        [
+            Event::Claim(1),
+            Event::Rollback(Some(1)),
+            Event::Nak(1, Duration::ZERO),
+        ]
+    );
+}
 
 fn trace(harness: &Harness, tag: u8) -> Vec<Event> {
     harness
@@ -440,6 +468,94 @@ async fn permanent_or_unsupported_settlement_stops() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn claim_failure_preserves_its_source_after_successful_rollback() {
+    let harness = Harness::new(MODE);
+
+    harness
+        .probe
+        .script_claim(1, ClaimStep::Db(Step::Error(FailureKind::Permanent)));
+
+    harness.deliver(1, "claim failure");
+    let error = expect_error(harness.run().await);
+    assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+
+    assert!(
+        error
+            .provider_source()
+            .is_some_and(|source| source.is::<FakeError>())
+    );
+
+    assert_eq!(
+        trace(&harness, 1),
+        [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
+    );
+
+    assert_redacted(&error);
+}
+
+#[tokio::test(start_paused = true)]
+async fn permanent_cleanup_rollback_stops_after_failed_complete() {
+    let harness = Harness::new(MODE);
+
+    harness
+        .probe
+        .script_complete(1, Step::Error(FailureKind::Transient));
+
+    harness
+        .probe
+        .script_rollback(Step::Error(FailureKind::Permanent));
+
+    harness.deliver(1, "failed complete and rollback");
+    let error = expect_error(harness.run().await);
+    assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+    assert_eq!(error.failure_kind(), FailureKind::Permanent);
+    assert_eq!(trace(&harness, 1).last(), Some(&Event::Left(1)));
+    assert_redacted(&error);
+}
+
+#[tokio::test(start_paused = true)]
+async fn permanent_cleanup_rollback_stops_in_progress_and_dead_duplicates() {
+    for dead in [false, true] {
+        let harness = Harness::new(MODE);
+
+        if dead {
+            harness.probe.mark_dead(1, DeadReason::Exhausted);
+        } else {
+            harness.probe.script_claim(1, ClaimStep::InProgress);
+        }
+
+        harness
+            .probe
+            .script_rollback(Step::Error(FailureKind::Permanent));
+
+        harness.deliver(1, "duplicate rollback failure");
+        let error = expect_error(harness.run().await);
+        assert_eq!(error.kind(), ConsumerErrorKind::Inbox);
+        assert_eq!(error.failure_kind(), FailureKind::Permanent);
+        assert_eq!(trace(&harness, 1).last(), Some(&Event::Left(1)));
+        assert_redacted(&error);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn rollback_timeout_keeps_original_duplicate_resolution() {
+    let harness = Harness::new(MODE);
+    harness.probe.script_claim(1, ClaimStep::InProgress);
+    harness.probe.script_rollback(Step::Hang);
+    harness.deliver(1, "duplicate rollback timeout");
+    closes_cleanly(&harness).await;
+
+    assert_eq!(
+        trace(&harness, 1),
+        [
+            Event::Claim(1),
+            Event::Rollback(Some(1)),
+            Event::Nak(1, NAK_DELAY)
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn permanent_cleanup_rollback_failure_stops_without_settling() {
     // A completed duplicate would otherwise be acknowledged.
     let completed = Harness::new(MODE);
@@ -467,6 +583,8 @@ async fn permanent_cleanup_rollback_failure_stops_without_settling() {
         [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
     );
 
+    assert_redacted(&error);
+
     // A transient claim failure would otherwise be negatively acknowledged.
     let claim = Harness::new(MODE);
 
@@ -486,9 +604,19 @@ async fn permanent_cleanup_rollback_failure_stops_without_settling() {
     assert_eq!(error.failure_kind(), FailureKind::Permanent);
 
     assert_eq!(
+        error
+            .provider_source()
+            .and_then(|source| source.downcast_ref::<FakeError>())
+            .map(FakeError::kind),
+        Some(FailureKind::Permanent),
+    );
+
+    assert_eq!(
         trace(&claim, 1),
         [Event::Claim(1), Event::Rollback(Some(1)), Event::Left(1)]
     );
+
+    assert_redacted(&error);
 }
 
 #[tokio::test(start_paused = true)]

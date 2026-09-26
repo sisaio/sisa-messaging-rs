@@ -5,9 +5,9 @@ use redis::{
     streams::{StreamPendingCountReply, StreamPendingReply},
 };
 use sisa_messaging::{
-    ContentType, Delivery, EnvelopeMapper, IndividualDeliverySource, IndividualSettlement,
-    IndividualSettlementError, IndividualSourceOpenError, IndividualSourceRequirements, MessageId,
-    MessageType, Metadata, SerializedEnvelope,
+    ContentType, Delivery, EnvelopeMapper, IndividualCapability, IndividualDeliverySource,
+    IndividualSettlement, IndividualSettlementError, IndividualSourceOpenError,
+    IndividualSourceRequirements, MessageId, MessageType, Metadata, SerializedEnvelope,
 };
 use sisa_messaging_redis::{
     RedisDeliverySource, RedisError, RedisMapper, RedisPublisher, SourceSettings,
@@ -141,6 +141,7 @@ async fn append_read_ack_reclaim_and_cancel() {
     assert_eq!(descriptor.ack_wait(), None);
     assert_eq!(descriptor.max_deliver(), None);
     assert!(!descriptor.supports_delayed_retry());
+    assert!(!descriptor.supports_immediate_requeue());
     assert!(!descriptor.supports_terminal_discard());
     assert!(!descriptor.supports_heartbeat());
 
@@ -148,6 +149,7 @@ async fn append_read_ack_reclaim_and_cancel() {
         IndividualSourceRequirements::new().requiring_ack_wait(),
         IndividualSourceRequirements::new().requiring_max_deliver(),
         IndividualSourceRequirements::new().requiring_delayed_retry(),
+        IndividualSourceRequirements::new().requiring_immediate_requeue(),
         IndividualSourceRequirements::new().requiring_terminal_discard(),
         IndividualSourceRequirements::new().requiring_heartbeat(),
     ] {
@@ -249,7 +251,9 @@ async fn append_read_ack_reclaim_and_cancel() {
 
     assert!(matches!(
         settlement.nak(Duration::from_secs(1)).await,
-        Err(IndividualSettlementError::Unsupported(_))
+        Err(IndividualSettlementError::Unsupported(
+            IndividualCapability::DelayedRetry
+        ))
     ));
 
     assert_eq!(
@@ -339,6 +343,31 @@ async fn append_read_ack_reclaim_and_cancel() {
         settlement.ack().await,
         Err(IndividualSettlementError::Operation(RedisError::Protocol))
     ));
+
+    let sixth = publisher.append(&envelope()).await.unwrap();
+
+    let delivered = tokio::time::timeout(Duration::from_secs(2), second.receive())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    let (_, settlement) = delivered.into_parts();
+
+    assert!(matches!(
+        settlement.nak(Duration::ZERO).await,
+        Err(IndividualSettlementError::Unsupported(
+            IndividualCapability::ImmediateRequeue
+        ))
+    ));
+
+    let _: i64 = redis::cmd("XACK")
+        .arg(&stream)
+        .arg(&group)
+        .arg(&sixth)
+        .query_async(&mut commands)
+        .await
+        .unwrap();
 
     second.close();
     assert!(second.receive().await.unwrap().is_none());

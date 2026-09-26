@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::{self, Write as _};
 use std::num::{NonZeroU32, NonZeroU64};
@@ -14,8 +14,9 @@ use sisa_messaging::{
     ContentType, Delivery, Envelope, EnvelopeMapper, ErrorClassifier, FailureKind, HeaderName,
     HeaderValue, IndividualCapability, IndividualDeliverySource, IndividualSettlement,
     IndividualSettlementError, IndividualSourceDescriptor, IndividualSourceOpenError,
-    IndividualSourceRequirements, Message, MessageId, MessageType, Metadata, SerializedEnvelope,
-    Serializer,
+    IndividualSourceRequirements, Message, MessageId, MessageType, Metadata, PartitionAdvance,
+    PartitionedLogDeliverySource, PartitionedLogReceive, PartitionedLogSettlement,
+    SerializedEnvelope, Serializer,
 };
 use sisa_messaging_consumer::{
     Consumer, ConsumerError, ConsumerExit, ConsumerHandler, ConsumerSettings, SettlementMode,
@@ -136,6 +137,8 @@ struct Script {
     fail: HashMap<u8, VecDeque<Step>>,
 
     settle: HashMap<u8, VecDeque<Step>>,
+
+    fenced_advance: HashSet<u8>,
 }
 
 /// Shared observation and scripting state for every fake.
@@ -315,6 +318,10 @@ impl Probe {
             .push_back(step);
     }
 
+    pub fn fence_advance(&self, tag: u8) {
+        lock(&self.script).fenced_advance.insert(tag);
+    }
+
     fn tx_opened(&self) {
         let live = self.live_tx.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_live_tx.fetch_max(live, Ordering::SeqCst);
@@ -404,6 +411,8 @@ pub struct FakeSettlement {
     probe: Arc<Probe>,
 
     invoked: bool,
+
+    supports_heartbeat: bool,
 }
 
 impl Drop for FakeSettlement {
@@ -440,9 +449,17 @@ impl IndividualSettlement for FakeSettlement {
     async fn heartbeat(&mut self) -> Result<(), IndividualSettlementError<Self::Error>> {
         self.probe.push(Event::Heartbeat(self.tag));
 
-        Err(IndividualSettlementError::Unsupported(
-            IndividualCapability::Heartbeat,
-        ))
+        if !self.supports_heartbeat {
+            return Err(IndividualSettlementError::Unsupported(
+                IndividualCapability::Heartbeat,
+            ));
+        }
+
+        let step = next(lock(&self.probe.script).settle.get_mut(&self.tag)).unwrap_or(Step::Ok);
+
+        perform(step)
+            .await
+            .map_err(IndividualSettlementError::Operation)
     }
 
     async fn ack(self) -> Result<(), IndividualSettlementError<Self::Error>> {
@@ -481,6 +498,7 @@ impl Delivery for FakeDelivery {
 
 enum SourceStep {
     Deliver { tag: u8, wire: FakeWire },
+    OwnershipLost(u8),
     Close,
     Fail(FailureKind),
 }
@@ -551,10 +569,118 @@ impl IndividualDeliverySource for FakeSource {
                             tag,
                             probe: Arc::clone(&self.probe),
                             invoked: false,
+                            supports_heartbeat: self.descriptor.supports_heartbeat(),
                         },
                     }));
                 }
                 Some(SourceStep::Close) => return Ok(None),
+                Some(SourceStep::OwnershipLost(_)) => {
+                    return Err(FakeError {
+                        kind: FailureKind::Permanent,
+                    });
+                }
+                Some(SourceStep::Fail(kind)) => return Err(FakeError { kind }),
+                None => self.queue.ready.notified().await,
+            }
+        }
+    }
+}
+
+pub struct FakePartitionedSettlement {
+    partition: u8,
+
+    inner: FakeSettlement,
+}
+
+impl PartitionedLogSettlement for FakePartitionedSettlement {
+    type Partition = u8;
+    type Error = FakeError;
+
+    async fn advance(self) -> Result<PartitionAdvance, Self::Error> {
+        let mut inner = self.inner;
+        let fenced = lock(&inner.probe.script).fenced_advance.remove(&inner.tag);
+
+        if fenced {
+            inner.invoked = true;
+            inner.probe.push(Event::Ack(inner.tag));
+
+            return Ok(PartitionAdvance::OwnershipLost);
+        }
+
+        inner
+            .ack()
+            .await
+            .map(|()| PartitionAdvance::Advanced)
+            .map_err(|error| match error {
+                IndividualSettlementError::Operation(error) => error,
+                _ => FakeError {
+                    kind: FailureKind::Permanent,
+                },
+            })
+    }
+
+    fn partition(&self) -> &Self::Partition {
+        &self.partition
+    }
+}
+
+pub struct FakePartitionedDelivery {
+    wire: FakeWire,
+
+    settlement: FakePartitionedSettlement,
+}
+
+impl Delivery for FakePartitionedDelivery {
+    type Wire = FakeWire;
+    type Settlement = FakePartitionedSettlement;
+
+    fn into_parts(self) -> (Self::Wire, Self::Settlement) {
+        (self.wire, self.settlement)
+    }
+}
+
+pub struct FakePartitionedSource {
+    probe: Arc<Probe>,
+
+    queue: Arc<Queue>,
+}
+
+impl PartitionedLogDeliverySource for FakePartitionedSource {
+    type Partition = u8;
+    type Delivery = FakePartitionedDelivery;
+    type Error = FakeError;
+
+    async fn open(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn receive(
+        &mut self,
+    ) -> Result<PartitionedLogReceive<Self::Delivery, Self::Partition>, Self::Error> {
+        loop {
+            let step = lock(&self.queue.steps).pop_front();
+
+            match step {
+                Some(SourceStep::Deliver { tag, wire }) => {
+                    self.probe.outstanding.fetch_add(1, Ordering::SeqCst);
+
+                    return Ok(PartitionedLogReceive::Delivery(FakePartitionedDelivery {
+                        wire,
+                        settlement: FakePartitionedSettlement {
+                            partition: tag % 2,
+                            inner: FakeSettlement {
+                                tag,
+                                probe: Arc::clone(&self.probe),
+                                invoked: false,
+                                supports_heartbeat: false,
+                            },
+                        },
+                    }));
+                }
+                Some(SourceStep::OwnershipLost(partition)) => {
+                    return Ok(PartitionedLogReceive::OwnershipLost(partition));
+                }
+                Some(SourceStep::Close) => return Ok(PartitionedLogReceive::Closed),
                 Some(SourceStep::Fail(kind)) => return Err(FakeError { kind }),
                 None => self.queue.ready.notified().await,
             }
@@ -936,6 +1062,17 @@ impl ConsumerHandler<Order, FakeTx> for FakeHandler {
 pub type TestConsumer =
     Consumer<Order, (FakeSource, FakeMapper, FakeCodec, FakeInbox, FakeHandler)>;
 
+pub type TestPartitionedConsumer = Consumer<
+    Order,
+    (
+        FakePartitionedSource,
+        FakeMapper,
+        FakeCodec,
+        FakeInbox,
+        FakeHandler,
+    ),
+>;
+
 pub struct Harness {
     pub probe: Arc<Probe>,
 
@@ -956,14 +1093,27 @@ impl Harness {
     /// A harness whose source advertises exactly what `mode` needs.
     pub fn new(mode: SettlementMode) -> Self {
         let broker = mode == SettlementMode::Broker;
+        let immediate = mode == SettlementMode::BrokerImmediateRequeue;
+        let opened = descriptor(None, broker, broker || immediate);
 
-        Self::with_descriptor(mode, descriptor(None, broker, broker))
+        let opened = if immediate {
+            opened.with_immediate_requeue()
+        } else {
+            opened
+        };
+
+        Self::with_descriptor(mode, opened)
     }
 
     pub fn with_descriptor(mode: SettlementMode, descriptor: IndividualSourceDescriptor) -> Self {
         let mut settings = ConsumerSettings::default();
         settings.mode = mode;
-        settings.nak_delay = NAK_DELAY;
+
+        settings.nak_delay = if mode == SettlementMode::BrokerImmediateRequeue {
+            Duration::ZERO
+        } else {
+            NAK_DELAY
+        };
 
         settings.max_in_flight =
             std::num::NonZeroUsize::new(4).unwrap_or(std::num::NonZeroUsize::MIN);
@@ -1016,6 +1166,10 @@ impl Harness {
         self.enqueue(SourceStep::Fail(kind));
     }
 
+    pub fn lose_partition(&self, partition: u8) {
+        self.enqueue(SourceStep::OwnershipLost(partition));
+    }
+
     /// Number of source steps not yet received.
     pub fn queued(&self) -> usize {
         lock(&self.queue.steps).len()
@@ -1042,6 +1196,36 @@ impl Harness {
         let scope = InboxScope::new(SCOPE_SENTINEL).unwrap_or_else(|_| unreachable_scope());
 
         Consumer::new(
+            source,
+            FakeMapper,
+            FakeCodec,
+            inbox,
+            scope,
+            handler,
+            self.settings.clone(),
+        )
+    }
+
+    pub fn partitioned_consumer(
+        &self,
+    ) -> Result<TestPartitionedConsumer, sisa_messaging_consumer::ConsumerConfigError> {
+        let source = FakePartitionedSource {
+            probe: Arc::clone(&self.probe),
+            queue: Arc::clone(&self.queue),
+        };
+
+        let inbox = FakeInbox {
+            probe: Arc::clone(&self.probe),
+            max_attempts: self.max_attempts,
+        };
+
+        let handler = FakeHandler {
+            probe: Arc::clone(&self.probe),
+        };
+
+        let scope = InboxScope::new(SCOPE_SENTINEL).unwrap_or_else(|_| unreachable_scope());
+
+        Consumer::new_partitioned(
             source,
             FakeMapper,
             FakeCodec,
