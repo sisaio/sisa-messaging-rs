@@ -3542,7 +3542,10 @@ dependencies = [
  "iggy",
  "iggy_common",
  "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

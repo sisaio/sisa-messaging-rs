@@ -4,13 +4,23 @@ use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::collections::BTreeMap;
+
 use iggy::prelude::{
-    AutoLogin, Client, ClientWrapper, Consumer, Credentials, Identifier,
-    IggyClient as RawIggyClient, MessageClient, PollingStrategy, StreamClient, TcpClient,
-    TcpClientConfig, TcpClientReconnectionConfig, TopicClient, TopicCreateOptions,
+    AutoLogin, Client, ClientWrapper, Consumer, ConsumerGroupClient, ConsumerOffsetClient,
+    Credentials, HeaderKey, HeaderValue as SdkHeaderValue, Identifier, IggyClient as RawIggyClient,
+    IggyMessage, MessageClient, Partitioning, PollingStrategy, StreamClient, TcpClient,
+    TcpClientConfig, TcpClientReconnectionConfig, TopicClient, TopicCreateOptions, UserClient,
+    UserStatus,
 };
-use sisa_messaging::MessageId;
-use sisa_messaging_iggy::{IggyClient, IggyClientSettings, IggyCredentials};
+use sisa_messaging::{
+    ContentType, Delivery, EnvelopeMapper, MessageId, MessageType, Metadata,
+    PartitionedLogDeliverySource, PartitionedLogReceive, SerializedEnvelope,
+};
+use sisa_messaging_iggy::{
+    IggyClient, IggyClientSettings, IggyCredentials, IggyDelivery, IggyDeliveryError,
+    IggyDeliverySource, IggyEnvelopeMapper, IggySettlement, IggySourceSettings,
+};
 
 pub const SERVER_ADDRESS_ENV: &str = "SISA_IGGY_SERVER_ADDRESS";
 pub const TEST_STREAM_ENV: &str = "SISA_IGGY_TEST_STREAM";
@@ -183,4 +193,335 @@ pub async fn poll_for_marker(
     }
 
     false
+}
+
+/// Starts a crate client authenticated as the given user.
+pub async fn new_iggy_client_as(
+    username: &str,
+    password: &str,
+) -> Result<IggyClient, sisa_messaging_iggy::IggyClientError> {
+    let settings = IggyClientSettings::new(
+        server_address(),
+        IggyCredentials::UsernamePassword {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        },
+    )
+    .with_connect_timeout(Duration::from_secs(10));
+
+    IggyClient::start(settings).await
+}
+
+/// Parses a test resource name as an Iggy identifier.
+pub fn identifier(name: &str) -> Identifier {
+    Identifier::from_str_value(name).unwrap_or_else(|_| panic!("invalid test identifier"))
+}
+
+/// A throwaway topic and pre-provisioned consumer group in the test stream, with a raw client
+/// for provisioning, publishing, and cursor inspection.
+pub struct GroupTopic {
+    pub raw: RawIggyClient,
+
+    pub stream: String,
+
+    pub topic: String,
+
+    pub group: String,
+
+    pub partitions: u32,
+
+    /// Users created through [`GroupTopic::create_user`], removed by [`GroupTopic::delete`].
+    users: std::sync::Mutex<Vec<String>>,
+}
+
+/// Runs `body` against a fresh group topic and removes the topic, group, and any users it
+/// created even when the body panics; the body's own panic then resumes.
+pub async fn with_group_topic<F, Fut>(partitions: u32, body: F)
+where
+    F: FnOnce(std::sync::Arc<GroupTopic>) -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let options = TopicCreateOptions {
+        partitions_count: Some(partitions),
+        ..TopicCreateOptions::default()
+    };
+
+    with_group_topic_options(options, body).await;
+}
+
+/// [`with_group_topic`] for a topic created with the given options.
+pub async fn with_group_topic_options<F, Fut>(options: TopicCreateOptions, body: F)
+where
+    F: FnOnce(std::sync::Arc<GroupTopic>) -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let fixture = std::sync::Arc::new(GroupTopic::create_with(options).await);
+    let outcome = tokio::spawn(body(std::sync::Arc::clone(&fixture))).await;
+
+    fixture.delete().await;
+
+    if let Err(error) = outcome {
+        match error.try_into_panic() {
+            Ok(panic) => std::panic::resume_unwind(panic),
+            Err(_) => panic!("Iggy test body was cancelled"),
+        }
+    }
+}
+
+impl GroupTopic {
+    /// Creates a unique topic with `partitions` partitions and a unique consumer group on it.
+    pub async fn create(partitions: u32) -> Self {
+        Self::create_with(TopicCreateOptions {
+            partitions_count: Some(partitions),
+            ..TopicCreateOptions::default()
+        })
+        .await
+    }
+
+    /// Creates a unique topic with the given options and a unique consumer group on it.
+    pub async fn create_with(options: TopicCreateOptions) -> Self {
+        let partitions = options.partitions_count.unwrap_or(1);
+        let raw = new_raw_client().await;
+        let stream = test_stream();
+        let topic = unique_name("sisa-iggy-source-topic");
+        let group = unique_name("sisa-iggy-source-group");
+        let stream_id = identifier(&stream);
+
+        if raw
+            .get_stream(&stream_id)
+            .await
+            .unwrap_or_else(|error| panic!("Iggy test stream lookup failed: {error}"))
+            .is_none()
+        {
+            let _ = raw.create_stream(&stream).await;
+        }
+
+        raw.create_topic(&stream_id, &topic, &options)
+            .await
+            .unwrap_or_else(|error| panic!("Iggy test topic creation failed: {error}"));
+
+        raw.create_consumer_group(&stream_id, &identifier(&topic), &group)
+            .await
+            .unwrap_or_else(|error| panic!("Iggy test consumer group creation failed: {error}"));
+
+        Self {
+            raw,
+            stream,
+            topic,
+            group,
+            partitions,
+            users: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Creates an active user without permissions; [`GroupTopic::delete`] removes it.
+    pub async fn create_user(&self, username: &str, password: &str) {
+        self.users
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(username.to_owned());
+
+        self.raw
+            .create_user(username, password, UserStatus::Active, None)
+            .await
+            .unwrap_or_else(|error| panic!("Iggy test user creation failed: {error}"));
+    }
+
+    pub fn settings(&self) -> IggySourceSettings {
+        IggySourceSettings::new(
+            identifier(&self.stream),
+            identifier(&self.topic),
+            identifier(&self.group),
+        )
+        .with_poll_interval(Duration::from_millis(50))
+        .and_then(|settings| settings.with_assignment_refresh_interval(Duration::from_millis(200)))
+        .and_then(|settings| settings.with_request_timeout(Duration::from_secs(5)))
+        .unwrap_or_else(|_| panic!("test source settings are valid"))
+    }
+
+    /// Starts a dedicated client and an opened source for this group.
+    pub async fn source(&self) -> (IggyClient, IggyDeliverySource) {
+        self.source_with(self.settings()).await
+    }
+
+    pub async fn source_with(
+        &self,
+        settings: IggySourceSettings,
+    ) -> (IggyClient, IggyDeliverySource) {
+        let client = new_iggy_client().await;
+        let mut source = IggyDeliverySource::new(client.clone(), settings);
+
+        tokio::time::timeout(TEST_TIMEOUT, source.open())
+            .await
+            .unwrap_or_else(|_| panic!("Iggy test source open timed out"))
+            .unwrap_or_else(|error| panic!("Iggy test source open failed: {error}"));
+
+        (client, source)
+    }
+
+    /// Publishes `count` fresh envelopes to one partition and returns their ids in order.
+    pub async fn publish(&self, partition: u32, count: usize) -> Vec<MessageId> {
+        let ids: Vec<MessageId> = (0..count).map(|_| MessageId::new()).collect();
+        let messages: Vec<IggyMessage> = ids.iter().map(|id| sdk_message(*id)).collect();
+
+        self.publish_messages(partition, messages).await;
+
+        ids
+    }
+
+    /// Publishes already-built SDK messages to one partition.
+    pub async fn publish_messages(&self, partition: u32, mut messages: Vec<IggyMessage>) {
+        self.raw
+            .send_messages(
+                &identifier(&self.stream),
+                &identifier(&self.topic),
+                &Partitioning::partition_id(partition),
+                &mut messages,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("Iggy test publish failed: {error}"));
+    }
+
+    /// Reads the group's stored offset for a partition.
+    pub async fn stored_offset(&self, partition: u32) -> Option<u64> {
+        self.raw
+            .get_consumer_offset(
+                &Consumer::group(identifier(&self.group)),
+                &identifier(&self.stream),
+                &identifier(&self.topic),
+                Some(partition),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("Iggy test offset read failed: {error}"))
+            .map(|offset| offset.stored_offset)
+    }
+
+    /// Best-effort removal of the group, topic, and created users.
+    pub async fn delete(&self) {
+        let users = std::mem::take(
+            &mut *self
+                .users
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+
+        for user in users {
+            let _ = self.raw.delete_user(&identifier(&user)).await;
+        }
+
+        let stream = identifier(&self.stream);
+        let topic = identifier(&self.topic);
+
+        let _ = self
+            .raw
+            .delete_consumer_group(&stream, &topic, &identifier(&self.group))
+            .await;
+
+        let _ = self.raw.delete_topic(&stream, &topic).await;
+    }
+}
+
+/// A fixture envelope with a fresh identity and a small payload.
+pub fn envelope(message_id: MessageId) -> SerializedEnvelope {
+    SerializedEnvelope {
+        message_id,
+        message_type: MessageType::new("iggy.source.probe").expect("fixture type is valid"),
+        message_version: 1,
+        content_type: ContentType::new("application/octet-stream")
+            .expect("fixture content type is valid"),
+        payload: message_id.to_string().into_bytes(),
+        metadata: Metadata::default(),
+        ordering_key: None,
+    }
+}
+
+/// Projects a fixture envelope into an SDK message the way the publisher does.
+pub fn sdk_message(message_id: MessageId) -> IggyMessage {
+    sdk_message_with(message_id, |_| {})
+}
+
+/// Projects a fixture envelope into an SDK message and lets the caller alter its headers.
+pub fn sdk_message_with(
+    message_id: MessageId,
+    alter: impl FnOnce(&mut BTreeMap<HeaderKey, SdkHeaderValue>),
+) -> IggyMessage {
+    let record = IggyEnvelopeMapper
+        .encode(&envelope(message_id))
+        .unwrap_or_else(|_| panic!("fixture envelope encodes"));
+
+    let mut headers: BTreeMap<HeaderKey, SdkHeaderValue> = record
+        .headers
+        .iter()
+        .map(|header| {
+            let name = HeaderKey::try_from(header.name.as_str())
+                .unwrap_or_else(|_| panic!("fixture header name is valid"));
+
+            let value = std::str::from_utf8(&header.value)
+                .ok()
+                .and_then(|value| SdkHeaderValue::try_from(value).ok())
+                .unwrap_or_else(|| panic!("fixture header value is valid"));
+
+            (name, value)
+        })
+        .collect();
+
+    alter(&mut headers);
+
+    IggyMessage::builder()
+        .id(record.id)
+        .payload(record.payload.into())
+        .user_headers(headers)
+        .build()
+        .unwrap_or_else(|_| panic!("fixture message builds"))
+}
+
+/// One received record: its partition, offset, and decoded identity, plus its settlement.
+pub struct Received {
+    pub partition: u32,
+
+    pub offset: u64,
+
+    pub message_id: MessageId,
+
+    pub settlement: IggySettlement,
+}
+
+/// Splits a delivery and decodes its identity through the crate's mapper.
+pub fn received(delivery: IggyDelivery) -> Received {
+    use sisa_messaging::PartitionedLogSettlement;
+
+    let (record, settlement) = delivery.into_parts();
+
+    let envelope = IggyEnvelopeMapper
+        .decode(record)
+        .unwrap_or_else(|error| panic!("received record decodes: {error}"));
+
+    Received {
+        partition: *settlement.partition(),
+        offset: settlement.offset(),
+        message_id: envelope.message_id,
+        settlement,
+    }
+}
+
+/// Waits for the next source event.
+pub async fn next_event(
+    source: &mut IggyDeliverySource,
+) -> Result<PartitionedLogReceive<IggyDelivery, u32>, IggyDeliveryError> {
+    tokio::time::timeout(TEST_TIMEOUT, source.receive())
+        .await
+        .unwrap_or_else(|_| panic!("Iggy test source receive timed out"))
+}
+
+/// Waits for the next delivery, failing on any other event.
+pub async fn next_delivery(source: &mut IggyDeliverySource) -> Received {
+    match next_event(source).await {
+        Ok(PartitionedLogReceive::Delivery(delivery)) => received(delivery),
+        Ok(PartitionedLogReceive::OwnershipLost(partition)) => {
+            panic!("unexpected ownership loss for partition {partition}")
+        }
+        Ok(PartitionedLogReceive::Closed) => panic!("unexpected source close"),
+        Ok(_) => panic!("unexpected source event"),
+        Err(error) => panic!("unexpected source error: {error}"),
+    }
 }
