@@ -145,9 +145,6 @@ pub enum ConsumerErrorKind {
     /// An ordered record could not be durably resolved.
     PartitionUnresolved,
 
-    /// Advance timed out or failed; the provider must fence and reconcile the cursor.
-    PartitionAdvanceUncertain,
-
     /// A delivery requires operator action; it was left unsettled.
     OperatorActionRequired(OperatorReason),
 
@@ -248,7 +245,6 @@ impl fmt::Display for ConsumerError {
             ConsumerErrorKind::Settlement => "consumer settlement failed",
             ConsumerErrorKind::PartitionOrder => "partition delivered an overlapping record",
             ConsumerErrorKind::PartitionUnresolved => "partition record remains unresolved",
-            ConsumerErrorKind::PartitionAdvanceUncertain => "partition advancement is uncertain",
             ConsumerErrorKind::OperatorActionRequired(_) => {
                 "consumer delivery requires operator action"
             }

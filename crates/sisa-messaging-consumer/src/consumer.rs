@@ -161,6 +161,9 @@ where
     H: ConsumerHandler<M, Inbox::Transaction> + 'static,
 {
     /// Constructs a partitioned-log consumer with one active record per partition.
+    ///
+    /// Heartbeat settings are rejected: partition liveness belongs to the source's group
+    /// ownership protocol, not to individual delivery acknowledgement deadlines.
     pub fn new_partitioned(
         source: S,
         mapper: Map,
@@ -185,6 +188,13 @@ where
     }
 
     /// Opens and runs the partitioned source until cancellation, close, or a fatal failure.
+    ///
+    /// A partition advances only after a committed success or durable terminal dead record.
+    /// A timed-out, transient, or otherwise ambiguous advance pauses only that partition without
+    /// failing the run; unrelated partitions may continue. A returned permanent provider error
+    /// stops the run with [`ConsumerErrorKind::Settlement`]. An overlapping live record stops the
+    /// run. On every exit, active work drains for at most the configured `drain_timeout` before
+    /// its transactions are released.
     pub async fn run_partitioned(
         self,
         cancel: CancellationToken,
@@ -239,6 +249,8 @@ async fn run_loop<I: Intake>(
             }
         }
     };
+
+    intake.stop();
 
     // The source stays alive until the drain ends because settlement handles may depend on it.
     shutdown::drain(&mut workers, drain_timeout).await;

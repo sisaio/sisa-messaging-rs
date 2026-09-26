@@ -11,6 +11,7 @@ use sisa_messaging::{
     PartitionedLogDeliverySource, PartitionedLogReceive, PartitionedLogSettlement, Serializer,
 };
 use sisa_messaging_inbox::{InboxStore, InboxUnitOfWork};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::telemetry::{self, MessageLabels};
@@ -28,9 +29,23 @@ struct ActiveEntry {
     stale: bool,
 
     coordinator_done: bool,
+
+    deferred: bool,
+
+    released: Arc<Notify>,
 }
 
 type Active<P> = Arc<Mutex<HashMap<P, ActiveEntry>>>;
+
+struct DeferredStart {
+    released: Arc<Notify>,
+
+    shutdown: CancellationToken,
+
+    tracker: tokio_util::task::TaskTracker,
+
+    stop: CancellationToken,
+}
 
 fn lock<P: Eq + Hash>(active: &Active<P>) -> std::sync::MutexGuard<'_, HashMap<P, ActiveEntry>> {
     active
@@ -47,6 +62,8 @@ where
     shared: Arc<Shared<Map, Codec, Inbox, H>>,
 
     active: Active<S::Partition>,
+
+    shutdown: CancellationToken,
 
     message: PhantomData<fn() -> M>,
 }
@@ -81,7 +98,7 @@ where
                     entry.stale = true;
                     entry.token.cancel();
 
-                    if entry.coordinator_done {
+                    if entry.coordinator_done && !entry.deferred {
                         active.remove(&partition);
                     }
                 }
@@ -91,42 +108,66 @@ where
                 let partition = settlement.partition().clone();
                 let token = Arc::new(CancellationToken::new());
 
-                {
+                let deferred = {
                     let mut active = lock(&self.active);
 
-                    if active.contains_key(&partition) {
-                        telemetry::partition_event(self.shared.labels, "overlap");
+                    if let Some(entry) = active.get_mut(&partition) {
+                        if entry.stale && !entry.deferred {
+                            entry.deferred = true;
 
-                        // The earlier offset is still unresolved. Dropping this delivery cannot
-                        // advance it, and stopping prevents later offsets being admitted.
-                        workers.fail(ConsumerError::new(
-                            ConsumerErrorKind::PartitionOrder,
-                            FailureKind::Permanent,
-                            None,
-                        ));
+                            Some(Arc::clone(&entry.released))
+                        } else {
+                            telemetry::partition_event(self.shared.labels, "overlap");
 
-                        return false;
+                            workers.fail(ConsumerError::new(
+                                ConsumerErrorKind::PartitionOrder,
+                                FailureKind::Permanent,
+                                None,
+                            ));
+
+                            return false;
+                        }
+                    } else {
+                        active.insert(
+                            partition.clone(),
+                            ActiveEntry {
+                                token: token.clone(),
+                                stale: false,
+                                coordinator_done: false,
+                                deferred: false,
+                                released: Arc::new(Notify::new()),
+                            },
+                        );
+
+                        None
                     }
+                };
 
-                    active.insert(
-                        partition.clone(),
-                        ActiveEntry {
-                            token: token.clone(),
-                            stale: false,
-                            coordinator_done: false,
+                if let Some(released) = deferred {
+                    workers.spawn(deferred_coordinate::<M, _, _, _, _, _, _>(
+                        Arc::clone(&self.shared),
+                        wire,
+                        settlement,
+                        Arc::clone(&self.active),
+                        token,
+                        DeferredStart {
+                            released,
+                            shutdown: self.shutdown.clone(),
+                            tracker: workers.tracker(),
+                            stop: workers.stop_token(),
                         },
-                    );
+                    ));
+                } else {
+                    workers.spawn(coordinate::<M, _, _, _, _, _, _>(
+                        Arc::clone(&self.shared),
+                        wire,
+                        settlement,
+                        Arc::clone(&self.active),
+                        token,
+                        workers.tracker(),
+                        workers.stop_token(),
+                    ));
                 }
-
-                workers.spawn(coordinate::<M, _, _, _, _, _, _>(
-                    Arc::clone(&self.shared),
-                    wire,
-                    settlement,
-                    Arc::clone(&self.active),
-                    token,
-                    workers.tracker(),
-                    workers.stop_token(),
-                ));
             }
             _ => workers.fail(ConsumerError::new(
                 ConsumerErrorKind::Runtime,
@@ -136,6 +177,10 @@ where
         }
 
         false
+    }
+
+    fn stop(&self) {
+        self.shutdown.cancel();
     }
 }
 
@@ -163,10 +208,93 @@ impl<P: Eq + Hash> Drop for ActiveGuard<P> {
 
         current.coordinator_done = true;
 
-        if self.safe_to_release || current.stale {
+        if current.stale && current.deferred {
+            // Keep the old token as a placeholder until the one deferred coordinator atomically
+            // installs its replacement. Later records cannot overtake it in that gap.
+            current.released.notify_one();
+        } else if self.safe_to_release || current.stale {
+            let released = Arc::clone(&current.released);
             active.remove(&self.partition);
+            released.notify_one();
         }
     }
+}
+
+async fn deferred_coordinate<M, W, St, Map, Codec, Inbox, H>(
+    shared: Arc<Shared<Map, Codec, Inbox, H>>,
+    wire: W,
+    settlement: St,
+    active: Active<St::Partition>,
+    token: Arc<CancellationToken>,
+    start: DeferredStart,
+) -> Result<(), ConsumerError>
+where
+    M: Message,
+    W: Send + 'static,
+    St: PartitionedLogSettlement,
+    Map: EnvelopeMapper<W> + 'static,
+    Codec: Serializer<M> + 'static,
+    Inbox: InboxUnitOfWork + InboxStore<Inbox::Transaction>,
+    H: ConsumerHandler<M, Inbox::Transaction> + 'static,
+{
+    let _panic_stop = StopOnPanic(start.stop.clone());
+
+    tokio::select! {
+        biased;
+        () = start.shutdown.cancelled() => return Ok(()),
+        () = start.stop.cancelled() => return Ok(()),
+        () = start.released.notified() => {}
+    }
+
+    if start.shutdown.is_cancelled() || start.stop.is_cancelled() {
+        return Ok(());
+    }
+
+    let partition = settlement.partition().clone();
+
+    {
+        let mut current = lock(&active);
+
+        if !current.get(&partition).is_some_and(|entry| {
+            entry.stale
+                && entry.coordinator_done
+                && entry.deferred
+                && Arc::ptr_eq(&entry.released, &start.released)
+        }) {
+            drop(current);
+            start.stop.cancel();
+
+            return Err(ConsumerError::new(
+                ConsumerErrorKind::PartitionOrder,
+                FailureKind::Permanent,
+                None,
+            ));
+        }
+
+        // The old workflow and its transaction are gone. Replace its placeholder under this
+        // lock, so no following record can overtake the deferred delivery.
+        current.insert(
+            partition,
+            ActiveEntry {
+                token: token.clone(),
+                stale: false,
+                coordinator_done: false,
+                deferred: false,
+                released: Arc::new(Notify::new()),
+            },
+        );
+    }
+
+    coordinate::<M, _, _, _, _, _, _>(
+        shared,
+        wire,
+        settlement,
+        active,
+        token,
+        start.tracker,
+        start.stop,
+    )
+    .await
 }
 
 async fn coordinate<M, W, St, Map, Codec, Inbox, H>(
@@ -268,6 +396,16 @@ where
 
                     Ok(())
                 }
+                Ok(Err(error)) if error.classify() == FailureKind::Permanent => {
+                    telemetry::partition_event(shared.labels, "advance_failed");
+                    stop.cancel();
+
+                    Err(ConsumerError::new(
+                        ConsumerErrorKind::Settlement,
+                        FailureKind::Permanent,
+                        Some(Box::new(error)),
+                    ))
+                }
                 _ => {
                     telemetry::partition_event(shared.labels, "advance_uncertain");
 
@@ -365,6 +503,7 @@ where
         source,
         shared,
         active: Arc::new(Mutex::new(HashMap::new())),
+        shutdown: CancellationToken::new(),
         message: PhantomData,
     };
 
@@ -393,6 +532,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    use tokio::sync::Notify;
     use tokio_util::sync::CancellationToken;
 
     use super::{ActiveEntry, ActiveGuard, lock};
@@ -408,6 +548,8 @@ mod tests {
                 token: first.clone(),
                 stale: false,
                 coordinator_done: false,
+                deferred: false,
+                released: Arc::new(Notify::new()),
             },
         );
 
@@ -428,6 +570,8 @@ mod tests {
                 token: next.clone(),
                 stale: false,
                 coordinator_done: false,
+                deferred: false,
+                released: Arc::new(Notify::new()),
             },
         );
 

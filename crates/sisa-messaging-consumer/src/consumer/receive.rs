@@ -33,6 +33,9 @@ pub(super) trait Intake: Send {
     /// Starts the coordinator that owns this item until it is settled or left.
     /// Returns true when the item represents a clean source close.
     fn dispatch(&self, item: Self::Item, workers: &mut Workers) -> bool;
+
+    /// Stops profile-specific pending admissions before the worker drain begins.
+    fn stop(&self) {}
 }
 
 /// The individual-delivery profile.
