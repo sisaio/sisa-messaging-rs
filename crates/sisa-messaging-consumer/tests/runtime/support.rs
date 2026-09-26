@@ -403,6 +403,7 @@ pub enum FakeWire {
         body: String,
     },
     Malformed,
+    MapperPanic,
 }
 
 pub struct FakeSettlement {
@@ -718,6 +719,10 @@ impl EnvelopeMapper<FakeWire> for FakeMapper {
     }
 
     fn decode(&self, wire: FakeWire) -> Result<SerializedEnvelope, Self::Error> {
+        if matches!(wire, FakeWire::MapperPanic) {
+            panic!("mapper panic {PAYLOAD_SENTINEL}");
+        }
+
         let FakeWire::Valid {
             id,
             message_type,
@@ -1155,6 +1160,13 @@ impl Harness {
         self.enqueue(SourceStep::Deliver {
             tag,
             wire: FakeWire::Malformed,
+        });
+    }
+
+    pub fn deliver_mapper_panic(&self, tag: u8) {
+        self.enqueue(SourceStep::Deliver {
+            tag,
+            wire: FakeWire::MapperPanic,
         });
     }
 

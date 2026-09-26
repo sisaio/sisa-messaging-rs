@@ -185,6 +185,8 @@ pub struct IndividualSourceDescriptor {
 
 impl IndividualSourceDescriptor {
     /// Constructs a descriptor. A configured acknowledgement deadline must be non-zero.
+    /// Immediate requeue is disabled by default; sources opt in only when
+    /// `nak(Duration::ZERO)` performs a real requeue without emulation.
     pub fn new(
         ack_wait: Option<Duration>,
         max_deliver: Option<NonZeroU64>,
@@ -225,6 +227,7 @@ impl IndividualSourceDescriptor {
     }
 
     /// Advertises existing support for immediate requeue on this source.
+    /// `nak(Duration::ZERO)` must perform a real requeue without emulation.
     #[must_use]
     pub const fn with_immediate_requeue(mut self) -> Self {
         self.supports_immediate_requeue = true;

@@ -13,6 +13,7 @@ use sisa_messaging::{
 };
 use sisa_messaging_inbox::{InboxStore, InboxUnitOfWork};
 use tokio::task::{JoinError, JoinSet};
+use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::{AbortOnDropHandle, TaskTracker};
 
@@ -178,16 +179,22 @@ where
     // Only readiness is selected. Heartbeat I/O is awaited outside the cancellable select so
     // dropping a select branch cannot abandon a broker operation with unknown effect.
     let joined = if let Some(interval) = shared.settings.heartbeat_interval {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        ticker.tick().await;
+
         loop {
             tokio::select! {
                 biased;
                 result = &mut workflow => break result,
-                () = tokio::time::sleep(interval) => {}
+                _ = ticker.tick() => {}
             }
 
-            let heartbeat =
-                tokio::time::timeout(shared.settings.settlement_timeout, settlement.heartbeat())
-                    .await;
+            let heartbeat = tokio::time::timeout(
+                interval.min(shared.settings.settlement_timeout),
+                settlement.heartbeat(),
+            )
+            .await;
 
             match heartbeat {
                 Ok(Ok(())) => {}

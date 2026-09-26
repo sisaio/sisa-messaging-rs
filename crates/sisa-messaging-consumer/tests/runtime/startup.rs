@@ -263,6 +263,56 @@ async fn heartbeat_failure_does_not_cancel_a_healthy_handler() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn timed_out_heartbeat_does_not_shift_the_next_scheduled_attempt() {
+    let opened = sisa_messaging::IndividualSourceDescriptor::new(
+        Some(Duration::from_secs(10)),
+        None,
+        true,
+        true,
+        true,
+    )
+    .unwrap_or_else(|_| panic!("valid descriptor"));
+
+    let mut harness = Harness::with_descriptor(SettlementMode::Broker, opened);
+    harness.settings.heartbeat_interval = Some(Duration::from_secs(2));
+    harness.probe.script_handler(1, HandlerStep::Hang);
+    harness.probe.script_settle(1, Step::Hang);
+    harness.deliver(1, "slow heartbeat");
+
+    let cancel = CancellationToken::new();
+    let running = harness.spawn(cancel.clone());
+
+    harness
+        .probe
+        .wait_until(|events| events.iter().any(|event| matches!(event, Event::Handle(1))))
+        .await;
+
+    harness
+        .probe
+        .wait_until(|events| {
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Heartbeat(1)))
+        })
+        .await;
+
+    tokio::time::advance(Duration::from_secs(2) + Duration::from_millis(1)).await;
+    tokio::task::yield_now().await;
+
+    assert!(
+        harness
+            .probe
+            .count(|event| matches!(event, Event::Heartbeat(1)))
+            >= 2
+    );
+
+    cancel.cancel();
+    let (result, live) = join(running).await;
+    assert!(matches!(result, Ok(ConsumerExit::Cancelled)));
+    assert_eq!(live, 0);
+}
+
+#[tokio::test(start_paused = true)]
 async fn open_requests_exactly_the_mode_requirements() {
     let expected = [
         (
