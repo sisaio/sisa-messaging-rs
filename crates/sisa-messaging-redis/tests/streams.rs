@@ -393,3 +393,442 @@ async fn append_read_ack_reclaim_and_cancel() {
         Err(IndividualSourceOpenError::Source(RedisError::SourceClosed))
     ));
 }
+
+mod typed_consumer {
+    use super::{SourceSettings, connection, pending, settings};
+    use redis::aio::MultiplexedConnection;
+    use redis::streams::StreamPendingCountReply;
+    use serde::{Deserialize, Serialize};
+    use sisa_messaging::{
+        Envelope, ErrorClassifier, FailureKind, JsonSerializer, Message, MessageId, Serializer,
+    };
+    use sisa_messaging_consumer::{
+        Consumer, ConsumerExit, ConsumerHandler, ConsumerSettings, SettlementMode,
+    };
+    use sisa_messaging_inbox::{
+        InboxClaimOutcome, InboxFailure, InboxFailureOutcome, InboxId, InboxReceipt, InboxRecord,
+        InboxScope, InboxStore, InboxUnitOfWork,
+    };
+    use sisa_messaging_redis::{RedisDeliverySource, RedisMapper, RedisPublisher};
+    use std::{
+        collections::HashSet,
+        num::NonZeroU32,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
+    };
+    use tokio::sync::{Notify, Semaphore};
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Debug, Deserialize, Serialize)]
+    struct TestMessage {
+        value: u32,
+    }
+
+    impl Message for TestMessage {
+        const TYPE: &'static str = "redis.typed.test";
+        const VERSION: u32 = 1;
+    }
+
+    #[derive(Debug)]
+    struct TestError;
+
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("test retry")
+        }
+    }
+
+    impl std::error::Error for TestError {}
+
+    impl ErrorClassifier for TestError {
+        fn classify(&self) -> FailureKind {
+            FailureKind::Transient
+        }
+    }
+
+    struct State {
+        completed: Mutex<HashSet<MessageId>>,
+
+        commit_started: Notify,
+
+        commit_gate: Semaphore,
+
+        failure_recorded: Notify,
+    }
+
+    impl Default for State {
+        fn default() -> Self {
+            Self {
+                completed: Mutex::default(),
+                commit_started: Notify::new(),
+                commit_gate: Semaphore::new(0),
+                failure_recorded: Notify::new(),
+            }
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct TestInbox(Arc<State>);
+
+    #[derive(Default)]
+    struct TestTransaction {
+        claimed: Option<MessageId>,
+
+        completed: Option<MessageId>,
+    }
+
+    struct TestReceipt(InboxId);
+
+    impl InboxReceipt for TestReceipt {
+        fn id(&self) -> InboxId {
+            self.0
+        }
+        fn recorded_failures(&self) -> u32 {
+            0
+        }
+    }
+
+    impl InboxUnitOfWork for TestInbox {
+        type Transaction = TestTransaction;
+        type Error = TestError;
+
+        async fn begin(&self) -> Result<TestTransaction, TestError> {
+            Ok(TestTransaction::default())
+        }
+
+        async fn commit(&self, tx: TestTransaction) -> Result<(), TestError> {
+            if let Some(id) = tx.completed {
+                self.0.commit_started.notify_one();
+                let permit = self.0.commit_gate.acquire().await.map_err(|_| TestError)?;
+                permit.forget();
+                self.0.completed.lock().unwrap().insert(id);
+            }
+
+            Ok(())
+        }
+
+        async fn rollback(&self, _tx: TestTransaction) -> Result<(), TestError> {
+            Ok(())
+        }
+    }
+
+    impl InboxStore<TestTransaction> for TestInbox {
+        type Error = TestError;
+        type Receipt = TestReceipt;
+
+        fn max_attempts(&self) -> NonZeroU32 {
+            NonZeroU32::new(3).unwrap()
+        }
+
+        async fn claim(
+            &self,
+            tx: &mut TestTransaction,
+            record: &InboxRecord,
+        ) -> Result<InboxClaimOutcome<TestReceipt>, TestError> {
+            if self
+                .0
+                .completed
+                .lock()
+                .unwrap()
+                .contains(&record.message_id)
+            {
+                return Ok(InboxClaimOutcome::CompletedDuplicate);
+            }
+
+            tx.claimed = Some(record.message_id);
+
+            Ok(InboxClaimOutcome::Claimed(TestReceipt(InboxId::from_uuid(
+                record.message_id.into_uuid(),
+            ))))
+        }
+
+        async fn complete(
+            &self,
+            tx: &mut TestTransaction,
+            receipt: TestReceipt,
+        ) -> Result<(), TestError> {
+            assert_eq!(
+                tx.claimed.map(MessageId::into_uuid),
+                Some(receipt.id().into_uuid())
+            );
+
+            tx.completed = tx.claimed;
+
+            Ok(())
+        }
+
+        async fn fail(
+            &self,
+            _record: &InboxRecord,
+            failure: InboxFailure,
+        ) -> Result<InboxFailureOutcome, TestError> {
+            assert_eq!(failure.kind, FailureKind::Transient);
+            self.0.failure_recorded.notify_one();
+
+            Ok(InboxFailureOutcome::Retry { attempts: 1 })
+        }
+    }
+
+    struct FailOnce(Arc<AtomicBool>);
+
+    impl ConsumerHandler<TestMessage, TestTransaction> for FailOnce {
+        type Error = TestError;
+
+        async fn handle(
+            &self,
+            _tx: &mut TestTransaction,
+            _envelope: &Envelope<TestMessage>,
+        ) -> Result<(), TestError> {
+            if self.0.swap(false, Ordering::SeqCst) {
+                Err(TestError)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    async fn source(
+        client: &redis::Client,
+        stream: &str,
+        group: &str,
+        name: &str,
+        settings: SourceSettings,
+    ) -> RedisDeliverySource {
+        RedisDeliverySource::new(
+            connection(client).await,
+            connection(client).await,
+            stream.to_owned(),
+            group.to_owned(),
+            name.to_owned(),
+            settings,
+        )
+        .unwrap()
+    }
+
+    async fn run(
+        source: RedisDeliverySource,
+        inbox: TestInbox,
+        fail: Arc<AtomicBool>,
+        cancel: CancellationToken,
+    ) -> Result<ConsumerExit, sisa_messaging_consumer::ConsumerError> {
+        let mut settings = ConsumerSettings::default();
+        settings.mode = SettlementMode::PendingRecovery;
+        settings.max_in_flight = std::num::NonZeroUsize::new(1).unwrap();
+        settings.drain_timeout = Duration::from_millis(200);
+
+        let consumer = Consumer::<TestMessage, _>::new(
+            source,
+            RedisMapper,
+            JsonSerializer,
+            inbox,
+            InboxScope::new("redis-typed-integration").unwrap(),
+            FailOnce(fail),
+            settings,
+        )
+        .unwrap();
+
+        consumer.run(cancel).await
+    }
+
+    async fn create_stream_and_group(
+        commands: &mut MultiplexedConnection,
+        stream: &str,
+        group: &str,
+    ) {
+        let _: String = redis::cmd("XADD")
+            .arg(stream)
+            .arg("*")
+            .arg("setup")
+            .arg("1")
+            .query_async(commands)
+            .await
+            .unwrap();
+
+        let _: String = redis::cmd("XGROUP")
+            .arg("CREATE")
+            .arg(stream)
+            .arg(group)
+            .arg("$")
+            .query_async(commands)
+            .await
+            .unwrap();
+    }
+
+    async fn pending_owner(
+        commands: &mut MultiplexedConnection,
+        stream: &str,
+        group: &str,
+    ) -> String {
+        let reply: StreamPendingCountReply = redis::cmd("XPENDING")
+            .arg(stream)
+            .arg(group)
+            .arg("-")
+            .arg("+")
+            .arg(1)
+            .query_async(commands)
+            .await
+            .unwrap();
+
+        assert_eq!(reply.ids.len(), 1);
+
+        reply.ids[0].consumer.clone()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Redis, Valkey, or Dragonfly at SISA_REDIS_URL"]
+    async fn typed_pending_recovery_commits_before_ack() {
+        let url = std::env::var("SISA_REDIS_URL").expect("SISA_REDIS_URL is required");
+        let client = redis::Client::open(url).unwrap();
+        let mut commands = connection(&client).await;
+        let suffix = MessageId::new().to_string().replace('-', "");
+        let stream = format!("sisa-typed-{suffix}");
+        let group = format!("group-{suffix}");
+        create_stream_and_group(&mut commands, &stream, &group).await;
+
+        let publisher = RedisPublisher::new(
+            connection(&client).await,
+            stream.clone(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+
+        let envelope = Envelope::new(
+            MessageId::new(),
+            TestMessage { value: 7 },
+            Default::default(),
+        )
+        .unwrap();
+
+        publisher
+            .append(&JsonSerializer.serialize(&envelope).unwrap())
+            .await
+            .unwrap();
+
+        let inbox = TestInbox::default();
+        let fail = Arc::new(AtomicBool::new(true));
+        let first_cancel = CancellationToken::new();
+        let mut first_settings = settings();
+        first_settings.min_idle = Duration::from_secs(3600);
+
+        let first_task = tokio::spawn(run(
+            source(&client, &stream, &group, "first", first_settings).await,
+            inbox.clone(),
+            fail.clone(),
+            first_cancel.clone(),
+        ));
+
+        tokio::time::timeout(Duration::from_secs(3), inbox.0.failure_recorded.notified())
+            .await
+            .unwrap();
+
+        assert_eq!(pending(&mut commands, &stream, &group).await, 1);
+        assert_eq!(pending_owner(&mut commands, &stream, &group).await, "first");
+        first_cancel.cancel();
+
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), first_task)
+                .await
+                .unwrap()
+                .unwrap(),
+            Ok(ConsumerExit::Cancelled)
+        ));
+
+        tokio::time::sleep(Duration::from_millis(75)).await;
+        let second_cancel = CancellationToken::new();
+
+        let second_task = tokio::spawn(run(
+            source(&client, &stream, &group, "second", settings()).await,
+            inbox.clone(),
+            fail,
+            second_cancel.clone(),
+        ));
+
+        tokio::time::timeout(Duration::from_secs(3), inbox.0.commit_started.notified())
+            .await
+            .unwrap();
+
+        assert_eq!(pending(&mut commands, &stream, &group).await, 1);
+
+        assert_eq!(
+            pending_owner(&mut commands, &stream, &group).await,
+            "second"
+        );
+
+        assert!(
+            !inbox
+                .0
+                .completed
+                .lock()
+                .unwrap()
+                .contains(&envelope.message_id())
+        );
+
+        inbox.0.commit_gate.add_permits(1);
+
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if pending(&mut commands, &stream, &group).await == 0 {
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            inbox
+                .0
+                .completed
+                .lock()
+                .unwrap()
+                .contains(&envelope.message_id())
+        );
+
+        second_cancel.cancel();
+
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), second_task)
+                .await
+                .unwrap()
+                .unwrap(),
+            Ok(ConsumerExit::Cancelled)
+        ));
+
+        let _: i64 = redis::cmd("DEL")
+            .arg(&stream)
+            .query_async(&mut commands)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Garnet 2.1.8 at SISA_GARNET_URL"]
+async fn garnet_2_1_8_rejects_xadd() {
+    let url = std::env::var("SISA_GARNET_URL").expect("SISA_GARNET_URL is required");
+    let client = redis::Client::open(url).unwrap();
+    let mut commands = connection(&client).await;
+    let stream = format!("sisa-garnet-negative-{}", MessageId::new());
+
+    let error = redis::cmd("XADD")
+        .arg(&stream)
+        .arg("*")
+        .arg("setup")
+        .arg("1")
+        .query_async::<String>(&mut commands)
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.kind(), redis::ErrorKind::ResponseError);
+
+    assert!(
+        error
+            .detail()
+            .is_some_and(|detail| detail.to_ascii_lowercase().starts_with("unknown command"))
+    );
+}

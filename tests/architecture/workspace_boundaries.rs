@@ -438,6 +438,7 @@ fn cargo_workspace_members_are_exactly_the_documented_packages() {
         "sisa-messaging-iggy",
         "sisa-messaging-rabbitmq",
         "sisa-messaging-redis",
+        "redis-postgres-consumer",
         "sisa-messaging-architecture-tests",
         "sisa-messaging-xtask",
     ]);

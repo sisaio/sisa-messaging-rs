@@ -1,0 +1,24 @@
+[package]
+name = "redis-postgres-consumer"
+version = "0.1.0"
+description = "Runnable Redis Streams consumer with a PostgreSQL inbox"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sisa-messaging = { workspace = true, features = ["json", "serde"] }
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+sisa-messaging-postgres = { workspace = true }
+sisa-messaging-redis = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio-util = { workspace = true }
+
+[lints]
+workspace = true
