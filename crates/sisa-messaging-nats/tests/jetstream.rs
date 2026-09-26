@@ -1,5 +1,12 @@
 //! Run ignored tests against a real server with `NATS_URL` set.
 
+#[path = "jetstream/consumer.rs"]
+mod consumer;
+#[path = "jetstream/consumer_lifecycle.rs"]
+mod consumer_lifecycle;
+#[path = "jetstream/inbox.rs"]
+mod inbox;
+
 use std::{
     future::Future,
     io::{Read, Write},

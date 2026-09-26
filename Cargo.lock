@@ -3559,8 +3559,12 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
  "tokio",
+ "tokio-util",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
