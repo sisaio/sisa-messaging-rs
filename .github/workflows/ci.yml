@@ -138,6 +138,8 @@ jobs:
           fi
       - name: Run NATS JetStream integration tests
         run: cargo test -p sisa-messaging-nats --test jetstream --all-features --locked -- --ignored
+      - name: Run PostgreSQL and NATS system tests
+        run: cargo test -p sisa-messaging-system-tests --all-features --locked -- --ignored
       - name: Start RabbitMQ
         run: |
           docker run --detach --name "${RABBITMQ_CONTAINER}" \
