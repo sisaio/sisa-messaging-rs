@@ -20,16 +20,32 @@ rdkafka = { workspace = true }
 # Transport-independent envelope and publisher contracts.
 sisa-messaging = { workspace = true }
 
+# Bounded in-memory hand-off between the async source and its member thread (Notify, oneshot,
+# and watch from the `sync` feature). Tokio is already in the graph through rdkafka's `tokio`
+# feature; the workspace entry fixes the inherited feature set.
+tokio = { workspace = true }
+
 [dev-dependencies]
 # Statistical microbenchmark harness.
 criterion = { workspace = true }
 
-# Async test runtime.
-tokio = { workspace = true }
+# Async test runtime with worker threads for broker-backed consumer scenarios.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+# Consumer composition tests and benchmarks run the generic runtime over this provider with a
+# test-local inbox; the runtime dependency graph stays messaging-only.
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+tokio-util = { workspace = true }
 
 [[bench]]
 # Shared-envelope Kafka record projection benchmark.
 name = "mapping"
+harness = false
+
+[[bench]]
+# Partitioned consumer settlement over a real broker; skipped unless configured.
+name = "consume"
 harness = false
 
 [lints]
