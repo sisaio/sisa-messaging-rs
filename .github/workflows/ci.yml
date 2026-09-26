@@ -34,6 +34,10 @@ jobs:
       NATS_URL: nats://127.0.0.1:4222
       RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/%2f
       RABBITMQ_CONTAINER: ci-rabbitmq
+      KAFKA_CONTAINER: ci-kafka
+      SISA_KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:9092
+      SISA_KAFKA_TEST_TOPIC: ci-kafka-topic
+      SISA_KAFKA_TEST_PARTITIONED_TOPIC: ci-kafka-partitioned-topic
     services:
       postgres:
         image: postgres:18
@@ -138,8 +142,62 @@ jobs:
           fi
       - name: Run NATS JetStream integration tests
         run: cargo test -p sisa-messaging-nats --test jetstream --all-features --locked -- --ignored
-      - name: Run PostgreSQL and NATS system tests
+      - name: Start Kafka (single-node KRaft)
+        run: |
+          docker run --detach --name "${KAFKA_CONTAINER}" \
+            --publish 9092:9092 \
+            --env KAFKA_NODE_ID=1 \
+            --env KAFKA_PROCESS_ROLES=broker,controller \
+            --env KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+            --env KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9092 \
+            --env KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            --env KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT \
+            --env KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            --env KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT \
+            --env KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            --env KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            --env KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            --env KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0 \
+            --env KAFKA_AUTO_CREATE_TOPICS_ENABLE=false \
+            apache/kafka:4.0.0
+          health_status=unavailable
+          health_attempt=0
+          while [ "${health_status}" != healthy ] && [ "${health_attempt}" -lt 30 ]; do
+            if docker exec "${KAFKA_CONTAINER}" /opt/kafka/bin/kafka-topics.sh \
+              --bootstrap-server "${SISA_KAFKA_BOOTSTRAP_SERVERS}" --list >/dev/null 2>&1; then
+              health_status=healthy
+              break
+            fi
+            health_attempt=$((health_attempt + 1))
+            sleep 1
+          done
+          if [ "${health_status}" != healthy ]; then
+            docker logs "${KAFKA_CONTAINER}"
+            exit 1
+          fi
+      - name: Create Kafka test topics
+        run: |
+          docker exec "${KAFKA_CONTAINER}" /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server "${SISA_KAFKA_BOOTSTRAP_SERVERS}" \
+            --create --topic "${SISA_KAFKA_TEST_TOPIC}" \
+            --partitions 1 --replication-factor 1
+          docker exec "${KAFKA_CONTAINER}" /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server "${SISA_KAFKA_BOOTSTRAP_SERVERS}" \
+            --create --topic "${SISA_KAFKA_TEST_PARTITIONED_TOPIC}" \
+            --partitions 8 --replication-factor 1
+      - name: Run PostgreSQL, NATS, and Kafka system tests
         run: cargo test -p sisa-messaging-system-tests --all-features --locked -- --ignored
+      - name: Run real Kafka integration tests
+        run: |
+          cargo test -p sisa-messaging-kafka --all-features --locked \
+            --test real_kafka_consumer \
+            --test real_kafka_consumer_rebalance \
+            --test real_kafka_transactional_fence \
+            --test real_kafka_rebalance \
+            --test real_kafka_settlement \
+            --test real_kafka_confirmed_commit \
+            --test real_kafka_publisher \
+            -- --ignored --test-threads=1
       - name: Start RabbitMQ
         run: |
           docker run --detach --name "${RABBITMQ_CONTAINER}" \
