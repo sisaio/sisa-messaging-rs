@@ -18,17 +18,33 @@ iggy_common = { workspace = true }
 # Transport-independent envelope and publisher contracts.
 sisa-messaging = { workspace = true }
 
-# Bounds the connect-and-login and per-publish server round trips with an explicit timeout; the
-# SDK's TCP client offers no built-in call timeout of its own.
+# Bounds the connect-and-login, per-publish, poll, and offset-store server round trips with an
+# explicit timeout, since the SDK's TCP client offers no built-in call timeout of its own, and wakes
+# the delivery source when a settlement reports.
 tokio = { workspace = true }
 
 [dev-dependencies]
 # Statistical microbenchmark harness.
 criterion = { workspace = true }
 
+# The rebalance test and the partition-progress benchmark run members and the generic consumer
+# runtime on a multi-threaded runtime.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+# The partition-progress benchmark runs the generic partitioned runtime over this source with a
+# benchmark-local inbox; the runtime dependency graph stays messaging-only.
+sisa-messaging-consumer = { workspace = true }
+sisa-messaging-inbox = { workspace = true }
+tokio-util = { workspace = true }
+
 [[bench]]
 # Shared-envelope Iggy message projection benchmark.
 name = "mapping"
+harness = false
+
+[[bench]]
+# Consumer-group partition progress through the delivery source and the partitioned runtime.
+name = "partition_progress"
 harness = false
 
 [lints]

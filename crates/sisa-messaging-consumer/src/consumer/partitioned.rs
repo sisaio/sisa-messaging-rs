@@ -28,11 +28,36 @@ struct ActiveEntry {
 
     stale: bool,
 
+    /// The coordinator has started this record's advance; a source may already report the
+    /// partition's next record, which then waits for this coordinator to finish.
+    advancing: bool,
+
+    /// The finished coordinator's advance was confirmed.
+    advanced: bool,
+
     coordinator_done: bool,
 
     deferred: bool,
 
+    /// Cancellation for the one record held until this entry is released.
+    deferred_token: Option<Arc<CancellationToken>>,
+
     released: Arc<Notify>,
+}
+
+impl ActiveEntry {
+    fn new(token: Arc<CancellationToken>, stale: bool) -> Self {
+        Self {
+            token,
+            stale,
+            advancing: false,
+            advanced: false,
+            coordinator_done: false,
+            deferred: false,
+            deferred_token: None,
+            released: Arc::new(Notify::new()),
+        }
+    }
 }
 
 type Active<P> = Arc<Mutex<HashMap<P, ActiveEntry>>>;
@@ -98,6 +123,11 @@ where
                     entry.stale = true;
                     entry.token.cancel();
 
+                    // A record held behind this entry belongs to the lost ownership too.
+                    if let Some(deferred) = &entry.deferred_token {
+                        deferred.cancel();
+                    }
+
                     if entry.coordinator_done && !entry.deferred {
                         active.remove(&partition);
                     }
@@ -112,8 +142,38 @@ where
                     let mut active = lock(&self.active);
 
                     if let Some(entry) = active.get_mut(&partition) {
-                        if entry.stale && !entry.deferred {
+                        // A stale entry is being withdrawn; a still-running advance may already
+                        // have reported success. Either way one next record waits for release.
+                        // A finished, unconfirmed advance under live ownership is unresolved, so
+                        // a record arriving after it is an overlap.
+                        let releasable =
+                            entry.stale || (entry.advancing && !entry.coordinator_done);
+
+                        // A held record cancelled by a later ownership loss is superseded by
+                        // the replacement, which gets its own release signal. The superseded
+                        // coordinator is woken on the old signal and exits without starting.
+                        let superseded = entry
+                            .deferred_token
+                            .as_ref()
+                            .is_some_and(|held| held.is_cancelled());
+
+                        if releasable && entry.deferred && superseded {
+                            let previous =
+                                std::mem::replace(&mut entry.released, Arc::new(Notify::new()));
+
+                            previous.notify_one();
+                            entry.deferred_token = Some(token.clone());
+
+                            // The predecessor already signalled its release to the superseded
+                            // record, so the replacement is released at once.
+                            if entry.coordinator_done {
+                                entry.released.notify_one();
+                            }
+
+                            Some(Arc::clone(&entry.released))
+                        } else if releasable && !entry.deferred {
                             entry.deferred = true;
+                            entry.deferred_token = Some(token.clone());
 
                             Some(Arc::clone(&entry.released))
                         } else {
@@ -128,16 +188,7 @@ where
                             return false;
                         }
                     } else {
-                        active.insert(
-                            partition.clone(),
-                            ActiveEntry {
-                                token: token.clone(),
-                                stale: false,
-                                coordinator_done: false,
-                                deferred: false,
-                                released: Arc::new(Notify::new()),
-                            },
-                        );
+                        active.insert(partition.clone(), ActiveEntry::new(token.clone(), false));
 
                         None
                     }
@@ -207,8 +258,9 @@ impl<P: Eq + Hash> Drop for ActiveGuard<P> {
         }
 
         current.coordinator_done = true;
+        current.advanced = self.safe_to_release;
 
-        if current.stale && current.deferred {
+        if current.deferred {
             // Keep the old token as a placeholder until the one deferred coordinator atomically
             // installs its replacement. Later records cannot overtake it in that gap.
             current.released.notify_one();
@@ -255,10 +307,29 @@ where
     {
         let mut current = lock(&active);
 
+        let held = current.get(&partition).is_some_and(|entry| {
+            entry.deferred
+                && Arc::ptr_eq(&entry.released, &start.released)
+                && entry
+                    .deferred_token
+                    .as_ref()
+                    .is_some_and(|held| Arc::ptr_eq(held, &token))
+        });
+
+        // A replacement superseded this cancelled record: it never starts.
+        if token.is_cancelled() && !held {
+            drop(current);
+            drop(settlement);
+
+            return Ok(());
+        }
+
+        // The held record may start only after its predecessor finished and either advanced or
+        // was withdrawn; an unconfirmed advance under live ownership stays unresolved.
         if !current.get(&partition).is_some_and(|entry| {
-            entry.stale
-                && entry.coordinator_done
+            entry.coordinator_done
                 && entry.deferred
+                && (entry.stale || entry.advanced)
                 && Arc::ptr_eq(&entry.released, &start.released)
         }) {
             drop(current);
@@ -272,16 +343,11 @@ where
         }
 
         // The old workflow and its transaction are gone. Replace its placeholder under this
-        // lock, so no following record can overtake the deferred delivery.
+        // lock, so no following record can overtake the deferred delivery. A held record whose
+        // ownership was lost meanwhile installs a stale entry that releases the partition.
         current.insert(
             partition,
-            ActiveEntry {
-                token: token.clone(),
-                stale: false,
-                coordinator_done: false,
-                deferred: false,
-                released: Arc::new(Notify::new()),
-            },
+            ActiveEntry::new(token.clone(), token.is_cancelled()),
         );
     }
 
@@ -324,6 +390,14 @@ where
         token: token.clone(),
         safe_to_release: false,
     };
+
+    // A record whose ownership was lost before it started never reaches the handler.
+    if token.is_cancelled() {
+        telemetry::partition_event(shared.labels, "stale_work");
+        drop(settlement);
+
+        return Ok(());
+    }
 
     let in_handler = Arc::new(AtomicBool::new(false));
 
@@ -377,6 +451,16 @@ where
 
     match processed.resolution {
         Resolution::Completed | Resolution::Dead(_) => {
+            {
+                let mut current = lock(&guard.active);
+
+                if let Some(entry) = current.get_mut(&guard.partition)
+                    && Arc::ptr_eq(&entry.token, &token)
+                {
+                    entry.advancing = true;
+                }
+            }
+
             // Advance is not selected against cancellation. Once started it must complete or
             // timeout before the coordinator can release local ownership.
             let advanced =
@@ -387,6 +471,13 @@ where
                 Ok(Ok(PartitionAdvance::Advanced)) if !token.is_cancelled() => {
                     guard.safe_to_release = true;
                     telemetry::partition_event(shared.labels, "advanced");
+
+                    Ok(())
+                }
+                Ok(Ok(PartitionAdvance::Advanced)) => {
+                    // Confirmed, but ownership was lost while advancing: the entry is already
+                    // stale and releases on drop without counting as a live-ownership advance.
+                    telemetry::partition_event(shared.labels, "advanced_stale");
 
                     Ok(())
                 }
@@ -532,7 +623,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use tokio::sync::Notify;
     use tokio_util::sync::CancellationToken;
 
     use super::{ActiveEntry, ActiveGuard, lock};
@@ -542,16 +632,7 @@ mod tests {
         let active = Arc::new(Mutex::new(HashMap::new()));
         let first = Arc::new(CancellationToken::new());
 
-        lock(&active).insert(
-            7_u8,
-            ActiveEntry {
-                token: first.clone(),
-                stale: false,
-                coordinator_done: false,
-                deferred: false,
-                released: Arc::new(Notify::new()),
-            },
-        );
+        lock(&active).insert(7_u8, ActiveEntry::new(first.clone(), false));
 
         drop(ActiveGuard {
             partition: 7_u8,
@@ -564,16 +645,7 @@ mod tests {
 
         let next = Arc::new(CancellationToken::new());
 
-        lock(&active).insert(
-            7_u8,
-            ActiveEntry {
-                token: next.clone(),
-                stale: false,
-                coordinator_done: false,
-                deferred: false,
-                released: Arc::new(Notify::new()),
-            },
-        );
+        lock(&active).insert(7_u8, ActiveEntry::new(next.clone(), false));
 
         drop(ActiveGuard {
             partition: 7_u8,

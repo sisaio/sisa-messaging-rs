@@ -1,7 +1,7 @@
 [package]
 name = "sisa-messaging-system-tests"
 version = "0.0.0"
-description = "Real PostgreSQL and JetStream system proofs of the typed consumer"
+description = "Real PostgreSQL, JetStream, and Apache Iggy system proofs of the typed consumer"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,17 +13,24 @@ publish = false
 sisa-messaging = { workspace = true, features = ["json"] }
 sisa-messaging-consumer = { workspace = true }
 sisa-messaging-inbox = { workspace = true }
+sisa-messaging-iggy = { workspace = true }
 sisa-messaging-nats = { workspace = true }
 sisa-messaging-postgres = { workspace = true }
 
-# Test-owned broker connection, pool, effect table, runtime, and cancellation.
+# Test-owned broker connections, pool, effect table, runtime, and cancellation. The raw Iggy
+# client provisions the test's topic and consumer group, which the library never creates.
 async-nats = { workspace = true }
+iggy = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-util = { workspace = true }
 
 # Derives the JSON test message.
 serde = { workspace = true }
+
+[[test]]
+name = "iggy_postgres"
+path = "iggy_postgres.rs"
 
 [[test]]
 name = "nats_postgres"

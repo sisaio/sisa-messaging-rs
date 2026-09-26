@@ -123,21 +123,40 @@ must neither lose nor settle/advance a delivery. Unsupported individual requirem
 with a bounded classified error and are never emulated.
 
 A partition settlement owns opaque partition, offset, and fencing generation, and exposes its
-partition so a generic coordinator can associate an ownership-loss event. It advances only after
-the consumer transaction commits or a durable terminal disposition exists. Initially the consumer
+partition so a generic coordinator can associate an ownership-loss event. It advances only after the
+consumer transaction commits or a durable terminal disposition exists. Initially the consumer
 permits one unresolved record per partition: a later offset cannot advance until its earlier record
-resolves. `OwnershipLost` proves fencing prevented advancement. A timeout, transient advance error,
-or dropped advance future is indeterminate: the consumer leaves that partition unresolved and the
-source pauses it. Before reading the authoritative committed cursor and ownership generation, the
-source must establish that the previous advance cannot still change the cursor, either by proving it
-is quiescent or by an authoritative fence against its old generation. It replays when the cursor did
-not advance, continues only when it did, and stays paused or fails when the advance's effects,
-cursor, or fencing cannot be established; other partitions may progress. A returned permanent
-advance error ends the run as a typed settlement failure. No replay or later offset may be emitted
-while the old advance could still take effect. A source must not emit a new generation while this
-handling is underway. Automatic commit is not a profile option. Redis Streams reclaim is
-individual delivery, not partitioned-log ownership; its unavailable delay, heartbeat, or terminal
-operation must fail requirement validation.
+resolves. A source may emit the partition's next record once it observes the advance succeed; the
+consumer holds it until the advancing workflow releases the partition. A timeout, transient advance
+error, or dropped advance future is indeterminate: the consumer leaves that partition unresolved and
+the source pauses it. A returned permanent advance error ends the run as a typed settlement failure.
+Automatic commit is not a profile option, and no provider may advance past an unresolved record or
+keep more than one unresolved record per partition.
+
+A fencing provider's `OwnershipLost` proves fencing prevented advancement. Before reading the
+authoritative committed cursor and ownership generation, its source must establish that the
+previous advance cannot still change the cursor, either by proving it is quiescent or by an
+authoritative fence against its old generation. It replays when the cursor did not advance,
+continues only when it did, and stays paused or fails when the advance's effects, cursor, or
+fencing cannot be established; other partitions may progress. No replay or later offset may be
+emitted while the old advance could still take effect, and the source must not emit a new
+generation while this handling is underway.
+
+A replay-only provider may implement the profile without generation-fenced cursor writes, because a
+late, reordered, or lower write can only cause redelivery of records the inbox already resolved. It
+qualifies only when every cursor write sets an absolute position n after record n and every earlier
+record on that partition have a committed inbox outcome or durable terminal disposition; nothing
+else moves the cursor (no commit on poll, close, or group leave); a replayed record keeps its
+envelope identity; and every group member uses the same inbox. Its `advance` never returns
+`OwnershipLost`: a rejected store proves only that the transmission that got the reply was rejected,
+because a client may resend the same request and a server may still admit writes while a revocation
+drains. After an indeterminate advance, its source emits an ownership-loss event for that partition
+and then replays from the unresolved record; the inbox absorbs the duplicate, so inbox retention
+must outlast the replay horizon. During a group rebalance a revoked member may still process
+buffered records while the new owner processes them too: effects stay once through the inbox, but
+handler order across members is not held. Apache Iggy is replay-only; the planned Kafka source must
+fence. Redis Streams reclaim is individual delivery, not partitioned-log ownership; its unavailable
+delay, heartbeat, or terminal operation must fail requirement validation.
 
 `sisa-messaging-inbox` owns `InboxUnitOfWork`, the ability to begin, commit, and roll back the
 transaction type used by an `InboxStore`. `PostgresInboxStore` implements both capabilities and
@@ -306,6 +325,13 @@ composition against a real JetStream server, including that a failed commit is n
 acknowledged. `tests/system` proves with `PostgresInboxStore` that committed effects are durable
 once acknowledged and that a failed attempt's effects roll back before the failure is recorded.
 
+[`examples/iggy-postgres-consumer`](../examples/iggy-postgres-consumer/src/main.rs) composes the
+same generic `Consumer` with the replay-only `IggyDeliverySource` through `new_partitioned` and
+`run_partitioned`, without an Iggy-specific façade. The application provisions the stream, topic,
+and consumer group and gives every group member the same inbox. The `sisa-messaging-iggy`
+real-broker suites prove ordered progression, offset gaps, cancellation, rebalance, and safe
+errors, and `tests/system` proves one committed effect per message across a two-member rebalance.
+
 For long individual-delivery handlers, configure `heartbeat_interval` below half the broker's
 acknowledgement wait. The source reports its descriptor during `run` opening, so requirements
 are validated after I/O but before the consumer receives a delivery. `NatsDeliverySource`
@@ -437,11 +463,13 @@ The partitioned profile consumes a `PartitionedLogDeliverySource` and does not c
 `ack`, `nak`, or `terminate`. It keeps at most one unresolved record active per partition while
 allowing other partitions to progress within `max_in_flight`. It calls `advance` only after the
 record's transaction commits or a durable terminal disposition is recorded. A transient error,
-timeout, or otherwise ambiguous outcome during `advance` leaves that partition unresolved and
-paused while other partitions continue; a returned permanent provider error stops the run with
-`Settlement`. The source must fence and reconcile its cursor and ownership generation before
-replaying the record or continuing at a later offset. An observed ownership-loss event cancels that
-partition's active workflow and leaves its record unresolved. Because ownership-loss events share
+timeout, or otherwise ambiguous outcome during `advance` leaves that partition unresolved and paused
+while other partitions continue; a returned permanent provider error stops the run with
+`Settlement`. A fencing source must fence and reconcile its cursor and ownership generation before
+replaying the record or continuing at a later offset; a replay-only source instead withdraws the
+partition with an ownership-loss event and replays from the unresolved record. An observed
+ownership-loss event cancels that partition's active workflow, including a record held for the
+partition's previous advance, and leaves its record unresolved. Because ownership-loss events share
 the source receive stream, the consumer cannot poll for one while all `max_in_flight` slots are
 occupied; cancellation can therefore wait until a slot is available.
 

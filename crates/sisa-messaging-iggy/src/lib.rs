@@ -1,4 +1,4 @@
-//! Apache Iggy publisher provider for Sisa messaging contracts.
+//! Apache Iggy publisher and consumer-group delivery source for Sisa messaging contracts.
 //!
 //! Applications configure the server address, credentials, optional TLS, and timeouts through
 //! [`IggyClientSettings`]. [`IggyClient::start`] connects over TCP and logs in within the
@@ -66,15 +66,63 @@
 //! including the configured username during sign-in and raw I/O error text on connection
 //! failures; applications that filter or redact log output should suppress or scrub that target.
 //!
+//! ## Delivery source
+//!
+//! [`IggyDeliverySource`] is a replay-only implementation of the shared partitioned-log delivery
+//! profile for one pre-provisioned consumer group; the application composes it with the generic
+//! consumer's `run_partitioned` and the [`IggyEnvelopeMapper`], as the `iggy-postgres-consumer`
+//! example shows. It uses the SDK's low-level client, not `IggyConsumer`, which commits in the
+//! background, buffers on its own, and hides revocation.
+//!
+//! Iggy's offset store carries no membership generation and checks ownership only when it admits
+//! a store, so the source cannot fence a late store
+//! (<https://github.com/sisaio/sisa-messaging-rs/issues/60>). It is correct because a late store
+//! can only cause replay, never a skipped record, as long as the topic's offsets are never reused
+//! (see the purge precondition below):
+//!
+//! 1. A settlement stores its own record's offset only after the consumer committed that record's
+//!    inbox outcome or durable terminal disposition, and the source holds at most one unresolved
+//!    record per partition and delivers each partition in offset order, so every earlier record
+//!    is already resolved. A poll that would skip an offset fails the source with
+//!    [`IggyDeliveryErrorKind::OffsetGap`].
+//! 2. Nothing else writes the cursor: polls always disable auto-commit, and the source never
+//!    commits on close and never leaves the group.
+//! 3. A replayed record carries the same message id, so it keeps its envelope identity.
+//! 4. The application must give every member of the group the same inbox.
+//!
+//! An indeterminate advance (an error, a timeout, or a dropped `advance` future) is not waited
+//! out: the source withdraws the record with an ownership-loss event and, one poll interval
+//! later, replays it from its own offset. A store that still applies afterwards, even a lower one
+//! that moves the cursor back, causes only replay that the shared inbox absorbs.
+//!
+//! During a rebalance a member keeps the records it already polled: Iggy holds a partition's
+//! revocation until the old owner has stored every offset it was served, then moves the partition
+//! and fences the old owner's next poll, so the new owner resumes after the last stored record.
+//! If the server's rebalancing timeout forces the move first, the revoked member may still
+//! process the records it already polled for that partition, at most `batch_length`, until a
+//! rejected offset store makes it withdraw them or its next poll is fenced, while the new owner
+//! processes them too. The shared inbox keeps each effect once, but handler order across members
+//! is not held during that window.
+//!
+//! Purging a topic is outside this guarantee. After a purge Iggy restarts the partition offsets
+//! at 0, and the source cannot detect that an offset was reused: a new record whose offset is
+//! below the source's next expected offset, or at or below the group's stored offset, is skipped
+//! without being delivered. The application must stop every consumer of the group before
+//! purging the topic and, if it reuses the group afterwards, reset or delete the group's stored
+//! offsets first.
+//!
 //! ## Scope
 //!
-//! This crate ships the publisher only. The inbound partitioned-log delivery source described by
-//! the shared consumer contracts is out of scope: Iggy's consumer-group offset store carries no
-//! membership generation, so a fencing-correct implementation of that profile is not possible with
-//! the current server, as recorded in <https://github.com/sisaio/sisa-messaging-rs/issues/60>. The
-//! crate's `tests/real_iggy_offset_fencing.rs` is an authored, opt-in test of that gap; its
-//! execution against a real broker is tracked in
-//! <https://github.com/sisaio/sisa-messaging-rs/issues/63>, and its finding is recorded in #60.
+//! This crate ships the publisher and the consumer-group delivery source. Client and resource
+//! provisioning, reconnect supervision, and automatic offset commits stay out of scope. The
+//! crate's opt-in `tests/real_iggy_offset_fencing.rs` records the offset-store facts behind
+//! <https://github.com/sisaio/sisa-messaging-rs/issues/60> against `apache/iggy:0.9.0`: a store
+//! from a member that does not own the partition is refused with
+//! `ConsumerGroupPartitionNotOwned` (5009), a store from an owner whose revocation is draining is
+//! still admitted, stores are absolute so a lower one moves the cursor back, and the stored offset
+//! is the last processed record. Because a draining owner is admitted and the SDK re-sends the same
+//! request id when it does not observe a reply, a 5009 does not prove that an earlier transmission
+//! of the store did nothing, so [`IggySettlement`]'s advance never reports an ownership loss.
 
 #![forbid(unsafe_code)]
 
@@ -83,14 +131,17 @@ mod error;
 mod mapper;
 mod publisher;
 mod settings;
+mod source;
 
 pub use client::IggyClient;
 pub use error::{
-    IggyClientError, IggyClientErrorKind, IggyMappingError, IggyPublishError, IggyPublishErrorKind,
-    InvalidSendTimeout, RoutingDestinationError,
+    IggyClientError, IggyClientErrorKind, IggyDeliveryError, IggyDeliveryErrorKind,
+    IggyMappingError, IggyPublishError, IggyPublishErrorKind, InvalidSendTimeout,
+    RoutingDestinationError,
 };
 pub use mapper::{IggyEnvelopeMapper, IggyHeader, IggyRecord};
 pub use publisher::{
     Identifier, IggyDestinationResolver, IggyPublisher, RoutingDestinationResolver,
 };
 pub use settings::{IggyClientSettings, IggyCredentials, IggyPublisherSettings, IggyTlsSettings};
+pub use source::{IggyDelivery, IggyDeliverySource, IggySettlement, IggySourceSettings};

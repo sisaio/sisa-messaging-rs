@@ -35,7 +35,7 @@ not used.
 | `sisa-messaging-postgres` | PostgreSQL runtime implementations for outbox and inbox |
 | `sisa-messaging-nats` | NATS JetStream mapping, subject resolution, publication, and inbound delivery |
 | `sisa-messaging-kafka` | Kafka envelope mapping, topic resolution, and outbound publication |
-| `sisa-messaging-iggy` | Apache Iggy envelope mapping, stream/topic resolution, and outbound publication |
+| `sisa-messaging-iggy` | Apache Iggy envelope mapping, stream/topic resolution, outbound publication, and replay-only consumer-group delivery |
 | `sisa-messaging-rabbitmq` | RabbitMQ AMQP 0-9-1 mapping, exchange/routing-key resolution, confirmed publication, and inbound delivery |
 | `sisa-messaging-redis` | Redis Streams envelope mapping, publication, and individual inbound delivery |
 
@@ -74,11 +74,12 @@ Rules:
 - Kafka depends only on messaging. It maps envelopes and implements outbound publication without
   depending on the outbox or inbox.
 - Iggy depends only on messaging. It maps envelopes and implements outbound publication over the
-  Iggy TCP protocol; its partitioned-log delivery source is deferred until Iggy can fence
-  consumer-group offset stores by membership generation. Iggy limits each header name and value
-  to 255 bytes: a custom header value over that bound is a permanent mapping error, and an
-  oversized `tracestate` is omitted under the W3C Trace Context allowance while an oversized
-  `traceparent` is rejected as a permanent mapping error.
+  Iggy TCP protocol. Its consumer-group source implements the partitioned-log profile as a
+  replay-only provider (Consumer framework section 2): Iggy offset stores carry no membership
+  generation, so a late store can only cause replay that the shared inbox absorbs. Iggy limits each
+  header name and value to 255 bytes: a custom header value over that bound is a permanent mapping
+  error, and an oversized `tracestate` is omitted under the W3C Trace Context allowance while an
+  oversized `traceparent` is rejected as a permanent mapping error.
 - RabbitMQ depends only on messaging. It publishes through an application-supplied lapin channel
   already in publisher-confirm mode and implements the individual-delivery profile over one
   dedicated channel per source. Publication is mandatory: a broker return is an unroutable

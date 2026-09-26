@@ -1963,6 +1963,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "iggy-postgres-consumer"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-iggy",
+ "sisa-messaging-inbox",
+ "sisa-messaging-postgres",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "iggy_binary_protocol"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3542,7 +3557,10 @@ dependencies = [
  "iggy",
  "iggy_common",
  "sisa-messaging",
+ "sisa-messaging-consumer",
+ "sisa-messaging-inbox",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -3650,9 +3668,11 @@ name = "sisa-messaging-system-tests"
 version = "0.0.0"
 dependencies = [
  "async-nats",
+ "iggy",
  "serde",
  "sisa-messaging",
  "sisa-messaging-consumer",
+ "sisa-messaging-iggy",
  "sisa-messaging-inbox",
  "sisa-messaging-nats",
  "sisa-messaging-postgres",

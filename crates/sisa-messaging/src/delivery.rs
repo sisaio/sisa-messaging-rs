@@ -495,14 +495,28 @@ pub enum PartitionAdvance {
 /// The implementation owns the opaque partition, offset, and fencing generation. It may advance
 /// only after the record has committed or received a durable terminal disposition. One unresolved
 /// record may exist per partition; a later offset must not advance ahead of it. An error, timeout,
-/// or dropped advance future is indeterminate and requires the source to pause that partition. The
-/// source must not reconcile or redeliver while the corresponding operation can still take effect,
-/// including while a pending or unpolled future remains live. It may resume only after the operation
-/// is conclusively quiescent or an authoritative generation fence prevents any late effect, and
-/// then only after reconciling the committed cursor and ownership generation. Reconciliation replays
-/// when the cursor did not advance, continues when it did, and keeps the partition paused if either
-/// fact cannot be established. Providers unable to fence and reconcile this state cannot implement
-/// this profile.
+/// or dropped advance future is indeterminate and requires the source to pause that partition.
+/// Unless the provider is replay-only (below), the source must not reconcile or redeliver while the
+/// corresponding operation can still take effect, including while a pending or unpolled future
+/// remains live. It may resume only after the operation is conclusively quiescent or an
+/// authoritative generation fence prevents any late effect, and then only after reconciling the
+/// committed cursor and ownership generation. Reconciliation replays when the cursor did not
+/// advance, continues when it did, and keeps the partition paused if either fact cannot be
+/// established.
+///
+/// A replay-only provider may implement this profile without generation-fenced cursor writes when
+/// all of the following hold:
+///
+/// 1. Every cursor write sets an absolute position `n` only after record `n` and every earlier
+///    record on that partition has a committed inbox outcome or a durable terminal disposition.
+/// 2. Nothing else moves the cursor: no automatic commit, and no commit on poll, close, or leave.
+/// 3. A replayed record keeps its envelope identity.
+/// 4. All group members share one inbox.
+///
+/// A late or reordered write from such a provider can then only cause replay, which the shared
+/// inbox absorbs, never a skipped record. After an indeterminate advance a replay-only source
+/// withdraws the unresolved record and replays it without waiting for quiescence. Every other
+/// provider must fence and reconcile.
 pub trait PartitionedLogSettlement: Send + 'static {
     /// Partition identifier surfaced by the corresponding source.
     type Partition: Clone + Eq + Hash + Send + Sync + 'static;
@@ -511,7 +525,8 @@ pub trait PartitionedLogSettlement: Send + 'static {
 
     /// Returns `Advanced` only after confirmed advancement. `OwnershipLost` is valid only when
     /// fencing proves that the cursor did not advance. Errors and cancellation are indeterminate;
-    /// the source must pause and reconcile before delivering a later offset for this partition.
+    /// the source must pause and then reconcile (fencing) or withdraw and replay (replay-only)
+    /// before delivering again.
     fn advance(self) -> impl Future<Output = Result<PartitionAdvance, Self::Error>> + Send;
 
     /// Returns the opaque partition associated with this settlement handle.
@@ -525,7 +540,10 @@ pub enum PartitionedLogReceive<D, P> {
     /// A record with a settlement handle bound to its partition and offset.
     Delivery(D),
 
-    /// The source lost ownership of this partition; no record was advanced.
+    /// The source withdrew this partition's unresolved record.
+    ///
+    /// A fencing provider emits this only when nothing advanced; a replay-only provider may emit
+    /// it while an earlier advance can still take effect.
     OwnershipLost(P),
 
     /// The source closed cleanly.

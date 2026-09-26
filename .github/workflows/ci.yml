@@ -32,6 +32,7 @@ jobs:
       PGUSER: postgres
       PGDATABASE: postgres
       NATS_URL: nats://127.0.0.1:4222
+      IGGY_CONTAINER: ci-iggy
       RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/%2f
       RABBITMQ_CONTAINER: ci-rabbitmq
     services:
@@ -138,7 +139,44 @@ jobs:
           fi
       - name: Run NATS JetStream integration tests
         run: cargo test -p sisa-messaging-nats --test jetstream --all-features --locked -- --ignored
-      - name: Run PostgreSQL and NATS system tests
+      - name: Start Apache Iggy
+        run: |
+          # apache/iggy:0.9.0 is the server release published alongside the `iggy = "=0.11.0"`
+          # Rust SDK pin (Cargo.toml): the apache/iggy monorepo versions the server and SDK
+          # crates independently, but this server tag and the 0.11.0 SDK crates were released
+          # together (crates.io and Docker Hub publish timestamps match). Do not float this tag.
+          # The server requires io_uring; GitHub-hosted runners block it under the default
+          # seccomp profile, so it needs --security-opt seccomp=unconfined to boot at all.
+          # IGGY_SHARDING_CPU_ALLOCATION caps shard count so per-shard NUMA memory-affinity
+          # binding does not fail on runners without full NUMA topology.
+          docker run --detach --name "${IGGY_CONTAINER}" \
+            --security-opt seccomp=unconfined \
+            --publish 8090:8090 \
+            --env IGGY_SHARDING_CPU_ALLOCATION=2 \
+            --env IGGY_TCP_ADDRESS=0.0.0.0:8090 \
+            --env IGGY_NODE_ADVERTISED_ADDRESS=127.0.0.1 \
+            --env IGGY_ROOT_USERNAME=iggy \
+            --env IGGY_ROOT_PASSWORD=iggy \
+            apache/iggy:0.9.0@sha256:b35fc2841964f2962a5f164d33b3ae3a9de99a66920defd3cd8a1c039470602d
+          # The image ships no wget/curl/nc, so readiness is a plain TCP connect to the
+          # published client port rather than a `--health-cmd` (as the NATS step uses).
+          health_status=unavailable
+          health_attempt=0
+          while [ "${health_status}" != healthy ] && [ "${health_attempt}" -lt 30 ]; do
+            if (exec 3<>/dev/tcp/127.0.0.1/8090) 2>/dev/null; then
+              health_status=healthy
+              break
+            fi
+            health_attempt=$((health_attempt + 1))
+            sleep 1
+          done
+          if [ "${health_status}" != healthy ]; then
+            docker logs "${IGGY_CONTAINER}"
+            exit 1
+          fi
+      - name: Run Iggy integration tests
+        run: cargo test -p sisa-messaging-iggy --all-features --locked -- --ignored
+      - name: Run PostgreSQL, NATS, and Iggy system tests
         run: cargo test -p sisa-messaging-system-tests --all-features --locked -- --ignored
       - name: Start RabbitMQ
         run: |

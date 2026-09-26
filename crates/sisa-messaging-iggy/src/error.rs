@@ -330,3 +330,193 @@ impl From<IggyError> for IggyPublishError {
         Self::new(kind, failure_kind)
     }
 }
+
+/// Safe, structured class of an Iggy delivery-source or offset-advance failure.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum IggyDeliveryErrorKind {
+    /// A source setting was outside its documented bound.
+    InvalidSettings,
+
+    /// The server rejected the session's credentials or permissions.
+    Unauthorized,
+
+    /// The stream, topic, consumer group, or partition does not exist.
+    ///
+    /// The source never creates any of them, and a group deleted while the source runs is
+    /// reported the same way when the source next tries to rejoin it.
+    NotFound,
+
+    /// The server permanently rejected the request, such as an out-of-range offset.
+    Rejected,
+
+    /// The client session was lost or was never connected.
+    ///
+    /// Reconnection is application-owned: build a new [`IggyClient`](crate::IggyClient) and a
+    /// new source. A deliberately shut-down client is reported as a clean source close instead.
+    Disconnected,
+
+    /// A server request did not complete within the source's request timeout.
+    ///
+    /// For an offset advance the outcome is unknown: the store may still be applied later.
+    Timeout,
+
+    /// The server refused or could not settle the request for a retryable reason, or returned
+    /// an error this crate does not classify by name.
+    ///
+    /// For an offset advance the outcome is unknown: the store may still be applied later.
+    Unavailable,
+
+    /// A poll returned a record past the partition's next expected offset.
+    ///
+    /// The source never skips forward over a record it has not resolved. This reports records
+    /// removed above the source's position before they were resolved, for example by segment
+    /// deletion or retention, which requires operator action. A topic purge is not detected as a
+    /// gap: it restarts offsets at 0, and the reused offsets are skipped instead (see the crate
+    /// documentation's purge precondition).
+    OffsetGap,
+}
+
+/// A redacted Iggy delivery-source or offset-advance failure.
+///
+/// It carries only its structured kind, its retry classification, and the numeric Iggy error
+/// code when the server or SDK reported one: never SDK error text, resource names, credentials,
+/// addresses, or payload bytes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IggyDeliveryError {
+    kind: IggyDeliveryErrorKind,
+
+    failure_kind: FailureKind,
+
+    code: Option<u32>,
+}
+
+impl IggyDeliveryError {
+    pub(crate) const fn new(kind: IggyDeliveryErrorKind, failure_kind: FailureKind) -> Self {
+        Self {
+            kind,
+            failure_kind,
+            code: None,
+        }
+    }
+
+    pub(crate) const fn invalid_settings() -> Self {
+        Self::new(
+            IggyDeliveryErrorKind::InvalidSettings,
+            FailureKind::Permanent,
+        )
+    }
+
+    pub(crate) const fn timeout() -> Self {
+        Self::new(IggyDeliveryErrorKind::Timeout, FailureKind::Transient)
+    }
+
+    /// Returns the structured failure class.
+    #[must_use]
+    pub const fn kind(self) -> IggyDeliveryErrorKind {
+        self.kind
+    }
+
+    /// Returns the numeric Iggy error code, when the failure came from an SDK or server error.
+    #[must_use]
+    pub const fn code(self) -> Option<u32> {
+        self.code
+    }
+}
+
+impl fmt::Display for IggyDeliveryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self.kind {
+            IggyDeliveryErrorKind::InvalidSettings => "Iggy delivery source settings are invalid",
+            IggyDeliveryErrorKind::Unauthorized => {
+                "Iggy server rejected the session's credentials or permissions"
+            }
+            IggyDeliveryErrorKind::NotFound => {
+                "Iggy stream, topic, consumer group, or partition not found"
+            }
+            IggyDeliveryErrorKind::Rejected => "Iggy server rejected the delivery request",
+            IggyDeliveryErrorKind::Disconnected => "Iggy client session is not connected",
+            IggyDeliveryErrorKind::Timeout => "Iggy delivery request did not complete in time",
+            IggyDeliveryErrorKind::Unavailable => {
+                "Iggy server could not complete the delivery request"
+            }
+            IggyDeliveryErrorKind::OffsetGap => {
+                "Iggy poll skipped past the partition's next expected offset"
+            }
+        })
+    }
+}
+
+impl Error for IggyDeliveryError {}
+
+impl ErrorClassifier for IggyDeliveryError {
+    fn classify(&self) -> FailureKind {
+        self.failure_kind
+    }
+}
+
+/// Classifies an SDK error into this crate's delivery failure taxonomy. This is the crate's single
+/// mapping from SDK error to [`IggyDeliveryErrorKind`]; the source and settlement paths use it
+/// after handling the outcomes that are not failures for them (an ownership fence on a poll, or
+/// a deliberately shut-down client).
+///
+/// An ownership fence (`ConsumerGroupPartitionNotOwned`) or missing membership
+/// (`ConsumerGroupMemberNotFound`) that reaches this mapping comes from an offset store, where it
+/// does not prove the SDK's own replay of the same request was not applied earlier, so both are
+/// [`IggyDeliveryErrorKind::Unavailable`] and transient rather than a conclusive ownership loss.
+impl From<IggyError> for IggyDeliveryError {
+    fn from(error: IggyError) -> Self {
+        let (kind, failure_kind) = match &error {
+            IggyError::Unauthorized
+            | IggyError::InvalidCredentials
+            | IggyError::InvalidUsername
+            | IggyError::InvalidPassword => {
+                (IggyDeliveryErrorKind::Unauthorized, FailureKind::Permanent)
+            }
+
+            IggyError::StreamIdNotFound(_)
+            | IggyError::StreamNameNotFound(_)
+            | IggyError::TopicIdNotFound(_, _)
+            | IggyError::TopicNameNotFound(_, _)
+            | IggyError::PartitionNotFound(_, _, _)
+            | IggyError::NoPartitions(_, _)
+            | IggyError::ConsumerGroupIdNotFound(_, _)
+            | IggyError::ConsumerGroupNameNotFound(_, _)
+            | IggyError::ResourceNotFound(_) => {
+                (IggyDeliveryErrorKind::NotFound, FailureKind::Permanent)
+            }
+
+            IggyError::InvalidOffset(_)
+            | IggyError::TooManyConsumerOffsets
+            | IggyError::InvalidIdentifier
+            | IggyError::InvalidConsumerGroupId
+            | IggyError::InvalidConsumerGroupName
+            | IggyError::FeatureUnavailable => {
+                (IggyDeliveryErrorKind::Rejected, FailureKind::Permanent)
+            }
+
+            // With reconnection disabled a lost session does not recover; the application builds
+            // a new client. `Unauthenticated` is how the SDK reports a session that is no longer
+            // signed in, which after the initial login means the session was lost.
+            IggyError::Disconnected
+            | IggyError::NotConnected
+            | IggyError::ClientShutdown
+            | IggyError::CannotEstablishConnection
+            | IggyError::TcpError
+            | IggyError::StaleClient
+            | IggyError::Unauthenticated => {
+                (IggyDeliveryErrorKind::Disconnected, FailureKind::Transient)
+            }
+
+            // Retryable server refusals, ownership fences on an offset store, and every error
+            // this crate does not recognize by name: never assumed permanent.
+            _ => (IggyDeliveryErrorKind::Unavailable, FailureKind::Transient),
+        };
+
+        Self {
+            kind,
+            failure_kind,
+            code: Some(error.as_code()),
+        }
+    }
+}
