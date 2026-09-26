@@ -4,7 +4,9 @@ use std::{error::Error, fmt, num::NonZeroUsize};
 
 use serde::{Deserialize, Serialize};
 use sisa_messaging::{Envelope, ErrorClassifier, FailureKind, JsonSerializer, Message};
-use sisa_messaging_consumer::{Consumer, ConsumerHandler, ConsumerSettings, SettlementMode};
+use sisa_messaging_consumer::{
+    Consumer, ConsumerError, ConsumerHandler, ConsumerSettings, SettlementMode,
+};
 use sisa_messaging_inbox::{InboxScope, InboxSettings};
 use sisa_messaging_postgres::{PostgresError, PostgresInboxStore, PostgresInboxTransaction};
 use sisa_messaging_redis::{RedisDeliverySource, RedisMapper, SourceSettings};
@@ -63,29 +65,59 @@ impl ConsumerHandler<OrderCreated, PostgresInboxTransaction> for RecordOrder {
 
 #[tokio::main]
 async fn main() {
-    if run().await.is_err() {
-        eprintln!("consumer stopped; check configuration, server availability, and operator state");
-        std::process::exit(1);
+    match run().await {
+        Ok(()) => {}
+        Err(RunError::Stage(stage)) => {
+            eprintln!("consumer failed at {stage}");
+            std::process::exit(1);
+        }
+        Err(RunError::Consumer(error)) => {
+            eprintln!("consumer stopped: {error} (kind: {:?})", error.kind());
+            std::process::exit(1);
+        }
     }
 }
 
-async fn run() -> Result<(), Box<dyn Error>> {
-    let postgres_url = std::env::var("SISA_POSTGRES_URL")?;
-    let redis_url = std::env::var("SISA_REDIS_URL")?;
-    let stream = std::env::var("SISA_REDIS_STREAM")?;
-    let group = std::env::var("SISA_REDIS_GROUP")?;
-    let consumer_name = std::env::var("SISA_REDIS_CONSUMER")?;
+enum RunError {
+    Stage(&'static str),
+    Consumer(ConsumerError),
+}
+
+async fn run() -> Result<(), RunError> {
+    let postgres_url =
+        std::env::var("SISA_POSTGRES_URL").map_err(|_| RunError::Stage("SISA_POSTGRES_URL"))?;
+
+    let redis_url =
+        std::env::var("SISA_REDIS_URL").map_err(|_| RunError::Stage("SISA_REDIS_URL"))?;
+
+    let stream =
+        std::env::var("SISA_REDIS_STREAM").map_err(|_| RunError::Stage("SISA_REDIS_STREAM"))?;
+
+    let group =
+        std::env::var("SISA_REDIS_GROUP").map_err(|_| RunError::Stage("SISA_REDIS_GROUP"))?;
+
+    let consumer_name =
+        std::env::var("SISA_REDIS_CONSUMER").map_err(|_| RunError::Stage("SISA_REDIS_CONSUMER"))?;
 
     let pool = PgPoolOptions::new()
         .max_connections(8)
         .connect(&postgres_url)
-        .await?;
+        .await
+        .map_err(|_| RunError::Stage("PostgreSQL connection"))?;
 
     let inbox = PostgresInboxStore::new(pool, InboxSettings::default());
 
-    let client = redis::Client::open(redis_url)?;
-    let read_connection = client.get_multiplexed_async_connection().await?;
-    let command_connection = client.get_multiplexed_async_connection().await?;
+    let client = redis::Client::open(redis_url).map_err(|_| RunError::Stage("Redis client"))?;
+
+    let read_connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|_| RunError::Stage("Redis read connection"))?;
+
+    let command_connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|_| RunError::Stage("Redis command connection"))?;
 
     let source = RedisDeliverySource::new(
         read_connection,
@@ -94,32 +126,35 @@ async fn run() -> Result<(), Box<dyn Error>> {
         group,
         consumer_name,
         SourceSettings::default(),
-    )?;
+    )
+    .map_err(|_| RunError::Stage("Redis source configuration"))?;
 
     let mut settings = ConsumerSettings::default();
     settings.mode = SettlementMode::PendingRecovery;
-    settings.max_in_flight = NonZeroUsize::new(4).ok_or("invalid concurrency")?;
+    settings.max_in_flight = NonZeroUsize::new(4).ok_or(RunError::Stage("consumer concurrency"))?;
 
     let consumer = Consumer::<OrderCreated, _>::new(
         source,
         RedisMapper,
         JsonSerializer,
         inbox,
-        InboxScope::new("orders-projection")?,
+        InboxScope::new("orders-projection")
+            .map_err(|_| RunError::Stage("inbox scope configuration"))?,
         RecordOrder,
         settings,
-    )?;
+    )
+    .map_err(|_| RunError::Stage("consumer configuration"))?;
 
     let cancel = CancellationToken::new();
     let run = consumer.run(cancel.clone());
     tokio::pin!(run);
 
     tokio::select! {
-        result = &mut run => { result?; }
+        result = &mut run => { result.map_err(RunError::Consumer)?; }
         signal = tokio::signal::ctrl_c() => {
-            signal?;
+            signal.map_err(|_| RunError::Stage("shutdown signal"))?;
             cancel.cancel();
-            run.await?;
+            run.await.map_err(RunError::Consumer)?;
         }
     }
 
