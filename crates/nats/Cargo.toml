@@ -1,0 +1,25 @@
+[package]
+name = "sisa-messaging-nats"
+description = "The NATS JetStream transport of Sisa Messaging"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The tests use sisa-messaging-testing, which isn't published, so a downloaded crate couldn't
+# build them.
+exclude = ["tests/"]
+keywords = ["messaging", "nats", "jetstream", "async"]
+categories = ["asynchronous", "network-programming"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The shared contracts that this crate implements.
+sisa-messaging-core = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -1,0 +1,34 @@
+[package]
+name = "sisa-messaging"
+description = "Messaging for Rust services with an optional transactional outbox and inbox: pick a transport, a database and a codec"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["messaging", "outbox", "inbox", "nats", "postgres"]
+categories = ["asynchronous", "network-programming"]
+
+[lints]
+workspace = true
+
+[features]
+# No default: an application names the transport and the persistence it uses.
+default = []
+# The NATS JetStream transport.
+nats = ["dep:sisa-messaging-nats"]
+# The PostgreSQL outbox and inbox.
+postgres = ["dep:sisa-messaging-postgres"]
+
+[dependencies]
+# One crate per part; this one only re-exports them.
+sisa-messaging-core = { workspace = true }
+sisa-messaging-nats = { workspace = true, optional = true }
+sisa-messaging-postgres = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+all-features = true
+# Marks each item a feature turns on, through `doc_cfg` in the crate root.
+rustdoc-args = ["--cfg", "docsrs"]
