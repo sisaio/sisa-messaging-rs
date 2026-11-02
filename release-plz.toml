@@ -22,4 +22,4 @@ commit_parsers = [
 name = "sisa-messaging-core"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
-changelog_include = ["sisa-messaging", "sisa-messaging-nats", "sisa-messaging-postgres"]
+changelog_include = ["sisa-messaging", "sisa-messaging-runtime", "sisa-messaging-nats", "sisa-messaging-postgres"]

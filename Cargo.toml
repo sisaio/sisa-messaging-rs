@@ -27,6 +27,7 @@ sisa-messaging = { path = "crates/sisa-messaging", version = "0.1.0" }
 sisa-messaging-core = { path = "crates/core", version = "0.1.0" }
 sisa-messaging-nats = { path = "crates/nats", version = "0.1.0" }
 sisa-messaging-postgres = { path = "crates/postgres", version = "0.1.0" }
+sisa-messaging-runtime = { path = "crates/runtime", version = "0.1.0" }
 
 # The NATS client, for core NATS and JetStream.
 async-nats = { version = "0.51.0" }

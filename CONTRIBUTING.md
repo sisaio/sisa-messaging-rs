@@ -120,7 +120,7 @@ Every issue and pull request also gets labels from these groups, so anyone can f
 
 | Group | Labels | Rule |
 | --- | --- | --- |
-| Crate | `crate: sisa-messaging`, `crate: core`, `crate: nats`, `crate: postgres`, `crate: testing`, `ci` | Every part the change touches. |
+| Crate | `crate: sisa-messaging`, `crate: core`, `crate: runtime`, `crate: nats`, `crate: postgres`, `crate: testing`, `ci` | Every part the change touches. |
 | Other | `documentation`, `needs info`, `breaking`, `good first issue`, `help wanted` | When they apply. |
 | Automated | `dependencies`, `release` | Set by Dependabot and release-plz on their PRs. |
 
@@ -193,7 +193,7 @@ What was wrong and why this fixes it, wrapped at 72 columns.
 
 - The subject is `type(scope): summary`, at most 72 characters, with no period at the end.
   Write the summary in the imperative: "add", "fix", "keep".
-- The scope is optional. Use it when the change sits in one crate: `core`, `nats`, `postgres`,
+- The scope is optional. Use it when the change sits in one crate: `core`, `runtime`, `nats`, `postgres`,
   `testing` or `facade`, or `deps` for a dependency bump.
 - Add `!` after the type or scope for a breaking change (`feat(core)!: ...`), and say how to
   migrate in the body.

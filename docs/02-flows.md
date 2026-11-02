@@ -28,11 +28,11 @@ sequenceDiagram
     participant Dispatcher
     participant Broker
     App->>DB: BEGIN, business writes
-    App->>DB: publish_in(tx): INSERT INTO outbox_messages
+    App->>DB: bus.outbox(&mut tx).publish: INSERT INTO outbox_messages
     App->>DB: COMMIT
     loop every poll interval
-        Dispatcher->>DB: claim due rows (FOR UPDATE SKIP LOCKED), move their due time by the lease, sort by sequence
-        Dispatcher->>Broker: publish each envelope, in sequence order
+        Dispatcher->>DB: claim due rows (FOR UPDATE SKIP LOCKED), move their due time by the lease, sort by id
+        Dispatcher->>Broker: publish each envelope, in id order
         Broker-->>Dispatcher: acknowledged
         Dispatcher->>DB: mark the rows dispatched
     end

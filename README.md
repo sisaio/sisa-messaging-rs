@@ -41,17 +41,17 @@ use sisa_messaging::{Bus, Message, NatsTransport, PostgresOutbox};
 struct OrderPlaced { id: u64 }
 
 impl Message for OrderPlaced {
-    const NAME: &'static str = "orders.order_placed.v1";
+    const TYPE: &'static str = "orders.order_placed.v1";
 }
 
-let bus = Bus::builder("orders", NatsTransport::connect("nats://127.0.0.1:4222", &nats).await?)
+let bus = Bus::builder("/orders", NatsTransport::connect("nats://127.0.0.1:4222", &nats).await?)
     .outbox(PostgresOutbox::new(pool.clone(), &postgres).await?)
     .start()
     .await?;
 
 let mut tx = pool.begin().await?;
 sqlx::query("insert into orders (id) values ($1)").bind(42).execute(&mut *tx).await?;
-bus.publish_in(&mut *tx, &OrderPlaced { id: 42 }).await?;
+bus.outbox(&mut tx).publish(&OrderPlaced { id: 42 }).await?;
 tx.commit().await?;
 ```
 

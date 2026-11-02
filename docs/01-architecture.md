@@ -29,15 +29,17 @@ ideas come from.
 
 | Word | Meaning |
 | --- | --- |
-| **Message** | A Rust type that implements `Message`: serde for the body, and a `NAME` such as `orders.order_placed.v1` |
-| **Message name** | Levels of `[a-z0-9_]` joined by `.`, ending with the version of the message's shape. It is valid as a NATS subject, a Kafka topic and an AMQP routing key |
-| **Envelope** | A message on its way: its id, name, content type, correlation and causation ids, time, headers, and the encoded body |
+| **Message** | A Rust type that implements `Message`: serde for its data, and a `TYPE` such as `orders.order_placed.v1` |
+| **Message type** | The CloudEvents `type`: levels of `[a-z0-9_]` joined by `.`, ending with the version of the message's shape. It is valid as a NATS subject, a Kafka topic and an AMQP routing key, so it is the default destination |
+| **Envelope** | A message on its way, as a CloudEvent: its id, type, source, time, content type, partition key, correlation, trace context, other extensions, and the encoded data |
 | **Codec** | Turns a message into bytes and back, and names the content type, such as `application/json` |
 | **Transport** | Moves envelopes: publishes them to the broker and delivers them to endpoints |
 | **Endpoint** | A named, durable subscription, such as `billing`. Every instance of a service shares its endpoint (competing consumers), and each endpoint gets its own copy of every message it subscribes to (fan-out) |
 | **Handler** | Application code that handles one message type on one endpoint |
-| **Bus** | What the application holds: it publishes, and it runs the endpoints and their handlers |
-| **Outbox** | The `outbox_messages` table in the application's database. A publish inside a transaction writes a row there, and the **dispatcher** publishes the row after the commit and marks it dispatched |
+| **Bus** | What the application holds: it publishes, and it runs the endpoints, their handlers and the workers |
+| **Publisher** | The trait with `publish`. The bus publishes straight to the broker, the outbox publisher writes a row in the caller's transaction, and a handler's context does what its endpoint is set up for |
+| **Store** | A persistence's side of the outbox, the inbox or the partitions: only the SQL. The runtime holds the logic around it |
+| **Outbox** | The `outbox_messages` table in the application's database. `bus.outbox(&mut tx).publish(..)` writes a row there in the caller's transaction, and the **dispatcher** publishes the row after the commit and marks it dispatched |
 | **Inbox** | The `inbox_receipts` table: a receipt per `(endpoint, message id)` handled, written in the handler's transaction, so a redelivery is acknowledged without running the handler again |
 | **Partition** | One time range of a table, a day by default. Both tables are partitioned, so old data leaves by whole partitions, never by `DELETE` |
 | **Retention** | How long a partition is kept before it is detached (kept as a table of its own, for archiving) or dropped. Off by default: outbox and inbox rows are business data |
@@ -46,23 +48,29 @@ ideas come from.
 
 ```mermaid
 flowchart TD
-    facade[sisa-messaging] --> nats[sisa-messaging-nats]
+    facade[sisa-messaging] --> runtime[sisa-messaging-runtime]
+    facade --> nats[sisa-messaging-nats]
     facade --> postgres[sisa-messaging-postgres]
-    nats --> core[sisa-messaging-core]
+    runtime --> core[sisa-messaging-core]
+    nats --> core
     postgres --> core
 ```
 
 | Crate | Published | Main types | What it holds |
 | --- | --- | --- | --- |
-| `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only; features `nats` and `postgres` pick the parts, none by default |
-| `sisa-messaging-core` | Yes | `Message`, `Envelope`, `MessageId`, `Codec`, `JsonCodec`, `Transport`, `Delivery`, `Outbox`, `Inbox`, `Bus`, `Handler` | The contracts every part implements, the JSON codec, the bus with its receive pipeline and retry policy, and an in-memory transport for tests |
-| `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings` | JetStream: a stream per bus, a durable pull consumer per endpoint |
-| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresSettings` | The tables and their migration, writes in the caller's transaction, the dispatcher's claims, and the worker that creates partitions ahead and applies the retention |
+| `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only, no code of its own; features `nats` and `postgres` pick the parts, none by default |
+| `sisa-messaging-core` | Yes | `Message`, `Envelope`, `MessageId`, `MessageType`, `Codec`, `JsonCodec`, `TransportPublisher`, `TransportSubscriber`, `Delivery`, `OutboxStore`, `InboxStore`, `PartitionStore`, `Publisher` | Contracts only, and the JSON codec. No runtime, no SQL, no broker client, so adapter crates build fast |
+| `sisa-messaging-runtime` | Yes | `Bus`, `OutboxPublisher`, `HandlerContext`, `Handler`, `RetryPolicy`, `InMemoryTransport` | The engine, the same for every transport and database: the bus, the receive pipeline with the inbox step, the dispatcher, the partition maintenance scheduler, retries, and an in-memory transport for tests |
+| `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings` | Both transport halves on JetStream: a stream per bus, a durable pull consumer per endpoint |
+| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresSettings` | The three stores: the tables and their migration, the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL |
 | `sisa-messaging-testing` | No | `Nats`, `Postgres`, `eventually` | A NATS and a PostgreSQL container per test, and a wait-until helper |
 
 Later crates follow the same shape: `-kafka` (Kafka, Redpanda, WarpStream), `-amqp` (RabbitMQ,
-LavinMQ), `-iggy`, `-mysql`, `-mssql`, `-msgpack`, `-avro`. JSON stays in core: serde is a bound
-on every message anyway, and the first milestone needs no other codec.
+LavinMQ), `-iggy`, `-mysql`, `-mssql`, `-msgpack`, `-avro`. A database crate implements the store
+traits and nothing else, so MySQL and SQL Server add only their SQL: the claim (`FOR UPDATE SKIP
+LOCKED`, or `READPAST` with `UPDLOCK`), the partition DDL and the lock differ in every dialect,
+and SQL Server uses tiberius rather than sqlx, so there is no shared SQL crate. JSON stays in
+core: serde is a bound on every message anyway.
 
 ## The contracts
 
@@ -72,22 +80,41 @@ Sketches, to show where each responsibility sits. The code settles the exact sig
 
 ```rust,ignore
 pub trait Message: Serialize + DeserializeOwned + Send + Sync + 'static {
-    /// Such as `orders.order_placed.v1`.
-    const NAME: &'static str;
+    /// The CloudEvents `type`, such as `orders.order_placed.v1`.
+    const TYPE: &'static str;
 }
 
 pub struct Envelope {
-    pub id: MessageId,                 // UUID version 7, so ids sort by creation time
-    pub name: MessageName,             // the `Message::NAME`
-    pub source: String,                // the publishing service, such as `orders`
-    pub time: Timestamp,
-    pub content_type: String,          // from the codec
-    pub correlation_id: Option<MessageId>,
-    pub causation_id: Option<MessageId>, // the message being handled when this one was published
-    pub headers: Headers,              // anything else, `traceparent` included
-    pub body: Bytes,
+    pub id: MessageId,                  // ce-id: UUID version 7, so ids sort by creation time
+    pub message_type: MessageType,      // ce-type: the `Message::TYPE`
+    pub source: Source,                 // ce-source: the publishing service, such as `/orders`
+    pub time: Timestamp,                // ce-time
+    pub subject: Option<String>,        // ce-subject: what the message is about, such as an order id
+    pub content_type: ContentType,      // ce-datacontenttype: from the codec
+    pub data_schema: Option<String>,    // ce-dataschema: for Avro later
+    pub partition_key: Option<String>,  // ce-partitionkey: messages with one key keep their order
+    pub correlation: Correlation,       // ce-correlationid, ce-causationid
+    pub trace: Option<TraceContext>,    // ce-traceparent, ce-tracestate (W3C)
+    pub extensions: Extensions,         // any other ce- attribute, kept as it came
+    pub data: Bytes,
+}
+
+pub struct Correlation {
+    pub correlation_id: Option<MessageId>,  // ties a conversation together
+    pub causation_id: Option<MessageId>,    // the message being handled when this one was published
+}
+
+pub struct TraceContext {
+    pub traceparent: String,
+    pub tracestate: Option<String>,  // passed on unchanged, as W3C Trace Context requires
 }
 ```
+
+The fields are grouped in Rust and flat on the wire, where each CloudEvents binding wants one
+header per attribute. Correlation and trace are typed fields, not extensions, because the runtime
+sets and carries them: a handler's publishes get the handled message as their causation, its
+correlation id, and the handler's span as their trace parent. `extensions` holds what the
+runtime doesn't interpret.
 
 ### Codec
 
@@ -104,14 +131,19 @@ type, so a service can move to another codec while old messages drain.
 
 ### Transport
 
+Two halves, so the dispatcher and a publish-only service need only the first. `NatsTransport`
+implements both.
+
 ```rust,ignore
-pub trait Transport: Send + Sync + 'static {
+pub trait TransportPublisher: Send + Sync + 'static {
     /// Returns once the broker has the envelope: a JetStream publish acknowledgement, a Kafka
     /// produce acknowledgement, a RabbitMQ publisher confirm.
     async fn publish(&self, envelope: &Envelope) -> Result<(), TransportError>;
+}
 
+pub trait TransportSubscriber: Send + Sync + 'static {
     /// Creates the endpoint's durable subscription if needed, and streams its deliveries.
-    async fn receive(&self, endpoint: &EndpointSpec) -> Result<Deliveries, TransportError>;
+    async fn subscribe(&self, endpoint: &EndpointSpec) -> Result<Deliveries, TransportError>;
 }
 
 pub trait Delivery: Send {
@@ -123,66 +155,101 @@ pub trait Delivery: Send {
 }
 ```
 
-### Outbox and inbox
+### Stores
 
-The write side runs on the application's own connection or transaction, whose type depends on the
-database, so each trait names it:
+A database crate implements three narrow traits. Everything around them (when to claim, how long
+the lease is, the backoff, when to give up, when to create and expire partitions) is in the
+runtime, once for every database.
 
 ```rust,ignore
-pub trait Outbox: Send + Sync + 'static {
-    type Connection: ?Sized;                 // `sqlx::PgConnection` for PostgreSQL
+pub trait OutboxStore: Send + Sync + 'static {
+    type Connection: ?Sized;  // sqlx::PgConnection; sqlx::MySqlConnection; a tiberius client
 
-    async fn enqueue(&self, connection: &mut Self::Connection, envelopes: &[Envelope]) -> Result<()>;
+    /// Writes the rows on the caller's connection, inside the caller's transaction.
+    async fn insert(&self, connection: &mut Self::Connection, envelopes: &[Envelope]) -> Result<()>;
 
-    // The dispatcher's side, on the outbox's own pool.
+    // The dispatcher's side, on the store's own pool.
     async fn claim(&self, limit: usize, lease: Duration) -> Result<Vec<OutboxRecord>>;
-    async fn complete(&self, records: &[OutboxRecord]) -> Result<()>;   // marks them dispatched
-    async fn fail(&self, record: &OutboxRecord, error: &str, retry_at: Option<Timestamp>) -> Result<()>;
+    async fn mark_dispatched(&self, records: &[OutboxRecord]) -> Result<()>;
+    async fn mark_retry(&self, record: &OutboxRecord, error: &str, at: Timestamp) -> Result<()>;
+    async fn mark_failed(&self, record: &OutboxRecord, error: &str) -> Result<()>;
 }
 
-pub trait Inbox: Send + Sync + 'static {
-    type Connection: ?Sized;
+pub trait InboxStore: Send + Sync + 'static {
+    type Transaction: Send;
 
-    /// Writes the receipt for the endpoint; false when one was written before.
-    async fn receive(&self, connection: &mut Self::Connection, endpoint: &str, envelope: &Envelope) -> Result<bool>;
+    async fn begin(&self) -> Result<Self::Transaction>;
+    /// Writes the receipt; false when the endpoint recorded this message before.
+    async fn record(&self, tx: &mut Self::Transaction, endpoint: &str, envelope: &Envelope) -> Result<bool>;
+    async fn commit(&self, tx: Self::Transaction) -> Result<()>;
+}
+
+pub trait PartitionStore: Send + Sync + 'static {
+    async fn try_lock(&self) -> Result<Option<PartitionLock>>;  // one instance at a time
+    async fn ensure_partitions(&self, from: Date, count: u32) -> Result<()>;
+    async fn expirable(&self, older_than: Date) -> Result<Vec<PartitionInfo>>;  // with pending and failed counts
+    async fn expire(&self, partition: &PartitionInfo, mode: Expiry) -> Result<()>;
 }
 ```
 
-A persistence crate also opens the transaction a transactional endpoint runs its handler in, and
-runs the maintenance worker that creates partitions ahead and applies the retention.
+### Bus, publishers and handlers
 
-### Bus and handlers
+One trait publishes, whatever the mode:
 
 ```rust,ignore
-let bus = Bus::builder("orders", NatsTransport::connect(nats_url, settings).await?)
-    .outbox(PostgresOutbox::new(pool.clone(), &pg_settings).await?) // optional
+pub trait Publisher {
+    async fn publish<Msg: Message>(&mut self, message: &Msg) -> Result<()>;
+}
+```
+
+Three types implement it, and the code that owns the transaction picks one:
+
+| Publisher | Where it sends | When to use it |
+| --- | --- | --- |
+| `Bus` | Straight to the broker; returns when the broker has it | Outside a database transaction: before it begins or after it commits |
+| `OutboxPublisher`, from `bus.outbox(&mut tx)` | A row in `outbox_messages`, in the caller's transaction; the dispatcher sends it after the commit | Inside the caller's transaction, so the message goes out if and only if it commits |
+| `HandlerContext` | As the endpoint is set up: a row in the handler's transaction with the outbox, otherwise held and sent after the handler succeeds | Inside a handler |
+
+```rust,ignore
+type AppBus = Bus<NatsTransport, PostgresOutbox>;
+
+let bus: AppBus = Bus::builder("/orders", NatsTransport::connect(nats_url, &nats).await?)
+    .outbox(PostgresOutbox::new(pool.clone(), &postgres).await?) // optional; changes the type
     .endpoint("billing", |endpoint| {
-        endpoint.inbox(PostgresInbox::new(pool.clone(), &pg_settings)) // optional
+        endpoint.inbox(PostgresInbox::new(pool.clone(), &postgres)) // optional
             .handle::<OrderPlaced>(charge_order)
     })
     .start()
     .await?;
 
-// Plain: straight to the broker.
+// Direct, outside a transaction.
 bus.publish(&OrderPlaced { id }).await?;
 
-// With the outbox: a row in the application's transaction, published after the commit.
+// Through the outbox: the application opens and commits its own transaction, as usual.
 let mut tx = pool.begin().await?;
 sqlx::query("insert into orders ...").execute(&mut *tx).await?;
-bus.publish_in(&mut *tx, &OrderPlaced { id }).await?;
+bus.outbox(&mut tx).publish(&OrderPlaced { id }).await?;
 tx.commit().await?;
+
+// Domain code doesn't care which one it gets.
+async fn place_order(publisher: &mut impl Publisher, order: Order) -> Result<()> { .. }
 ```
 
-A handler gets the message and a context. The context publishes with the handled message as the
-causation and its correlation id carried over, and, on a transactional endpoint, hands out the
-transaction.
+The bus carries its outbox in its type. `outbox` exists only on a bus built with one, and
+accepts only that store's connection type, so a missing outbox or a transaction from another
+database is a compile error, never a silent direct send. `bus.outbox(&mut tx)` borrows the
+transaction only for the call, so the application keeps using `tx` between publishes.
+
+A handler gets the message and a `HandlerContext`. The context publishes with the handled message
+as the causation and its correlation id carried over, and, on a transactional endpoint, hands out
+the transaction.
 
 ## How each mode behaves
 
 | Mode | A publish from application code | A publish from a handler | A redelivered message |
 | --- | --- | --- | --- |
 | Plain | Goes to the broker; returns when the broker has it | Held until the handler returns `Ok`, then sent before the ack | Handled again: the handler must be idempotent |
-| Outbox | `publish_in(tx)` writes a row; the dispatcher publishes it after the commit. `publish` still goes straight to the broker | On a transactional endpoint, a row in the handler's transaction; otherwise as in plain mode | Handled again |
+| Outbox | `bus.outbox(&mut tx).publish` writes a row; the dispatcher publishes it after the commit. `bus.publish` still goes straight to the broker | On a transactional endpoint, a row in the handler's transaction; otherwise as in plain mode | Handled again |
 | Outbox and inbox | As above | A row in the handler's transaction | The inbox row exists, so the delivery is acked and the handler doesn't run |
 
 The inbox needs a transactional endpoint, since its row has to commit with the handler's work. It
@@ -210,8 +277,9 @@ For each delivery, an endpoint:
 
 ### Dispatching the outbox
 
-The dispatcher is a worker the bus starts when it has an outbox. Each round it claims a batch of
-due rows, publishes them in sequence order, waiting for the broker each time, and marks them
+The dispatcher is a runtime worker the bus starts when it has an outbox; a store only claims and
+marks rows. Each round it claims a batch of due rows, publishes them in id order (UUID version 7,
+so creation order), waiting for the broker each time, and marks them
 `dispatched` with the time. A row that fails is put back with a later due time and its error; past
 the last attempt it is marked `failed` and left for a person to look at; setting it back to
 `pending` sends it again. Claiming moves the due
@@ -229,7 +297,8 @@ sent and handled. Both tables are range-partitioned by time, one partition per d
 - **The inbox** is partitioned by `message_time`, the envelope's own `time`, not by when the
   receipt was written. A redelivery carries the same envelope, so its receipt falls in the same
   partition and the primary key catches it, however many days later it comes.
-- **Maintenance** is a worker the bus starts with a PostgreSQL outbox or inbox. Once an hour, with
+- **Maintenance** is a runtime worker the bus starts with an outbox or inbox store; the store
+  only runs the DDL. Once an hour, with
   one instance at a time through an advisory lock, it creates the partitions for the next 7
   intervals and applies the retention. `partitions = "external"` turns it off for teams that use
   pg_partman or their own jobs.
@@ -257,13 +326,21 @@ consumers that don't know CloudEvents still read a plain body.
 | --- | --- | --- |
 | `specversion` | Yes | `1.0` |
 | `id` | Yes | The message id, a UUID version 7 |
-| `source` | Yes | The publishing service, such as `orders` |
-| `type` | Yes | The message name, such as `orders.order_placed.v1` |
+| `source` | Yes | A URI reference naming the publishing service, set once per bus, such as `/orders` |
+| `type` | Yes | The message type, such as `orders.order_placed.v1` |
 | `time` | Yes | When it was published, RFC 3339 |
 | `datacontenttype` | Yes | The codec's content type, such as `application/json` |
-| `correlationid` | No | The id that ties a conversation together |
-| `causationid` | No | The id of the message whose handler published this one |
-| `traceparent`, `tracestate` | No | W3C trace context, per the CloudEvents distributed tracing extension |
+| `subject` | No | What the message is about within the source, such as an order id |
+| `dataschema` | No | The schema's URI, for Avro and other schema codecs |
+| `partitionkey` | No | Messages with one key keep their order; the CloudEvents Partitioning extension. The Kafka message key; a NATS subject token later |
+| `traceparent`, `tracestate` | No | W3C Trace Context, per the CloudEvents Distributed Tracing extension |
+| `correlationid` | No | Our extension: the id that ties a conversation together |
+| `causationid` | No | Our extension: the id of the message whose handler published this one |
+| `errorendpoint`, `errortype`, `errormessage`, `errorattempts` | Error destination only | Our extensions: where and why handling gave up |
+
+Our extension names follow the CloudEvents rules (lowercase letters and digits, at most 20
+characters), so other CloudEvents SDKs carry them. A receiver also accepts structured mode
+(`application/cloudevents+json`), so producers in other languages can use either mode.
 
 Each transport names the headers as its CloudEvents binding says:
 
@@ -280,7 +357,7 @@ publish inside the stream's duplicate window.
 
 | Thing | Name | Example |
 | --- | --- | --- |
-| Subject | `{prefix}.{message name}` | `sisa.orders.order_placed.v1` |
+| Subject | `{prefix}.{message type}` | `sisa.orders.order_placed.v1` |
 | Stream | One per prefix, capturing `{prefix}.>` | `SISA`, on `sisa.>` |
 | Durable consumer | The endpoint name, filtered on the subjects of the messages it handles | `billing` |
 | Error subject | `{prefix}._error.{endpoint}` | `sisa._error.billing` |
@@ -289,42 +366,46 @@ The prefix keeps deployments that share a server apart, such as `prod` and `stag
 
 ### PostgreSQL tables
 
-In a schema of their own, `sisa_messaging` by default, created by `migrate`. The sequence is a
-plain `bigint` with its own sequence object, since PostgreSQL before 17 has no identity columns on
-partitioned tables, and a primary key there must hold the partition key.
+In a schema of their own, `sisa_messaging` by default, created by `migrate`. Columns that hold
+a CloudEvents attribute take its name. A primary key on a partitioned table must hold the
+partition key, so each one starts with it.
 
 ```sql
-CREATE SEQUENCE sisa_messaging.outbox_messages_sequence;
-
 CREATE TABLE sisa_messaging.outbox_messages (
-    sequence      bigint      NOT NULL DEFAULT nextval('sisa_messaging.outbox_messages_sequence'),
-    created_at    timestamptz NOT NULL DEFAULT now(),
-    message_id    uuid        NOT NULL,
-    message_type  text        NOT NULL,              -- the message name, which picks the destination
-    headers       jsonb       NOT NULL,              -- every attribute but the body
-    body          bytea       NOT NULL,
-    status        text        NOT NULL DEFAULT 'pending', -- pending, dispatched or failed
-    available_at  timestamptz NOT NULL DEFAULT now(),     -- due time, moved forward by a claim
-    attempts      integer     NOT NULL DEFAULT 0,
-    last_error    text,
-    dispatched_at timestamptz,
-    PRIMARY KEY (created_at, sequence)
+    id                uuid        NOT NULL,              -- the message id, UUID v7: claim order
+    created_at        timestamptz NOT NULL DEFAULT now(), -- the partition key
+    type              text        NOT NULL,              -- the message type, which picks the destination
+    source            text        NOT NULL,
+    subject           text,
+    partition_key     text,
+    data_content_type text        NOT NULL,
+    data_schema       text,
+    attributes        jsonb       NOT NULL,              -- time, correlation, trace, extensions
+    data              bytea       NOT NULL,
+    status            text        NOT NULL DEFAULT 'pending', -- pending, dispatched or failed
+    available_at      timestamptz NOT NULL DEFAULT now(),     -- due time, moved forward by a claim
+    attempts          integer     NOT NULL DEFAULT 0,
+    last_error        text,
+    dispatched_at     timestamptz,
+    PRIMARY KEY (created_at, id)
 ) PARTITION BY RANGE (created_at);
-CREATE INDEX outbox_messages_due ON sisa_messaging.outbox_messages (available_at, sequence)
+CREATE INDEX outbox_messages_due ON sisa_messaging.outbox_messages (available_at, id)
     WHERE status = 'pending';
-CREATE INDEX outbox_messages_message_id ON sisa_messaging.outbox_messages (message_id);
+CREATE INDEX outbox_messages_id ON sisa_messaging.outbox_messages (id);
 
 CREATE TABLE sisa_messaging.inbox_receipts (
+    id             uuid        NOT NULL,                 -- the receipt's own id, UUID v7
+    message_time   timestamptz NOT NULL,                 -- the envelope's time: the partition key
     endpoint       text        NOT NULL,
     message_id     uuid        NOT NULL,
-    message_time   timestamptz NOT NULL,             -- the envelope's time: the partition key
-    message_type   text        NOT NULL,
+    type           text        NOT NULL,
     source         text        NOT NULL,
     correlation_id uuid,
-    headers        jsonb       NOT NULL,
-    body           bytea,                            -- kept only with `keep_body = true`
+    attributes     jsonb       NOT NULL,
+    data           bytea,                                -- kept only with `keep_data = true`
     received_at    timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (endpoint, message_id, message_time)
+    PRIMARY KEY (message_time, id),
+    UNIQUE (endpoint, message_id, message_time)          -- the deduplication
 ) PARTITION BY RANGE (message_time);
 
 -- One per interval, made by `migrate` and then by the maintenance worker:
@@ -335,6 +416,10 @@ CREATE TABLE sisa_messaging.outbox_messages_default PARTITION OF sisa_messaging.
 CREATE TABLE sisa_messaging.schema_version (version integer NOT NULL);
 ```
 
+The outbox orders by `id` instead of a sequence column: a UUID version 7 starts with its
+millisecond, and one process makes them in order inside a millisecond. Rows from two instances in
+the same millisecond may swap, which the guarantees already allow.
+
 A claim is one statement. The partial index holds only pending rows, so old partitions cost the
 claim next to nothing. `RETURNING` has no order of its own, so the outer query sorts the claimed
 rows:
@@ -343,16 +428,16 @@ rows:
 WITH claimed AS (
     UPDATE sisa_messaging.outbox_messages
     SET available_at = now() + $2, attempts = attempts + 1
-    WHERE (created_at, sequence) IN (
-        SELECT created_at, sequence FROM sisa_messaging.outbox_messages
+    WHERE (created_at, id) IN (
+        SELECT created_at, id FROM sisa_messaging.outbox_messages
         WHERE status = 'pending' AND available_at <= now()
-        ORDER BY sequence
+        ORDER BY id
         LIMIT $1
         FOR UPDATE SKIP LOCKED
     )
     RETURNING *
 )
-SELECT * FROM claimed ORDER BY sequence;
+SELECT * FROM claimed ORDER BY id;
 ```
 
 A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplicate.
@@ -362,12 +447,12 @@ A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplic
 | | |
 | --- | --- |
 | **Guaranteed** | A `publish` that returns `Ok` is in the broker. |
-| **Guaranteed** | With the outbox, a `publish_in` whose transaction commits is published after the commit, or, when every attempt fails, kept as a `failed` row until someone sends it again; one whose transaction rolls back is never published. |
+| **Guaranteed** | With the outbox, a publish through `bus.outbox(&mut tx)` whose transaction commits is published after the commit, or, when every attempt fails, kept as a `failed` row until someone sends it again; one whose transaction rolls back is never published. |
 | **Guaranteed** | A delivery is acked only after its handler succeeded and, on a transactional endpoint, its transaction committed. |
 | **Guaranteed** | With the inbox, a handler's transaction commits at most once per endpoint and message id, while the inbox row is kept. |
 | **Not guaranteed** | A handler's publishes with the inbox and no outbox: they are sent after the commit, so a process that stops in between loses them, and the inbox skips the redelivery. |
 | **Not guaranteed** | Exactly-once delivery. Every mode is at least once: a handler without the inbox can see a message twice, and anything it does outside the transaction can happen twice even with it. |
-| **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Ordering by a partition key is on the [roadmap](../ROADMAP.md). |
+| **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Envelopes carry a `partitionkey` from the start; keeping order per key is on the [roadmap](../ROADMAP.md). |
 | **Not guaranteed** | A message redelivered after its receipt's partition expired is handled again. Keep the inbox retention longer than the longest redelivery. |
 | **Not guaranteed** | Deduplication of a message whose `time` was changed between deliveries: the receipt's partition comes from it. Publishers never change it; a hand-made republish must keep it. |
 
@@ -378,7 +463,7 @@ proposal.
 
 | Decision | Why |
 | --- | --- |
-| CloudEvents 1.0 binary mode is the envelope | One documented format that NATS, Kafka and AMQP each have a binding for, so other languages and tools read our messages without a library of ours |
+| CloudEvents 1.0 binary mode is the envelope, with the standard tracing and partitioning extensions and our own `correlationid` and `causationid` | One documented format that NATS, Kafka and AMQP each have a binding for, so other languages and tools read our messages without a library of ours |
 | Message ids are UUID version 7, made by the publisher | Ids stay stable across outbox retries and broker redeliveries, which the inbox and broker deduplication need; v7 sorts by time, which keeps the inbox index compact |
 | The outbox is written on the caller's connection, never on a connection of its own | Only the caller's transaction makes the row commit or roll back with the business data |
 | Outbox and inbox rows are never deleted one by one; whole partitions expire, and only when a retention is set | The rows are business data. Expiring a partition is one cheap statement that leaves no bloat, where deleting rows needs vacuum and slows the claim |
@@ -387,6 +472,11 @@ proposal.
 | The tables live in their own schema, created by our own `migrate` with a version table, not sqlx's migrator | sqlx's `_sqlx_migrations` table belongs to the application, and two migrators in one table refuse each other's rows. The SQL is also published for teams that run migrations themselves |
 | NATS uses JetStream, not core NATS | Core NATS has no acknowledgement or redelivery, so it can't be at least once |
 | Transports, persistences and codecs are open traits | Users asked to bring their own; sealing them would rule that out. Their docs say which changes a minor release may make |
+| The engine lives in `sisa-messaging-runtime`; database crates implement only store traits; the facade has no code | The dispatcher, the inbox step and partition maintenance would otherwise be copied into every database crate, where only the SQL differs |
+| One `Publisher` trait; the outbox publisher borrows the caller's transaction, and exists only on a bus built with an outbox | One signature for domain code, while the guarantee stays visible where the transaction lives and a missing outbox fails to compile instead of silently sending direct |
+| The transport is two traits, publish and subscribe | The dispatcher and publish-only services need only the publish half |
+| The message's routing name is its CloudEvents `type` | One word from the Rust trait to the wire to the table |
+| The outbox orders by its UUID v7 id; no sequence column | Ids already sort by creation, one column fewer, and MySQL and SQL Server need no identity column on a partitioned table |
 | JSON lives in core | Every message is serde already; other codecs get crates of their own |
 | The minimum Rust is 1.94 | sqlx 0.9 needs it |
 

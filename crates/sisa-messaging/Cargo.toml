@@ -25,6 +25,7 @@ postgres = ["dep:sisa-messaging-postgres"]
 [dependencies]
 # One crate per part; this one only re-exports them.
 sisa-messaging-core = { workspace = true }
+sisa-messaging-runtime = { workspace = true }
 sisa-messaging-nats = { workspace = true, optional = true }
 sisa-messaging-postgres = { workspace = true, optional = true }
 

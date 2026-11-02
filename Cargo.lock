@@ -9,6 +9,7 @@ dependencies = [
  "sisa-messaging-core",
  "sisa-messaging-nats",
  "sisa-messaging-postgres",
+ "sisa-messaging-runtime",
 ]
 
 [[package]]
@@ -24,6 +25,13 @@ dependencies = [
 
 [[package]]
 name = "sisa-messaging-postgres"
+version = "0.1.0"
+dependencies = [
+ "sisa-messaging-core",
+]
+
+[[package]]
+name = "sisa-messaging-runtime"
 version = "0.1.0"
 dependencies = [
  "sisa-messaging-core",

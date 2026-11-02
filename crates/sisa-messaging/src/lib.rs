@@ -8,7 +8,7 @@
 //! | `nats` | The NATS JetStream transport |
 //! | `postgres` | The PostgreSQL outbox and inbox, on sqlx |
 //!
-//! Each part is also its own crate (`sisa-messaging-core`, `-nats`, `-postgres`), for an
+//! Each part is also its own crate (`sisa-messaging-core`, `-runtime`, `-nats`, `-postgres`), for an
 //! application that wants only one.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
