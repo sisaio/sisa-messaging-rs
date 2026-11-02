@@ -233,7 +233,7 @@ jobs:
           tool: lychee
 
       - name: Check the links
-        run: lychee --offline --include-fragments --no-progress --exclude-path target './**/*.md'
+        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path target --exclude-path .git './**/*.md'
 
   # The oldest and newest supported servers, paired, rather than every combination: the transport
   # and the database don't depend on each other's version.
