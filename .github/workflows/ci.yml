@@ -63,7 +63,7 @@ jobs:
             .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           done
           printf '%s\n' "$TITLE" > "$RUNNER_TEMP/message"
-          .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
+          SUBJECT_ONLY=1 .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           exit "$status"
 
   lint:

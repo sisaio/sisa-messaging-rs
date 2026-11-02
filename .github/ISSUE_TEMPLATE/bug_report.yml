@@ -17,6 +17,7 @@ body:
         - sisa-messaging-runtime
         - sisa-messaging-nats
         - sisa-messaging-postgres
+        - sisa-messaging-testing
         - Not sure
     validations:
       required: true
