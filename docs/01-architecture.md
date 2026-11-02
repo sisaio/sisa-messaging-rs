@@ -37,8 +37,10 @@ ideas come from.
 | **Endpoint** | A named, durable subscription, such as `billing`. Every instance of a service shares its endpoint (competing consumers), and each endpoint gets its own copy of every message it subscribes to (fan-out) |
 | **Handler** | Application code that handles one message type on one endpoint |
 | **Bus** | What the application holds: it publishes, and it runs the endpoints and their handlers |
-| **Outbox** | A table in the application's database. A publish inside a transaction writes a row there, and the **dispatcher** publishes the row after the commit |
-| **Inbox** | A table that records each `(endpoint, message id)` handled, in the handler's transaction, so a redelivery is acknowledged without running the handler again |
+| **Outbox** | The `outbox_messages` table in the application's database. A publish inside a transaction writes a row there, and the **dispatcher** publishes the row after the commit and marks it dispatched |
+| **Inbox** | The `inbox_receipts` table: a receipt per `(endpoint, message id)` handled, written in the handler's transaction, so a redelivery is acknowledged without running the handler again |
+| **Partition** | One time range of a table, a day by default. Both tables are partitioned, so old data leaves by whole partitions, never by `DELETE` |
+| **Retention** | How long a partition is kept before it is detached (kept as a table of its own, for archiving) or dropped. Off by default: outbox and inbox rows are business data |
 
 ## Crates
 
@@ -55,7 +57,7 @@ flowchart TD
 | `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only; features `nats` and `postgres` pick the parts, none by default |
 | `sisa-messaging-core` | Yes | `Message`, `Envelope`, `MessageId`, `Codec`, `JsonCodec`, `Transport`, `Delivery`, `Outbox`, `Inbox`, `Bus`, `Handler` | The contracts every part implements, the JSON codec, the bus with its receive pipeline and retry policy, and an in-memory transport for tests |
 | `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings` | JetStream: a stream per bus, a durable pull consumer per endpoint |
-| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresSettings` | The tables and their migration, writes in the caller's transaction, the dispatcher's claims, the inbox's purge |
+| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresSettings` | The tables and their migration, writes in the caller's transaction, the dispatcher's claims, and the worker that creates partitions ahead and applies the retention |
 | `sisa-messaging-testing` | No | `Nats`, `Postgres`, `eventually` | A NATS and a PostgreSQL container per test, and a wait-until helper |
 
 Later crates follow the same shape: `-kafka` (Kafka, Redpanda, WarpStream), `-amqp` (RabbitMQ,
@@ -134,20 +136,20 @@ pub trait Outbox: Send + Sync + 'static {
 
     // The dispatcher's side, on the outbox's own pool.
     async fn claim(&self, limit: usize, lease: Duration) -> Result<Vec<OutboxRecord>>;
-    async fn complete(&self, records: &[OutboxRecord]) -> Result<()>;
-    async fn fail(&self, record: &OutboxRecord, error: &str, retry_at: Timestamp) -> Result<()>;
+    async fn complete(&self, records: &[OutboxRecord]) -> Result<()>;   // marks them dispatched
+    async fn fail(&self, record: &OutboxRecord, error: &str, retry_at: Option<Timestamp>) -> Result<()>;
 }
 
 pub trait Inbox: Send + Sync + 'static {
     type Connection: ?Sized;
 
-    /// Records the message for the endpoint; false when it was recorded before.
-    async fn record(&self, connection: &mut Self::Connection, endpoint: &str, id: MessageId) -> Result<bool>;
-    async fn purge(&self, older_than: Timestamp) -> Result<u64>;
+    /// Writes the receipt for the endpoint; false when one was written before.
+    async fn receive(&self, connection: &mut Self::Connection, endpoint: &str, envelope: &Envelope) -> Result<bool>;
 }
 ```
 
-A persistence crate also opens the transaction a transactional endpoint runs its handler in.
+A persistence crate also opens the transaction a transactional endpoint runs its handler in, and
+runs the maintenance worker that creates partitions ahead and applies the retention.
 
 ### Bus and handlers
 
@@ -204,12 +206,35 @@ For each delivery, an endpoint:
 ### Dispatching the outbox
 
 The dispatcher is a worker the bus starts when it has an outbox. Each round it claims a batch of
-due rows, publishes them in sequence order, waiting for the broker each time, and deletes them.
-A row that fails is put back with a later due time and its error. Claiming moves the due time
-forward by a lease, so the rows of a dispatcher that dies come back once the lease runs out, and
-several instances claim different rows. The envelope keeps its id in the outbox, so a row
-published twice (a crash between the publish and the delete) reaches the broker with the same id:
+due rows, publishes them in sequence order, waiting for the broker each time, and marks them
+`dispatched` with the time. A row that fails is put back with a later due time and its error; past
+the last attempt it is marked `failed` and left for a person to look at. Claiming moves the due
+time forward by a lease, so the rows of a dispatcher that dies come back once the lease runs out,
+and several instances claim different rows. The envelope keeps its id in the outbox, so a row
+published twice (a crash between the publish and the mark) reaches the broker with the same id:
 JetStream drops it inside its duplicate window, and an inbox drops it after.
+
+### Partitions and retention
+
+Rows are never deleted one by one: the outbox and inbox are the application's record of what it
+sent and handled. Both tables are range-partitioned by time, one partition per day by default.
+
+- **The outbox** is partitioned by `created_at`, when the row was written.
+- **The inbox** is partitioned by `message_time`, the envelope's own `time`, not by when the
+  receipt was written. A redelivery carries the same envelope, so its receipt falls in the same
+  partition and the primary key catches it, however many days later it comes.
+- **Maintenance** is a worker the bus starts with a PostgreSQL outbox or inbox. Once an hour, with
+  one instance at a time through an advisory lock, it creates the partitions for the next 7
+  intervals and applies the retention. `partitions = "external"` turns it off for teams that use
+  pg_partman or their own jobs.
+- **Retention** is off by default. When set, such as `retention_days = 90`, a partition older than
+  that is detached, which keeps it as an ordinary table for archiving, or dropped with
+  `on_expiry = "drop"`. An outbox partition that still holds `pending` rows is never expired; the
+  worker warns instead. Keep the inbox retention longer than the longest redelivery, or a very
+  late redelivery is handled again.
+- **A default partition** catches a row whose time has no partition yet, such as a message from a
+  publisher with a clock far off. The worker warns while it holds rows, since PostgreSQL can't
+  create a partition over rows already sitting in the default one.
 
 ## Data formats
 
@@ -258,40 +283,61 @@ The prefix keeps deployments that share a server apart, such as `prod` and `stag
 
 ### PostgreSQL tables
 
-In a schema of their own, `sisa_messaging` by default, created by `migrate`:
+In a schema of their own, `sisa_messaging` by default, created by `migrate`. The sequence is a
+plain `bigint` with its own sequence object, since PostgreSQL before 17 has no identity columns on
+partitioned tables, and a primary key there must hold the partition key.
 
 ```sql
-CREATE TABLE sisa_messaging.outbox (
-    sequence     bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    message_id   uuid        NOT NULL,
-    destination  text        NOT NULL,             -- the message name
-    headers      jsonb       NOT NULL,             -- every attribute but the body
-    body         bytea       NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    available_at timestamptz NOT NULL DEFAULT now(), -- due time, moved forward by a claim
-    attempts     integer     NOT NULL DEFAULT 0,
-    last_error   text
-);
-CREATE INDEX outbox_due ON sisa_messaging.outbox (available_at, sequence);
+CREATE SEQUENCE sisa_messaging.outbox_messages_sequence;
 
-CREATE TABLE sisa_messaging.inbox (
-    endpoint    text        NOT NULL,
-    message_id  uuid        NOT NULL,
-    received_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (endpoint, message_id)
-);
-CREATE INDEX inbox_received_at ON sisa_messaging.inbox (received_at);
+CREATE TABLE sisa_messaging.outbox_messages (
+    sequence      bigint      NOT NULL DEFAULT nextval('sisa_messaging.outbox_messages_sequence'),
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    message_id    uuid        NOT NULL,
+    message_type  text        NOT NULL,              -- the message name, which picks the destination
+    headers       jsonb       NOT NULL,              -- every attribute but the body
+    body          bytea       NOT NULL,
+    status        text        NOT NULL DEFAULT 'pending', -- pending, dispatched or failed
+    available_at  timestamptz NOT NULL DEFAULT now(),     -- due time, moved forward by a claim
+    attempts      integer     NOT NULL DEFAULT 0,
+    last_error    text,
+    dispatched_at timestamptz,
+    PRIMARY KEY (created_at, sequence)
+) PARTITION BY RANGE (created_at);
+CREATE INDEX outbox_messages_due ON sisa_messaging.outbox_messages (available_at, sequence)
+    WHERE status = 'pending';
+CREATE INDEX outbox_messages_message_id ON sisa_messaging.outbox_messages (message_id);
+
+CREATE TABLE sisa_messaging.inbox_receipts (
+    endpoint       text        NOT NULL,
+    message_id     uuid        NOT NULL,
+    message_time   timestamptz NOT NULL,             -- the envelope's time: the partition key
+    message_type   text        NOT NULL,
+    source         text        NOT NULL,
+    correlation_id uuid,
+    headers        jsonb       NOT NULL,
+    body           bytea,                            -- kept only with `keep_body = true`
+    received_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (endpoint, message_id, message_time)
+) PARTITION BY RANGE (message_time);
+
+-- One per interval, made by `migrate` and then by the maintenance worker:
+CREATE TABLE sisa_messaging.outbox_messages_p20261102 PARTITION OF sisa_messaging.outbox_messages
+    FOR VALUES FROM ('2026-11-02') TO ('2026-11-03');
+CREATE TABLE sisa_messaging.outbox_messages_default PARTITION OF sisa_messaging.outbox_messages DEFAULT;
 
 CREATE TABLE sisa_messaging.schema_version (version integer NOT NULL);
 ```
 
-A claim is one statement:
+A claim is one statement. The partial index holds only pending rows, so old partitions cost the
+claim next to nothing:
 
 ```sql
-UPDATE sisa_messaging.outbox SET available_at = now() + $2, attempts = attempts + 1
-WHERE sequence IN (
-    SELECT sequence FROM sisa_messaging.outbox
-    WHERE available_at <= now()
+UPDATE sisa_messaging.outbox_messages
+SET available_at = now() + $2, attempts = attempts + 1
+WHERE (created_at, sequence) IN (
+    SELECT created_at, sequence FROM sisa_messaging.outbox_messages
+    WHERE status = 'pending' AND available_at <= now()
     ORDER BY sequence
     LIMIT $1
     FOR UPDATE SKIP LOCKED
@@ -299,7 +345,7 @@ WHERE sequence IN (
 RETURNING *;
 ```
 
-An inbox write is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplicate.
+A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplicate.
 
 ## Guarantees and limits
 
@@ -311,7 +357,8 @@ An inbox write is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a d
 | **Guaranteed** | With the inbox, a handler's transaction commits at most once per endpoint and message id, while the inbox row is kept. |
 | **Not guaranteed** | Exactly-once delivery. Every mode is at least once: a handler without the inbox can see a message twice, and anything it does outside the transaction can happen twice even with it. |
 | **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Ordering by a partition key is on the [roadmap](../ROADMAP.md). |
-| **Not guaranteed** | A message redelivered after its inbox row was purged is handled again. Keep the inbox retention longer than the longest redelivery. |
+| **Not guaranteed** | A message redelivered after its receipt's partition expired is handled again. Keep the inbox retention longer than the longest redelivery. |
+| **Not guaranteed** | Deduplication of a message whose `time` was changed between deliveries: the receipt's partition comes from it. Publishers never change it; a hand-made republish must keep it. |
 
 ## Decisions
 
@@ -323,7 +370,9 @@ proposal.
 | CloudEvents 1.0 binary mode is the envelope | One documented format that NATS, Kafka and AMQP each have a binding for, so other languages and tools read our messages without a library of ours |
 | Message ids are UUID version 7, made by the publisher | Ids stay stable across outbox retries and broker redeliveries, which the inbox and broker deduplication need; v7 sorts by time, which keeps the inbox index compact |
 | The outbox is written on the caller's connection, never on a connection of its own | Only the caller's transaction makes the row commit or roll back with the business data |
-| Dispatched outbox rows are deleted, not kept | The table stays small and the claim stays fast; tracing shows what was sent |
+| Outbox and inbox rows are never deleted one by one; whole partitions expire, and only when a retention is set | The rows are business data. Expiring a partition is one cheap statement that leaves no bloat, where deleting rows needs vacuum and slows the claim |
+| The inbox is partitioned by the envelope's `time`, not by when the receipt was written | A primary key on a partitioned table only holds inside one partition, so a redelivery must land in the same partition as its first receipt |
+| An expired partition is detached by default, dropped only when asked | Detaching keeps the data as a table to archive or query; dropping it is the step nobody can undo |
 | The tables live in their own schema, created by our own `migrate` with a version table, not sqlx's migrator | sqlx's `_sqlx_migrations` table belongs to the application, and two migrators in one table refuse each other's rows. The SQL is also published for teams that run migrations themselves |
 | NATS uses JetStream, not core NATS | Core NATS has no acknowledgement or redelivery, so it can't be at least once |
 | Transports, persistences and codecs are open traits | Users asked to bring their own; sealing them would rule that out. Their docs say which changes a minor release may make |
@@ -338,5 +387,7 @@ proposal.
   commit, and the dispatcher's claim commits before it publishes.
 - The outbox and inbox SQL always names the configured schema.
 - Only the clock module reads the wall clock.
-- A bus starts each of its workers once (the dispatcher, the inbox purge, one receive loop per
-  endpoint), and stops them when it shuts down or its last clone drops.
+- No code deletes outbox or inbox rows; data leaves only by expiring a partition, and an outbox
+  partition with pending rows never expires.
+- A bus starts each of its workers once (the dispatcher, the partition maintenance, one receive
+  loop per endpoint), and stops them when it shuts down or its last clone drops.

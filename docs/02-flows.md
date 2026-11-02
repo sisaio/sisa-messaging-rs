@@ -28,18 +28,18 @@ sequenceDiagram
     participant Dispatcher
     participant Broker
     App->>DB: BEGIN, business writes
-    App->>DB: publish_in(tx): INSERT INTO outbox
+    App->>DB: publish_in(tx): INSERT INTO outbox_messages
     App->>DB: COMMIT
     loop every poll interval
         Dispatcher->>DB: claim due rows (FOR UPDATE SKIP LOCKED), move their due time by the lease
         Dispatcher->>Broker: publish each envelope, in sequence order
         Broker-->>Dispatcher: acknowledged
-        Dispatcher->>DB: DELETE the published rows
+        Dispatcher->>DB: mark the rows dispatched
     end
 ```
 
 A rollback removes the outbox row with the business writes, so nothing is published. A dispatcher
-that crashes after publishing and before deleting leaves rows that come back when the lease runs
+that crashes after publishing and before marking leaves rows that come back when the lease runs
 out; they are published again with the same message id.
 
 ## Receiving on a transactional endpoint with the inbox
@@ -53,7 +53,7 @@ sequenceDiagram
     Broker->>Endpoint: delivery
     Endpoint->>Endpoint: decode the body
     Endpoint->>DB: BEGIN
-    Endpoint->>DB: INSERT INTO inbox ON CONFLICT DO NOTHING
+    Endpoint->>DB: INSERT INTO inbox_receipts ON CONFLICT DO NOTHING
     alt recorded before
         Endpoint->>DB: COMMIT
         Endpoint->>Broker: ack
@@ -61,7 +61,7 @@ sequenceDiagram
         Endpoint->>Handler: handle(message, context with tx)
         Handler->>DB: business writes
         Handler-->>Endpoint: Ok, with publishes
-        Endpoint->>DB: INSERT INTO outbox (the publishes)
+        Endpoint->>DB: INSERT INTO outbox_messages (the publishes)
         Endpoint->>DB: COMMIT
         Endpoint->>Broker: ack
     end
@@ -79,4 +79,19 @@ flowchart TD
     rollback --> attempts{Attempts left?}
     attempts -->|yes| retry([Retry after the policy's delay])
     attempts -->|no| error
+```
+
+## Partition maintenance
+
+```mermaid
+flowchart TD
+    tick([Every hour]) --> lock{Advisory lock taken?}
+    lock -->|no, another instance runs it| done([Wait for the next tick])
+    lock -->|yes| ahead[Create the partitions for the next 7 intervals]
+    ahead --> retention{Retention set?}
+    retention -->|no| done
+    retention -->|yes| each[Each partition older than the retention]
+    each --> pending{Outbox partition with pending rows?}
+    pending -->|yes| warn[Skip it and warn] --> done
+    pending -->|no| expire[Detach it, or drop it with on_expiry = drop] --> done
 ```
