@@ -31,7 +31,7 @@ sequenceDiagram
     App->>DB: publish_in(tx): INSERT INTO outbox_messages
     App->>DB: COMMIT
     loop every poll interval
-        Dispatcher->>DB: claim due rows (FOR UPDATE SKIP LOCKED), move their due time by the lease
+        Dispatcher->>DB: claim due rows (FOR UPDATE SKIP LOCKED), move their due time by the lease, sort by sequence
         Dispatcher->>Broker: publish each envelope, in sequence order
         Broker-->>Dispatcher: acknowledged
         Dispatcher->>DB: mark the rows dispatched
@@ -72,7 +72,9 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     delivery([Delivery]) --> decode{Body decodes?}
-    decode -->|no| error[Publish to the error destination] --> reject([Reject])
+    decode -->|no| error[Publish to the error destination]
+    error -->|published| reject([Reject])
+    error -->|failed| retry
     decode -->|yes| handle[Run the handler]
     handle -->|Ok| commit[Commit, then ack]
     handle -->|Err| rollback[Roll back]
@@ -91,7 +93,7 @@ flowchart TD
     ahead --> retention{Retention set?}
     retention -->|no| done
     retention -->|yes| each[Each partition older than the retention]
-    each --> pending{Outbox partition with pending rows?}
+    each --> pending{Outbox partition with pending or failed rows?}
     pending -->|yes| warn[Skip it and warn] --> done
     pending -->|no| expire[Detach it, or drop it with on_expiry = drop] --> done
 ```

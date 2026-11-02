@@ -186,7 +186,10 @@ transaction.
 | Outbox and inbox | As above | A row in the handler's transaction | The inbox row exists, so the delivery is acked and the handler doesn't run |
 
 The inbox needs a transactional endpoint, since its row has to commit with the handler's work. It
-works without the outbox too: the handler's publishes are then sent after the commit.
+works without the outbox too: the handler's publishes are then sent after the commit, which leaves
+a gap. A process that stops after the commit and before the send loses them, and the inbox
+acks the redelivery without running the handler again. Use the outbox with the inbox when those
+publishes matter.
 
 ### Receiving
 
@@ -201,14 +204,17 @@ For each delivery, an endpoint:
    held publishes, then acks.
 5. On an error, rolls back and asks the transport to retry after the retry policy's delay. Past
    the policy's last attempt, it publishes the envelope to the endpoint's error destination with
-   the error in its headers, then rejects the delivery.
+   the error in its headers, then rejects the delivery. If that publish fails, the delivery is
+   retried after the policy's delay instead of rejected, so a message is never dropped without a
+   copy in the error destination.
 
 ### Dispatching the outbox
 
 The dispatcher is a worker the bus starts when it has an outbox. Each round it claims a batch of
 due rows, publishes them in sequence order, waiting for the broker each time, and marks them
 `dispatched` with the time. A row that fails is put back with a later due time and its error; past
-the last attempt it is marked `failed` and left for a person to look at. Claiming moves the due
+the last attempt it is marked `failed` and left for a person to look at; setting it back to
+`pending` sends it again. Claiming moves the due
 time forward by a lease, so the rows of a dispatcher that dies come back once the lease runs out,
 and several instances claim different rows. The envelope keeps its id in the outbox, so a row
 published twice (a crash between the publish and the mark) reaches the broker with the same id:
@@ -229,8 +235,8 @@ sent and handled. Both tables are range-partitioned by time, one partition per d
   pg_partman or their own jobs.
 - **Retention** is off by default. When set, such as `retention_days = 90`, a partition older than
   that is detached, which keeps it as an ordinary table for archiving, or dropped with
-  `on_expiry = "drop"`. An outbox partition that still holds `pending` rows is never expired; the
-  worker warns instead. Keep the inbox retention longer than the longest redelivery, or a very
+  `on_expiry = "drop"`. An outbox partition that still holds `pending` or `failed` rows is never
+  expired; the worker warns instead. Keep the inbox retention longer than the longest redelivery, or a very
   late redelivery is handled again.
 - **A default partition** catches a row whose time has no partition yet, such as a message from a
   publisher with a clock far off. The worker warns while it holds rows, since PostgreSQL can't
@@ -330,19 +336,23 @@ CREATE TABLE sisa_messaging.schema_version (version integer NOT NULL);
 ```
 
 A claim is one statement. The partial index holds only pending rows, so old partitions cost the
-claim next to nothing:
+claim next to nothing. `RETURNING` has no order of its own, so the outer query sorts the claimed
+rows:
 
 ```sql
-UPDATE sisa_messaging.outbox_messages
-SET available_at = now() + $2, attempts = attempts + 1
-WHERE (created_at, sequence) IN (
-    SELECT created_at, sequence FROM sisa_messaging.outbox_messages
-    WHERE status = 'pending' AND available_at <= now()
-    ORDER BY sequence
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
+WITH claimed AS (
+    UPDATE sisa_messaging.outbox_messages
+    SET available_at = now() + $2, attempts = attempts + 1
+    WHERE (created_at, sequence) IN (
+        SELECT created_at, sequence FROM sisa_messaging.outbox_messages
+        WHERE status = 'pending' AND available_at <= now()
+        ORDER BY sequence
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
 )
-RETURNING *;
+SELECT * FROM claimed ORDER BY sequence;
 ```
 
 A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplicate.
@@ -352,9 +362,10 @@ A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplic
 | | |
 | --- | --- |
 | **Guaranteed** | A `publish` that returns `Ok` is in the broker. |
-| **Guaranteed** | With the outbox, a `publish_in` whose transaction commits is published, after the commit; one whose transaction rolls back is never published. |
+| **Guaranteed** | With the outbox, a `publish_in` whose transaction commits is published after the commit, or, when every attempt fails, kept as a `failed` row until someone sends it again; one whose transaction rolls back is never published. |
 | **Guaranteed** | A delivery is acked only after its handler succeeded and, on a transactional endpoint, its transaction committed. |
 | **Guaranteed** | With the inbox, a handler's transaction commits at most once per endpoint and message id, while the inbox row is kept. |
+| **Not guaranteed** | A handler's publishes with the inbox and no outbox: they are sent after the commit, so a process that stops in between loses them, and the inbox skips the redelivery. |
 | **Not guaranteed** | Exactly-once delivery. Every mode is at least once: a handler without the inbox can see a message twice, and anything it does outside the transaction can happen twice even with it. |
 | **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Ordering by a partition key is on the [roadmap](../ROADMAP.md). |
 | **Not guaranteed** | A message redelivered after its receipt's partition expired is handled again. Keep the inbox retention longer than the longest redelivery. |
@@ -388,6 +399,6 @@ proposal.
 - The outbox and inbox SQL always names the configured schema.
 - Only the clock module reads the wall clock.
 - No code deletes outbox or inbox rows; data leaves only by expiring a partition, and an outbox
-  partition with pending rows never expires.
+  partition with pending or failed rows never expires.
 - A bus starts each of its workers once (the dispatcher, the partition maintenance, one receive
   loop per endpoint), and stops them when it shuts down or its last clone drops.
