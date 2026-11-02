@@ -55,4 +55,6 @@ through a retry topic. This is the main reason the core contract talks about `re
 - **Request and response**: needs reply addresses on every transport; later, if users ask.
 - **Scheduled messages**: the outbox's `available_at` makes it cheap later.
 - **Storing incoming messages before handling them** (Wolverine's durable inbox): the broker
-  already holds them until the ack, so recording the id is enough for deduplication.
+  already holds them until the ack, so recording the id is enough for deduplication. That holds
+  only while the broker keeps them: a stream or topic with an age or size limit drops unacked
+  messages too, so its retention must outlast the longest consumer outage.

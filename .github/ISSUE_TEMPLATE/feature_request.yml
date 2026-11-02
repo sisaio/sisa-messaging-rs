@@ -18,6 +18,7 @@ body:
         - sisa-messaging-runtime
         - sisa-messaging-nats
         - sisa-messaging-postgres
+        - sisa-messaging-testing
         - A new crate
         - Not sure
     validations:

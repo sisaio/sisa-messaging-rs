@@ -28,8 +28,8 @@ reviews:
       instructions: >-
         The PR breaks what CONTRIBUTING.md's "What the public API is" lists: it removes or
         changes a public item that isn't `#[doc(hidden)]`, a settings field name or default, a
-        metric or span name or attribute, the wire format (headers and body) or the outbox and
-        inbox tables, or moves to an async-nats or sqlx release that breaks its API. A new item,
+        metric or span name or attribute, the wire format (headers and data), the subject, stream
+        and consumer names, or the outbox and inbox tables, or moves to an async-nats or sqlx release that breaks its API. A new item,
         setting or error variant isn't breaking. A commit subject with `!` always is.
 
   # The generated changelog and the lock file aren't reviewed.

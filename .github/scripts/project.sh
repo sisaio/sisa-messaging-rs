@@ -56,7 +56,7 @@ milestones=(
 )
 # Existing milestones keep their number, issues and state; the description and due date are
 # updated. Closing a milestone after its release is left to the maintainer.
-existing=$(gh api "repos/$REPO/milestones?state=all&per_page=100" --jq '.[] | "\(.title)|\(.number)"')
+existing=$(gh api --paginate "repos/$REPO/milestones?state=all&per_page=100" --jq '.[] | "\(.title)|\(.number)"')
 for line in "${milestones[@]}"; do
   IFS='|' read -r title due description <<<"$line"
   args=(-f description="$description")
@@ -72,12 +72,14 @@ for line in "${milestones[@]}"; do
 done
 
 # --- Project board --------------------------------------------------------------------------------
-number=$(gh project list --owner "$OWNER" --format json --jq ".projects[] | select(.title == \"$TITLE\") | .number")
+number=$(gh project list --owner "$OWNER" --limit 1000 --format json --jq ".projects[] | select(.title == \"$TITLE\") | .number")
 if [ -z "$number" ]; then
   number=$(gh project create --owner "$OWNER" --title "$TITLE" --format json --jq .number)
   echo "project $TITLE created"
 fi
-gh project link "$number" --owner "$OWNER" --repo "${REPO#*/}" 2>/dev/null || true
+# Linking again fails once linked, so a failure only warns.
+gh project link "$number" --owner "$OWNER" --repo "${REPO#*/}" >/dev/null 2>&1 ||
+  echo "warning: could not link project $TITLE to $REPO; check it under the repository's Projects tab" >&2
 
 # The short description and the README come from project-readme.md, next to this script.
 gh project edit "$number" --owner "$OWNER" \
@@ -160,9 +162,13 @@ priority=$(field Priority)
 start=$(field "Start date")
 target=$(field "Target date")
 
-views=$(gh api graphql -f owner="$OWNER" -F number="$number" -f query='
-query($owner: String!, $number: Int!) {
-  organization(login: $owner) { projectV2(number: $number) { views(first: 50) { nodes { name } } } }
+views=$(gh api graphql --paginate -f owner="$OWNER" -F number="$number" -f query='
+query($owner: String!, $number: Int!, $endCursor: String) {
+  organization(login: $owner) {
+    projectV2(number: $number) {
+      views(first: 100, after: $endCursor) { nodes { name } pageInfo { hasNextPage endCursor } }
+    }
+  }
 }' --jq '.data.organization.projectV2.views.nodes[].name')
 
 # name, then the jq program that builds the request body from the field ids.
