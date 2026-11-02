@@ -14,6 +14,8 @@ reviews:
   labeling_instructions:
     - label: "crate: core"
       instructions: The PR changes crates/core.
+    - label: "crate: runtime"
+      instructions: The PR changes crates/runtime.
     - label: "crate: nats"
       instructions: The PR changes crates/nats.
     - label: "crate: postgres"

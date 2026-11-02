@@ -18,9 +18,10 @@ TITLE=sisa-messaging
 labels=(
   "documentation|0075ca|Docs only: doc comments, docs/, README."
   "crate: sisa-messaging|1d76db|sisa-messaging: the facade crate, its features and re-exports."
-  "crate: core|1d76db|sisa-messaging-core: envelope, codecs, the bus, and the transport, outbox and inbox contracts."
+  "crate: core|1d76db|sisa-messaging-core: the contracts: envelope, codecs, transport and store traits."
+  "crate: runtime|1d76db|sisa-messaging-runtime: the bus, receive pipeline, dispatcher and partition maintenance."
   "crate: nats|1d76db|sisa-messaging-nats: the NATS JetStream transport."
-  "crate: postgres|1d76db|sisa-messaging-postgres: the PostgreSQL outbox and inbox."
+  "crate: postgres|1d76db|sisa-messaging-postgres: the PostgreSQL outbox, inbox and partition stores."
   "crate: testing|1d76db|sisa-messaging-testing: the shared test helpers and containers."
   "ci|5319e7|Workflows, release, benchmarks and tooling."
   "needs info|fbca04|Waiting on the reporter for details or a reproduction."

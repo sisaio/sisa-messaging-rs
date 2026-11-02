@@ -1,5 +1,6 @@
-//! The shared parts of Sisa Messaging: messages and their envelope, codecs, and the contracts that
-//! transports, outboxes and inboxes implement.
+//! The contracts of Sisa Messaging: messages and their CloudEvents envelope, codecs, and the traits
+//! that transports and database stores implement. No runtime lives here; that is
+//! `sisa-messaging-runtime`.
 //!
 //! Applications depend on `sisa-messaging`, which re-exports this crate's types, or on this crate
 //! and the transport and persistence crates they use. The types land with the first milestone.
