@@ -7,6 +7,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # `edited` re-runs the title check after a title change.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -190,12 +192,29 @@ jobs:
         with:
           tool: cargo-semver-checks
 
-      # The facade with every feature, so it re-exports every store crate's API.
+      # The facade with every feature, so it re-exports every store crate's API. Only the
+      # publishable crates the base already has: a new crate has no API to break yet.
       - name: Check the public API
         if: steps.label.outputs.breaking != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
-        run: cargo semver-checks --workspace --all-features --baseline-rev "$BASE"
+        run: |
+          if ! git cat-file -e "$BASE:Cargo.toml" 2>/dev/null; then
+            echo "The base has no workspace yet; nothing to compare."
+            exit 0
+          fi
+          packages=()
+          while IFS=$'\t' read -r name manifest; do
+            if git cat-file -e "$BASE:${manifest#"$GITHUB_WORKSPACE/"}" 2>/dev/null; then
+              packages+=(--package "$name")
+            fi
+          done < <(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.publish != []) | [.name, .manifest_path] | @tsv')
+          if [ ${#packages[@]} -eq 0 ]; then
+            echo "No publishable crate exists in the base yet; nothing to compare."
+            exit 0
+          fi
+          cargo semver-checks "${packages[@]}" --all-features --baseline-rev "$BASE"
 
   # Relative links and #anchors in the Markdown files. External links stay out, since they flake;
   # rustdoc checks the links in doc comments.
