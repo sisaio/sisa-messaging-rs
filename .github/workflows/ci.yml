@@ -65,7 +65,7 @@ jobs:
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           api=false
-          if git diff --name-only "$BASE...$HEAD" | grep -qE \
+          if git diff --no-renames --name-only "$BASE...$HEAD" | grep -qE \
             '^crates/(core|runtime|nats|postgres|sisa-messaging)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
             api=true
           fi
