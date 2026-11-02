@@ -21,8 +21,8 @@ body:
     attributes:
       label: Acceptance criteria
       description: What must be true to close this task, one checkbox each.
-      value: |
-        - [ ] 
+      placeholder: |
+        - [ ] The dispatcher marks a published row dispatched
     validations:
       required: true
   - type: textarea
