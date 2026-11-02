@@ -1,6 +1,7 @@
 # sisa-messaging-rs
 
 [![CI](https://github.com/sisaio/sisa-messaging-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sisaio/sisa-messaging-rs/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sisaio/sisa-messaging-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/sisaio/sisa-messaging-rs)
 [![MSRV](https://img.shields.io/badge/MSRV-1.94-blue)](https://github.com/sisaio/sisa-messaging-rs/blob/main/Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sisaio/sisa-messaging-rs/blob/main/LICENSE)
 
