@@ -370,6 +370,23 @@ In a schema of their own, `sisa_messaging` by default, created by `migrate`. Col
 a CloudEvents attribute take its name. A primary key on a partitioned table must hold the
 partition key, so each one starts with it.
 
+Every constraint and index is named in the SQL, never left to PostgreSQL or a tool to generate,
+so the names stay the same across versions and the next migration can refer to them. A name is a
+two-letter prefix and the table, then the columns or purpose, within PostgreSQL's 63 characters:
+
+| Prefix | Object | Example |
+| --- | --- | --- |
+| `pk_` | Primary key | `pk_outbox_messages` |
+| `uq_` | Unique constraint | `uq_inbox_receipts_endpoint_message` |
+| `fk_` | Foreign key | none yet |
+| `ck_` | Check constraint | `ck_outbox_messages_status` |
+| `ix_` | Index | `ix_outbox_messages_due` |
+
+Constraints go inside `CREATE TABLE`. PostgreSQL has no inline index syntax, so an index that
+isn't backing a constraint, such as the partial one for the claim, is a `CREATE INDEX` right after
+its table. A partition's own copies of these get names PostgreSQL derives from the partition
+table; nothing refers to them.
+
 ```sql
 CREATE TABLE sisa_messaging.outbox_messages (
     id                uuid        NOT NULL,              -- the message id, UUID v7: claim order
@@ -382,16 +399,17 @@ CREATE TABLE sisa_messaging.outbox_messages (
     data_schema       text,
     attributes        jsonb       NOT NULL,              -- time, correlation, trace, extensions
     data              bytea       NOT NULL,
-    status            text        NOT NULL DEFAULT 'pending', -- pending, dispatched or failed
+    status            text        NOT NULL DEFAULT 'pending',
     available_at      timestamptz NOT NULL DEFAULT now(),     -- due time, moved forward by a claim
     attempts          integer     NOT NULL DEFAULT 0,
     last_error        text,
     dispatched_at     timestamptz,
-    PRIMARY KEY (created_at, id)
+    CONSTRAINT pk_outbox_messages PRIMARY KEY (created_at, id),
+    CONSTRAINT ck_outbox_messages_status CHECK (status IN ('pending', 'dispatched', 'failed'))
 ) PARTITION BY RANGE (created_at);
-CREATE INDEX outbox_messages_due ON sisa_messaging.outbox_messages (available_at, id)
+CREATE INDEX ix_outbox_messages_due ON sisa_messaging.outbox_messages (available_at, id)
     WHERE status = 'pending';
-CREATE INDEX outbox_messages_id ON sisa_messaging.outbox_messages (id);
+CREATE INDEX ix_outbox_messages_id ON sisa_messaging.outbox_messages (id);
 
 CREATE TABLE sisa_messaging.inbox_receipts (
     id             uuid        NOT NULL,                 -- the receipt's own id, UUID v7
@@ -404,8 +422,9 @@ CREATE TABLE sisa_messaging.inbox_receipts (
     attributes     jsonb       NOT NULL,
     data           bytea,                                -- kept only with `keep_data = true`
     received_at    timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (message_time, id),
-    UNIQUE (endpoint, message_id, message_time)          -- the deduplication
+    CONSTRAINT pk_inbox_receipts PRIMARY KEY (message_time, id),
+    CONSTRAINT uq_inbox_receipts_endpoint_message        -- the deduplication
+        UNIQUE (endpoint, message_id, message_time)
 ) PARTITION BY RANGE (message_time);
 
 -- One per interval, made by `migrate` and then by the maintenance worker:
@@ -413,7 +432,10 @@ CREATE TABLE sisa_messaging.outbox_messages_p20261102 PARTITION OF sisa_messagin
     FOR VALUES FROM ('2026-11-02') TO ('2026-11-03');
 CREATE TABLE sisa_messaging.outbox_messages_default PARTITION OF sisa_messaging.outbox_messages DEFAULT;
 
-CREATE TABLE sisa_messaging.schema_version (version integer NOT NULL);
+CREATE TABLE sisa_messaging.schema_version (
+    version integer NOT NULL,
+    CONSTRAINT pk_schema_version PRIMARY KEY (version)
+);
 ```
 
 The outbox orders by `id` instead of a sequence column: a UUID version 7 starts with its
