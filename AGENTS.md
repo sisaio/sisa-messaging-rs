@@ -41,6 +41,8 @@ exit codes rather than piped output. The NATS and PostgreSQL tests need Docker.
 - Keep code minimal, readable, and working; the smallest change that does the job wins.
 - A delivery is acked only after its work is durable, and an outbox row is written only on the
   caller's connection. Don't add a path around either.
+- Name every constraint and index in SQL, with a two-letter prefix: `pk_`, `uq_`, `fk_`, `ck_`,
+  `ix_` (docs/01-architecture.md#postgresql-tables). Constraints go inside `CREATE TABLE`.
 - The maintainer picks public names. Use given names exactly, and propose new ones instead of
   inventing them.
 - Don't add dependencies to the library crates without asking. Each transport, persistence and
