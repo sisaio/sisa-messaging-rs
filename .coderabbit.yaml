@@ -1,0 +1,98 @@
+# CodeRabbit's review settings. Keys left out keep their defaults:
+# https://docs.coderabbit.ai/reference/configuration
+language: en-US
+
+reviews:
+  profile: chill
+  # Short walkthroughs: one maintainer reviews, so no reviewer suggestions, and no poem.
+  poem: false
+  suggested_reviewers: false
+  # Suggest labels, never apply them: a PR carries its crate labels and, when it breaks the public
+  # API or a data format, `breaking`, which the semver check reads.
+  suggested_labels: true
+  auto_apply_labels: false
+  labeling_instructions:
+    - label: "crate: core"
+      instructions: The PR changes crates/core.
+    - label: "crate: nats"
+      instructions: The PR changes crates/nats.
+    - label: "crate: postgres"
+      instructions: The PR changes crates/postgres.
+    - label: "crate: testing"
+      instructions: The PR changes crates/testing.
+    - label: "crate: sisa-messaging"
+      instructions: The PR changes crates/sisa-messaging, the facade crate.
+    - label: breaking
+      instructions: >-
+        The PR breaks what CONTRIBUTING.md's "What the public API is" lists: it removes or
+        changes a public item that isn't `#[doc(hidden)]`, a settings field name or default, a
+        metric or span name or attribute, the wire format (headers and body) or the outbox and
+        inbox tables, or moves to an async-nats or sqlx release that breaks its API. A new item,
+        setting or error variant isn't breaking. A commit subject with `!` always is.
+
+  # The generated changelog and the lock file aren't reviewed.
+  path_filters:
+    - "!CHANGELOG.md"
+    - "!Cargo.lock"
+
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: >-
+        Check the rules in docs/01-architecture.md: a message is acknowledged only after its
+        handler's work is committed; an outbox row is written in the caller's transaction, never
+        in one of its own; only the clock module reads the wall clock; no new dependency in a
+        library crate. Look for a lock held across `.await`, a transaction held across a
+        transport call, a delivery acknowledged on an error path, an error dropped without a log,
+        and SQL that names a table without its configured schema. Don't ask for doc comments on
+        private items.
+    - path: "docs/**/*.md"
+      instructions: >-
+        Diagrams are Mermaid, and tables beat long lists. Every relative link and `#anchor` must
+        resolve. A change to the headers, the body or the outbox and inbox tables must update
+        Data formats in docs/01-architecture.md.
+    - path: ".github/workflows/*.yml"
+      instructions: >-
+        Every action is pinned to a full commit SHA with its version in a comment. Workflow names
+        are Title Case; job names stay lowercase, since the `main` ruleset requires checks by job
+        name.
+
+  pre_merge_checks:
+    # rustdoc's `missing_docs` lint covers public items; this check also counts private helpers.
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits as CONTRIBUTING.md says: `type(scope): summary`, at most 72
+        characters, no period at the end, the summary in the imperative. The type is one of feat,
+        fix, perf, refactor, docs, test, build, ci, chore or revert. The scope is optional: core,
+        nats, postgres, testing, facade or deps. A breaking change adds `!` after the type or scope.
+
+  # Commits on a PR come from its author only, so CodeRabbit doesn't write docstrings or tests.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+
+  tools:
+    # CI runs clippy with `-D warnings`.
+    clippy:
+      enabled: false
+    # Its 80-column rule fights the docs' 100 columns.
+    markdownlint:
+      enabled: false
+
+chat:
+  art: false
+
+knowledge_base:
+  code_guidelines:
+    # Read beside AGENTS.md, which CodeRabbit finds by itself, so settled decisions aren't raised
+    # again. A plain path applies to its own folder, so the two below name every file.
+    filePatterns:
+      - CONTRIBUTING.md
+      - files: .agents/skills/review-changes/SKILL.md
+        applyTo: "**"
+      - files: docs/01-architecture.md
+        applyTo: "**"

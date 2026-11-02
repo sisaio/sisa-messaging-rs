@@ -1,0 +1,310 @@
+# Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
+# links, the tests, which run against two NATS and PostgreSQL pairs, and coverage on main. The
+# tests start their servers in Docker. PRs that change no Rust inputs
+# skip the Rust jobs; `ci` sums them up for the ruleset.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # Whether the Rust jobs need to run (always on main), and the commit check every PR needs.
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    env:
+      BASE: ${{ github.event.pull_request.base.sha }}
+      HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The whole history, so both checks can read the PR's commits.
+          fetch-depth: 0
+
+      - name: Look for code changes
+        id: diff
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
+      # checked on the next push. Dependabot's titles run long, so its PRs are left out.
+      - name: Check commit messages
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          status=0
+          for sha in $(git rev-list "$BASE..$HEAD"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/message"
+            .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
+          done
+          printf '%s\n' "$TITLE" > "$RUNNER_TEMP/message"
+          .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
+          exit "$status"
+
+  lint:
+    name: lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      # Restores ~/.cargo and target/ from main's last run. Only main saves, so PRs don't fill the
+      # cache quota. The other jobs below do the same.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run Clippy with every feature
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      # Alone, so the workspace's other members don't turn its features on.
+      - name: Build the facade with each feature
+        run: |
+          for features in "" nats postgres; do
+            cargo check -p sisa-messaging --features "$features" --locked
+          done
+
+      # docs.rs builds every published crate with every feature; a broken link fails here instead.
+      - name: Build the docs
+        run: cargo doc --workspace --no-deps --all-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  msrv:
+    name: msrv
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The workspace `rust-version`.
+      - name: Install the MSRV toolchain
+        run: rustup toolchain install 1.94 --profile minimal
+
+      # Keyed on the MSRV compiler; the default from rust-toolchain.toml isn't installed here.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        env:
+          RUSTUP_TOOLCHAIN: "1.94"
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build at the MSRV
+        run: cargo +1.94 check --workspace --all-targets --all-features --locked
+
+  deny:
+    name: deny
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Advisories, licenses, bans and sources, as deny.toml sets them.
+      - name: Check the dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  # A change that breaks a published crate's API, against the PR's base, fails unless the PR
+  # carries the `breaking` label. The base rather than crates.io, so that a break already merged
+  # for the next release doesn't fail every later PR. The label is read when the job runs, so after
+  # adding it, re-run the job.
+  semver:
+    name: semver
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Look for the breaking label
+        id: label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          breaking=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels \
+            --jq 'any(.labels[]; .name == "breaking")')
+          echo "breaking=$breaking" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned toolchain
+        if: steps.label.outputs.breaking != 'true'
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.label.outputs.breaking != 'true'
+        with:
+          save-if: false
+
+      - name: Install cargo-semver-checks
+        if: steps.label.outputs.breaking != 'true'
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-semver-checks
+
+      # The facade with every feature, so it re-exports every store crate's API.
+      - name: Check the public API
+        if: steps.label.outputs.breaking != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: cargo semver-checks --workspace --all-features --baseline-rev "$BASE"
+
+  # Relative links and #anchors in the Markdown files. External links stay out, since they flake;
+  # rustdoc checks the links in doc comments.
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install lychee
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: lychee
+
+      - name: Check the links
+        run: lychee --offline --include-fragments --no-progress --exclude-path target './**/*.md'
+
+  # The oldest and newest supported servers, paired, rather than every combination: the transport
+  # and the database don't depend on each other's version.
+  test:
+    name: test (${{ matrix.nats }}, ${{ matrix.postgres }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nats: nats:2.11-alpine
+            postgres: postgres:15-alpine
+          - nats: nats:2.12-alpine
+            postgres: postgres:18-alpine
+    env:
+      NATS_IMAGE: ${{ matrix.nats }}
+      POSTGRES_IMAGE: ${{ matrix.postgres }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Pulled once here, so no test waits on the download.
+      - name: Pull the server images
+        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE"
+
+      - name: Run all tests including NATS and PostgreSQL
+        run: cargo test --workspace --all-features --locked
+
+  # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
+  # matrix job reports no `test (...)` check, so those can't be required directly.
+  ci:
+    name: ci
+    if: always()
+    needs: [changes, lint, msrv, deny, semver, links, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check the results
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+
+  # Line coverage for the README badge, on main only to keep Actions minutes down. One pair of
+  # servers is enough: the others run the same code paths. The test helpers crate is left out.
+  coverage:
+    name: coverage
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NATS_IMAGE: nats:2.12-alpine
+      POSTGRES_IMAGE: postgres:18-alpine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install && rustup component add llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Pull the server images
+        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE"
+
+      - name: Measure coverage
+        run: cargo llvm-cov --workspace --all-features --locked --ignore-filename-regex 'crates/testing/' --lcov --output-path lcov.info
+
+      # A Codecov outage only leaves the badge stale; it doesn't turn main red, which would hold up
+      # a release waiting on this run.
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

@@ -1,0 +1,76 @@
+# The library crates. Examples and benchmarks join the workspace when the first of them lands.
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Sang Au <auvansang@outlook.com>"]
+edition = "2024"
+# sqlx 0.9 needs Rust 1.94, so the workspace does too.
+rust-version = "1.94"
+license = "MIT"
+repository = "https://github.com/sisaio/sisa-messaging-rs"
+readme = "README.md"
+
+# Lints every package takes, through its `[lints] workspace = true`, for all its targets: library,
+# tests, benches and examples. A name means one thing in its scope: a new binding may reuse one
+# only for the same value converted, such as `let subject = subject.into()`. Names are whole words,
+# so no name is a single letter.
+[workspace.lints.clippy]
+shadow_unrelated = "warn"
+min_ident_chars = "warn"
+
+[workspace.dependencies]
+# The library crates, at the coordinated version.
+sisa-messaging = { path = "crates/sisa-messaging", version = "0.1.0" }
+sisa-messaging-core = { path = "crates/core", version = "0.1.0" }
+sisa-messaging-nats = { path = "crates/nats", version = "0.1.0" }
+sisa-messaging-postgres = { path = "crates/postgres", version = "0.1.0" }
+
+# The NATS client, for core NATS and JetStream.
+async-nats = { version = "0.51.0" }
+
+# PostgreSQL through sqlx, without the default macros and migrate features: queries are checked by
+# the tests, and the schema is created by the crate's own `migrate`.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json"] }
+
+# Message ids: UUID version 7, so ids sort by creation time.
+uuid = { version = "1.29.0", features = ["v7", "serde"] }
+
+# Async building blocks.
+tokio = { version = "1.54.1", features = ["rt", "macros", "time", "sync"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+bytes = { version = "1.12.1" }
+tracing = { version = "0.1.44" }
+
+# Error types: the mechanical `Display` and `Error` implementations.
+thiserror = { version = "2.0.21" }
+
+# Serialization: settings, and the JSON codec.
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.154" }
+
+# Tests: the shared helpers, and a NATS and a PostgreSQL server per test in Docker.
+sisa-messaging-testing = { path = "crates/testing" }
+testcontainers = { version = "0.28.0", default-features = false }
+
+# Development and test builds keep line tables for backtraces but no full debug information, and
+# dependencies carry none, which shortens builds and links. This follows the Cargo book's
+# "Optimizing Build Performance" guide. `cargo test` uses this profile too.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# A debugger session needs full debug information: `cargo build --profile debugging`.
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+# Release and benchmark builds keep Cargo's defaults, which applications also get, so measurements
+# stay representative. Profilers need line tables: `cargo bench --profile profiling`.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"

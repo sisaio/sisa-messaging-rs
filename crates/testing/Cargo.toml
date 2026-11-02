@@ -1,0 +1,13 @@
+[package]
+name = "sisa-messaging-testing"
+description = "Test helpers shared by the Sisa Messaging crates: NATS and PostgreSQL servers in containers"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

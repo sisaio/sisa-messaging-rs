@@ -1,0 +1,15 @@
+[package]
+name = "sisa-messaging-core"
+description = "Messages, envelopes, codecs, and the transport, outbox and inbox contracts of Sisa Messaging"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["messaging", "outbox", "inbox", "async"]
+categories = ["asynchronous", "network-programming"]
+
+[lints]
+workspace = true
