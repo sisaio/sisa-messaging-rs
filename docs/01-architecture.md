@@ -262,8 +262,9 @@ publishes matter.
 
 For each delivery, an endpoint:
 
-1. Decodes the body with the codec its content type names. A body that doesn't decode is rejected
-   at once: no retry can fix it.
+1. Decodes the data with the codec its content type names. Data that doesn't decode goes to the
+   error destination at once, without retries, since no retry can fix it; it is rejected once that
+   publish succeeds, as in step 5.
 2. On a transactional endpoint, begins a transaction and, with the inbox, records the message. A
    message recorded before is committed and acked here.
 3. Runs the handler.
@@ -427,10 +428,14 @@ CREATE TABLE sisa_messaging.inbox_receipts (
         UNIQUE (endpoint, message_id, message_time)
 ) PARTITION BY RANGE (message_time);
 
--- One per interval, made by `migrate` and then by the maintenance worker:
+-- For each table, the partitions for today and the next 7 intervals and a default partition,
+-- made by `migrate` so the first write has a partition, then kept ahead by the maintenance worker:
 CREATE TABLE sisa_messaging.outbox_messages_p20261102 PARTITION OF sisa_messaging.outbox_messages
     FOR VALUES FROM ('2026-11-02') TO ('2026-11-03');
 CREATE TABLE sisa_messaging.outbox_messages_default PARTITION OF sisa_messaging.outbox_messages DEFAULT;
+CREATE TABLE sisa_messaging.inbox_receipts_p20261102 PARTITION OF sisa_messaging.inbox_receipts
+    FOR VALUES FROM ('2026-11-02') TO ('2026-11-03');
+CREATE TABLE sisa_messaging.inbox_receipts_default PARTITION OF sisa_messaging.inbox_receipts DEFAULT;
 
 CREATE TABLE sisa_messaging.schema_version (
     version integer NOT NULL,

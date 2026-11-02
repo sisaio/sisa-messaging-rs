@@ -51,7 +51,7 @@ sequenceDiagram
     participant DB as Database
     participant Handler
     Broker->>Endpoint: delivery
-    Endpoint->>Endpoint: decode the body
+    Endpoint->>Endpoint: decode the data
     Endpoint->>DB: BEGIN
     Endpoint->>DB: INSERT INTO inbox_receipts ON CONFLICT DO NOTHING
     alt recorded before
@@ -71,7 +71,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    delivery([Delivery]) --> decode{Body decodes?}
+    delivery([Delivery]) --> decode{Data decodes?}
     decode -->|no| error[Publish to the error destination]
     error -->|published| reject([Reject])
     error -->|failed| retry

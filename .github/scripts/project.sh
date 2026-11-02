@@ -73,6 +73,10 @@ done
 
 # --- Project board --------------------------------------------------------------------------------
 number=$(gh project list --owner "$OWNER" --limit 1000 --format json --jq ".projects[] | select(.title == \"$TITLE\") | .number")
+if [ "$(grep -c . <<<"$number")" -gt 1 ]; then
+  echo "error: more than one project is titled $TITLE ($(tr '\n' ' ' <<<"$number")); rename or close the extra one" >&2
+  exit 1
+fi
 if [ -z "$number" ]; then
   number=$(gh project create --owner "$OWNER" --title "$TITLE" --format json --jq .number)
   echo "project $TITLE created"
