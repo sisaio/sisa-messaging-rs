@@ -1,32 +1,10 @@
 use std::time::Duration;
 
-use bytes::Bytes;
-use sisa_messaging_core::{
-    ContentType, Correlation, Envelope, MessageId, MessageType, Source, TraceContext,
-    TransportPublisher,
-};
-use sisa_messaging_nats::{NatsSettings, NatsTransport};
+use sisa_messaging_core::{Correlation, MessageId, TraceContext, TransportPublisher};
+use sisa_messaging_nats::NatsTransport;
 use sisa_messaging_testing::Nats;
 
-fn settings(nats: &Nats) -> NatsSettings {
-    let mut settings = NatsSettings::default();
-    settings.url = nats.url().to_owned();
-    settings
-}
-
-fn envelope() -> Envelope {
-    Envelope::new(
-        MessageType::new("orders.order_placed.v1").unwrap(),
-        Source::new("/orders").unwrap(),
-        ContentType::new("application/json").unwrap(),
-        Bytes::from_static(br#"{"id":42}"#),
-    )
-}
-
-async fn stored_messages(nats: &Nats) -> u64 {
-    let mut stream = nats.jetstream().await.get_stream("SISA").await.unwrap();
-    stream.info().await.unwrap().state.messages
-}
+use crate::common::{envelope, settings, stored_messages};
 
 #[tokio::test]
 async fn connect_creates_the_stream_on_the_prefix() {
@@ -103,7 +81,7 @@ async fn a_second_publish_of_one_id_inside_the_window_is_dropped() {
 
     transport.publish(&envelope).await.unwrap();
     transport.publish(&envelope).await.unwrap();
-    transport.publish(&self::envelope()).await.unwrap();
+    transport.publish(&crate::common::envelope()).await.unwrap();
 
     assert_eq!(stored_messages(&nats).await, 2);
 }

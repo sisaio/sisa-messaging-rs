@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 mod settings;
+mod subscribe;
 mod transport;
 
-pub use crate::{settings::NatsSettings, transport::NatsTransport};
+pub use crate::{settings::NatsSettings, subscribe::NatsDelivery, transport::NatsTransport};
