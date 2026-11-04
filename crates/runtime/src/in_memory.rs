@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use futures_util::stream;
 use sisa_messaging_core::{
-    Deliveries, Delivery, EndpointSpec, Envelope, MessageType, TransportError, TransportPublisher,
-    TransportSubscriber,
+    Deliveries, Delivery, EndpointSpec, Envelope, MessageId, MessageType, TransportError,
+    TransportPublisher, TransportSubscriber,
 };
 use tokio::sync::Notify;
 
@@ -29,6 +29,7 @@ struct Queue {
     // `notify_one` keeps a permit when nobody waits, so a push between a subscriber finding the
     // queue empty and waiting isn't missed.
     ready: Notify,
+    rejected: Mutex<Vec<MessageId>>,
 }
 
 impl Queue {
@@ -57,6 +58,8 @@ struct Endpoint {
 struct State {
     endpoints: HashMap<String, Endpoint>,
     published: Vec<Envelope>,
+    errors: HashMap<String, Vec<Envelope>>,
+    failing: bool,
 }
 
 /// A message received from an [`InMemoryTransport`].
@@ -109,6 +112,7 @@ impl Delivery for InMemoryDelivery {
 
     async fn reject(mut self) -> Result<(), TransportError> {
         self.settled = true;
+        lock(&self.queue.rejected).push(self.envelope.id);
         Ok(())
     }
 }
@@ -161,12 +165,48 @@ impl InMemoryTransport {
     pub fn published(&self) -> Vec<Envelope> {
         lock(&self.state).published.clone()
     }
+
+    /// The ids of the deliveries an endpoint rejected so far, in order.
+    #[must_use]
+    pub fn rejected(&self, endpoint: &str) -> Vec<MessageId> {
+        lock(&self.state)
+            .endpoints
+            .get(endpoint)
+            .map(|entry| lock(&entry.queue.rejected).clone())
+            .unwrap_or_default()
+    }
+
+    /// Every envelope sent to an endpoint's error destination so far, in order.
+    #[must_use]
+    pub fn errors(&self, endpoint: &str) -> Vec<Envelope> {
+        lock(&self.state)
+            .errors
+            .get(endpoint)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Makes every publish, to a message type or an error destination, fail while `failing` is
+    /// true, as a broker that can't be reached does.
+    pub fn fail_publishes(&self, failing: bool) {
+        lock(&self.state).failing = failing;
+    }
+}
+
+fn unreachable_broker() -> TransportError {
+    TransportError::Broker {
+        context: "publishing in memory",
+        source: "publishes are set to fail".into(),
+    }
 }
 
 // Copies each envelope to every endpoint subscribed to its message type.
 impl TransportPublisher for InMemoryTransport {
     async fn publish(&self, envelope: &Envelope) -> Result<(), TransportError> {
         let mut state = lock(&self.state);
+        if state.failing {
+            return Err(unreachable_broker());
+        }
         state.published.push(envelope.clone());
         let envelope = Arc::new(envelope.clone());
         for endpoint in state.endpoints.values() {
@@ -182,7 +222,7 @@ impl TransportPublisher for InMemoryTransport {
 }
 
 // Creates the endpoint on its first subscription; a later one joins it and adds its message
-// types.
+// types. An error destination is a list per endpoint, read with `errors`.
 impl TransportSubscriber for InMemoryTransport {
     type Delivery = InMemoryDelivery;
 
@@ -209,6 +249,23 @@ impl TransportSubscriber for InMemoryTransport {
             Some((Ok(delivery), queue))
         });
         Ok(Box::pin(deliveries))
+    }
+
+    async fn publish_error(
+        &self,
+        endpoint: &str,
+        envelope: &Envelope,
+    ) -> Result<(), TransportError> {
+        let mut state = lock(&self.state);
+        if state.failing {
+            return Err(unreachable_broker());
+        }
+        state
+            .errors
+            .entry(endpoint.to_owned())
+            .or_default()
+            .push(envelope.clone());
+        Ok(())
     }
 }
 
@@ -370,5 +427,31 @@ mod tests {
         }
 
         assert_eq!(transport.published(), sent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn keeps_error_destinations_apart_from_published_messages() {
+        let transport = InMemoryTransport::new();
+        let failed = envelope(ORDER_PLACED);
+
+        transport.publish_error("billing", &failed).await.unwrap();
+
+        assert_eq!(transport.errors("billing"), [failed]);
+        assert!(transport.errors("shipping").is_empty());
+        assert!(transport.published().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fails_publishes_while_told_to() {
+        let transport = InMemoryTransport::new();
+        let sent = envelope(ORDER_PLACED);
+
+        transport.fail_publishes(true);
+        assert!(transport.publish(&sent).await.is_err());
+        assert!(transport.publish_error("billing", &sent).await.is_err());
+        transport.fail_publishes(false);
+        transport.publish(&sent).await.unwrap();
+
+        assert_eq!(transport.published(), [sent]);
     }
 }

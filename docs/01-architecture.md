@@ -144,6 +144,8 @@ pub trait TransportPublisher: Send + Sync + 'static {
 pub trait TransportSubscriber: Send + Sync + 'static {
     /// Creates the endpoint's durable subscription if needed, and streams its deliveries.
     async fn subscribe(&self, endpoint: &EndpointSpec) -> Result<Deliveries, TransportError>;
+    /// Publishes an envelope the endpoint gave up on to its error destination.
+    async fn publish_error(&self, endpoint: &str, envelope: &Envelope) -> Result<(), TransportError>;
 }
 
 pub trait Delivery: Send {
