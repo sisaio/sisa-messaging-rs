@@ -53,8 +53,8 @@ reviews:
         in one of its own; only the clock module reads the wall clock; no new dependency in a
         library crate. Look for a lock held across `.await`, a transaction held across a
         transport call, a delivery acknowledged on an error path, an error dropped without a log,
-        and SQL that names a table without its configured schema. Don't ask for doc comments on
-        private items.
+        and SQL that qualifies a table with a schema instead of leaving it to the connection's
+        `search_path`. Don't ask for doc comments on private items.
     - path: "docs/**/*.md"
       instructions: >-
         Diagrams are Mermaid, and tables beat long lists. Every relative link and `#anchor` must
