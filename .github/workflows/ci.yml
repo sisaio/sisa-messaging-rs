@@ -32,7 +32,7 @@ jobs:
   # examples have no public API.
   changes:
     name: changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     permissions:
       actions: read
@@ -91,7 +91,7 @@ jobs:
     name: lint
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,7 +133,7 @@ jobs:
     name: msrv
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,16 +158,22 @@ jobs:
     name: deny
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # cargo-deny-action's image holds an x64 binary, so the tool is installed instead.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-deny
+
       # Advisories, licenses, bans and sources, as deny.toml sets them.
       - name: Check the dependency policy
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        run: cargo deny --log-level warn --all-features check
 
   # A change that breaks a published crate's API, against the PR's base, fails unless the PR
   # carries the `breaking` label. The base rather than crates.io, so that a break already merged
@@ -177,7 +183,7 @@ jobs:
     name: semver
     needs: changes
     if: needs.changes.outputs.api == 'true' && github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     permissions:
       contents: read
@@ -202,23 +208,21 @@ jobs:
         if: steps.label.outputs.breaking != 'true'
         run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: steps.label.outputs.breaking != 'true'
-        with:
-          save-if: false
-
       - name: Install cargo-semver-checks
         if: steps.label.outputs.breaking != 'true'
         uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-semver-checks
 
-      # The facade with every feature, so it re-exports every store crate's API. Only the
-      # publishable crates the base already has: a new crate has no API to break yet.
+      # Every publishable crate the base already has, with every feature: a new crate has no API
+      # to break yet. Each crate is built twice, as it is and at the base, and on its own
+      # cargo-semver-checks gives every build a target dir of its own. One shared dir builds the
+      # dependencies once instead.
       - name: Check the public API
         if: steps.label.outputs.breaking != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/semver
         run: |
           if ! git cat-file -e "$BASE:Cargo.toml" 2>/dev/null; then
             echo "The base has no workspace yet; nothing to compare."
@@ -237,11 +241,12 @@ jobs:
           fi
           cargo semver-checks "${packages[@]}" --all-features --baseline-rev "$BASE"
 
-  # Relative links and #anchors in the Markdown files. External links stay out, since they flake;
-  # rustdoc checks the links in doc comments.
+  # Relative links and #anchors in the Markdown files, hidden folders such as .agents and .github
+  # included; .claude only links to .agents. External links stay out, since they flake; rustdoc
+  # checks the links in doc comments.
   links:
     name: links
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -254,7 +259,7 @@ jobs:
           tool: lychee
 
       - name: Check the links
-        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path target --exclude-path .git './**/*.md'
+        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 
   # The oldest and newest supported servers, paired, rather than every combination: the transport
   # and the database don't depend on each other's version.
@@ -262,7 +267,7 @@ jobs:
     name: test (${{ matrix.nats }}, ${{ matrix.postgres }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -307,7 +312,7 @@ jobs:
     name: ci
     if: always()
     needs: [changes, lint, msrv, deny, semver, links, test]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:
       - name: Check the results
@@ -320,7 +325,7 @@ jobs:
     name: coverage
     needs: changes
     if: github.event_name == 'push' && needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     env:
       NATS_IMAGE: nats:2.12-alpine

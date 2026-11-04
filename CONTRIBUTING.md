@@ -16,7 +16,7 @@ cargo +1.94 check --workspace --all-targets --all-features --locked
 cargo test --workspace --all-features --locked
 cargo deny check
 cargo semver-checks --workspace --all-features --baseline-rev origin/main   # unless labeled `breaking`
-lychee --offline --include-fragments --exclude-path target './**/*.md'
+lychee --offline --include-fragments --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 ```
 
 A weekly workflow also checks the workspace with every direct dependency at its lowest allowed
@@ -36,6 +36,14 @@ default; CI also runs NATS 2.11 with PostgreSQL 15.
 
 ```sh
 NATS_IMAGE=nats:2.11-alpine POSTGRES_IMAGE=postgres:15-alpine cargo test --workspace --all-features
+```
+
+Docker Hub limits anonymous pulls. When a pull fails with `429 Too Many Requests`, run
+`docker login`, or pull the image from Google's mirror under the name the tests use:
+
+```sh
+docker pull mirror.gcr.io/library/nats:2.12-alpine
+docker tag mirror.gcr.io/library/nats:2.12-alpine nats:2.12-alpine
 ```
 
 Coverage comes from [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov); CI measures it on
