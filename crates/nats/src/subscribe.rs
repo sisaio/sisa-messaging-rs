@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
+use async_nats::jetstream::context::ConsumerInfoErrorKind;
 use async_nats::jetstream::{self, AckKind, consumer};
 use async_nats::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
@@ -18,7 +19,8 @@ impl TransportSubscriber for NatsTransport {
     type Delivery = NatsDelivery;
 
     /// Creates the endpoint's durable pull consumer, named after the endpoint and filtered on
-    /// the subjects of its message types, or updates it to them, and pulls its messages.
+    /// the subjects of its message types, and pulls its messages. When the consumer exists, its
+    /// filter gains the subjects it lacks and keeps the ones it has.
     ///
     /// A new consumer starts with the messages published after it is created. A message whose
     /// headers don't make an envelope goes to the error subject as it came, with the error in
@@ -34,21 +36,44 @@ impl TransportSubscriber for NatsTransport {
                 std::io::Error::other("an endpoint needs at least one message type"),
             ));
         }
+        let stream = self
+            .jetstream()
+            .get_stream_no_info(self.settings().stream.as_str())
+            .await
+            .map_err(|error| broker("creating the JetStream consumer", error))?;
+        let mut filter_subjects: Vec<String> = endpoint
+            .message_types
+            .iter()
+            .map(|message_type| self.subject(message_type))
+            .collect();
+        // Instances of one endpoint may handle different types for a while, as in a rolling
+        // deploy, so the filter only widens: a subject dropped from it would be skipped by every
+        // instance.
+        match stream.consumer_info(endpoint.name.as_str()).await {
+            Ok(info) => {
+                let existing =
+                    info.config.filter_subjects.into_iter().chain(
+                        Some(info.config.filter_subject).filter(|subject| !subject.is_empty()),
+                    );
+                for subject in existing {
+                    if !filter_subjects.contains(&subject) {
+                        filter_subjects.push(subject);
+                    }
+                }
+            }
+            Err(error) if matches!(error.kind(), ConsumerInfoErrorKind::NotFound) => {}
+            Err(error) => return Err(broker("reading the JetStream consumer", error)),
+        }
         let config = consumer::pull::Config {
             durable_name: Some(endpoint.name.clone()),
-            filter_subjects: endpoint
-                .message_types
-                .iter()
-                .map(|message_type| self.subject(message_type))
-                .collect(),
+            filter_subjects,
             deliver_policy: consumer::DeliverPolicy::New,
             ack_policy: consumer::AckPolicy::Explicit,
             ack_wait: self.settings().ack_wait,
             ..Default::default()
         };
-        let consumer = self
-            .jetstream()
-            .create_consumer_on_stream(config, self.settings().stream.as_str())
+        let consumer = stream
+            .create_consumer(config)
             .await
             .map_err(|error| broker("creating the JetStream consumer", error))?;
         let messages = consumer
@@ -72,10 +97,11 @@ impl TransportSubscriber for NatsTransport {
                         attempt,
                         message,
                     })),
-                    Err(error) => {
-                        transport.set_aside(&endpoint, message, &error).await;
-                        None
-                    }
+                    Err(error) => transport
+                        .set_aside(&endpoint, message, &error)
+                        .await
+                        .err()
+                        .map(Err),
                 }
             }
         });
@@ -105,8 +131,14 @@ impl NatsTransport {
     }
 
     // Moves a message that isn't an envelope to the error subject, then terminates it. If the
-    // copy fails, the message comes again after the ack wait, so it is never dropped without one.
-    async fn set_aside(&self, endpoint: &str, message: jetstream::Message, error: &str) {
+    // copy fails, the message isn't terminated: it comes again after the ack wait, so it is never
+    // dropped without a copy. A failed term means it comes again and is copied again.
+    async fn set_aside(
+        &self,
+        endpoint: &str,
+        message: jetstream::Message,
+        error: &str,
+    ) -> Result<(), TransportError> {
         let mut headers = HeaderMap::new();
         for (name, values) in message.headers.iter().flat_map(HeaderMap::iter) {
             if name.to_string() != MSG_ID {
@@ -118,17 +150,16 @@ impl NatsTransport {
         headers.insert(format!("{CE}errorendpoint"), endpoint);
         headers.insert(format!("{CE}errortype"), "invalid_envelope");
         headers.insert(format!("{CE}errormessage"), one_line(error));
-        let copied = self
-            .publish_to(
-                self.error_subject(endpoint),
-                headers,
-                message.payload.clone(),
-            )
-            .await;
-        if copied.is_ok() {
-            // A failed term only means the message comes again and is copied again.
-            let _ = message.double_ack_with(AckKind::Term).await;
-        }
+        self.publish_to(
+            self.error_subject(endpoint),
+            headers,
+            message.payload.clone(),
+        )
+        .await?;
+        message
+            .double_ack_with(AckKind::Term)
+            .await
+            .map_err(|failure| broker("settling a JetStream message", failure))
     }
 }
 
@@ -164,7 +195,8 @@ impl NatsDelivery {
             .iter()
             .flat_map(HeaderMap::iter)
             .filter_map(|(name, values)| {
-                let name = name.to_string();
+                // Header names are compared without case, so `Ce-Id` from another client counts.
+                let name = name.to_string().to_ascii_lowercase();
                 let attribute = name.strip_prefix(CE)?.to_owned();
                 Some((attribute, values.first()?.as_str().to_owned()))
             })
