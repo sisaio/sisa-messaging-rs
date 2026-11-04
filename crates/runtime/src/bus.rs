@@ -43,6 +43,9 @@ pub enum StartError {
     /// bypass the outbox. Add the outbox first.
     #[error("endpoint `{0}` has an inbox and is added before the outbox")]
     InboxBeforeOutbox(String),
+    /// The outbox's [`DispatchSettings`] can't run, such as a zero batch size.
+    #[error("invalid dispatch settings: {0}")]
+    DispatchSettings(&'static str),
     /// The transport couldn't subscribe an endpoint.
     #[error("could not subscribe endpoint `{endpoint}`: {source}")]
     Subscribe {
@@ -345,10 +348,13 @@ where
     ///
     /// # Errors
     ///
-    /// [`StartError`] when the source or a message type is invalid, an endpoint name or a
-    /// handler is there twice, or the transport can't subscribe an endpoint.
+    /// [`StartError`] when the source, a message type or the dispatch settings are invalid, an
+    /// endpoint name or a handler is there twice, or the transport can't subscribe an endpoint.
     pub async fn start(self) -> Result<Bus<Transport, Outbox>, StartError> {
         let source = Source::new(self.source)?;
+        if let Some(reason) = self.dispatch.invalid() {
+            return Err(StartError::DispatchSettings(reason));
+        }
         let mut names = HashSet::new();
         let mut endpoints = Vec::new();
         for (name, endpoint) in self.endpoints {

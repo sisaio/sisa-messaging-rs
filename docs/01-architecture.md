@@ -172,7 +172,8 @@ pub trait OutboxStore: Send + Sync + 'static {
 
     // The dispatcher's side, on the store's own pool. Each call commits before it returns, and
     // due times come from the database's clock. An `OutboxRecord` is the envelope, the row's
-    // `created_at` and its failed attempts.
+    // `created_at`, its failed attempts and when the claim's lease runs out, which each mark
+    // matches, so a dispatcher whose lease ran out can't overwrite a newer claim.
     async fn claim(&self, limit: usize, lease: Duration) -> Result<Vec<OutboxRecord>>;
     async fn mark_dispatched(&self, records: &[OutboxRecord]) -> Result<()>;
     async fn mark_retry(&self, record: &OutboxRecord, error: &str, delay: Duration) -> Result<()>;
@@ -309,7 +310,8 @@ its `attempts` counts one more failure; past the last attempt it is marked `fail
 person to look at; setting it back to `pending` sends it again. Claiming moves the due
 time forward by a lease, so the rows of a dispatcher that dies come back once the lease runs out,
 and several instances claim different rows. A dispatcher publishes no row of a batch whose lease
-ran out, since another instance may hold it by then. The envelope keeps its id in the outbox, so a
+ran out, and gives up waiting on a publish when the lease runs out, since another instance may hold
+the row by then. The envelope keeps its id in the outbox, so a
 row published twice (a crash between the publish and the mark) reaches the broker with the same
 id: JetStream drops it inside its duplicate window, and an inbox drops it after. A row that doesn't
 read back as an envelope is marked `failed` by the claim, so it can't hold up the others.

@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 use sisa_messaging_core::{Envelope, OutboxRecord, OutboxStore, StoreError, Timestamp};
-use sqlx::types::{Json, Uuid};
+use sqlx::types::{Json, JsonValue, Uuid};
 use sqlx::{PgConnection, PgPool};
 
 // The attributes that have a column of their own, so `attributes` doesn't repeat them.
@@ -40,16 +40,28 @@ type ClaimedRow = (
     Option<String>,
     String,
     Option<String>,
-    Json<BTreeMap<String, String>>,
+    Json<BTreeMap<String, JsonValue>>,
     Vec<u8>,
     i32,
+    String,
 );
 
-// Puts the envelope of a claimed row back together: its columns, then its other attributes.
-fn envelope(row: ClaimedRow) -> Result<(Envelope, Timestamp, u32), String> {
+fn timestamp(column: &str, text: &str) -> Result<Timestamp, String> {
+    text.parse().map_err(|error| format!("{column}: {error}"))
+}
+
+// Puts a claimed row back together as a record: the envelope from its columns and its other
+// attributes, which are all strings unless something other than this crate wrote the row.
+fn record(row: ClaimedRow) -> Result<OutboxRecord, String> {
     let (id, created_at, message_type, source, subject, partition_key, content_type, schema) =
         (row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7);
-    let mut attributes = row.8.0;
+    let mut attributes = BTreeMap::new();
+    for (name, value) in row.8.0 {
+        match value {
+            JsonValue::String(value) => attributes.insert(name, value),
+            other => return Err(format!("attribute `{name}` is {other}, not a string")),
+        };
+    }
     let columns = [
         ("specversion", Some("1.0".to_owned())),
         ("id", Some(id.to_string())),
@@ -67,12 +79,14 @@ fn envelope(row: ClaimedRow) -> Result<(Envelope, Timestamp, u32), String> {
     }
     let envelope =
         Envelope::from_attributes(attributes, row.9.into()).map_err(|error| error.to_string())?;
-    let created_at = created_at
-        .parse()
-        .map_err(|error| format!("created_at: {error}"))?;
     // A count of failed attempts is never negative.
     let attempts = u32::try_from(row.10).unwrap_or_default();
-    Ok((envelope, created_at, attempts))
+    Ok(OutboxRecord::new(
+        envelope,
+        timestamp("created_at", &created_at)?,
+        attempts,
+        timestamp("available_at", &row.11)?,
+    ))
 }
 
 fn database(context: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
@@ -125,7 +139,8 @@ impl PostgresOutbox {
 }
 
 // Writes the rows on the caller's connection, so they commit with its transaction, and claims
-// and marks them on its own pool, one committed statement each.
+// and marks them on its own pool, one committed statement each. A mark matches the due time its
+// claim set, so a dispatcher whose lease ran out can't overwrite a newer claim.
 impl OutboxStore for PostgresOutbox {
     type Connection = PgConnection;
 
@@ -158,8 +173,8 @@ impl OutboxStore for PostgresOutbox {
     }
 
     async fn claim(&self, limit: usize, lease: Duration) -> Result<Vec<OutboxRecord>, StoreError> {
-        // `RETURNING` has no order, so the outer query sorts. `to_json` writes `created_at` in
-        // RFC 3339, whatever the session's date style, so it reads back as a `Timestamp`.
+        // `RETURNING` has no order, so the outer query sorts. `to_json` writes the times in
+        // RFC 3339, whatever the session's date style, so they read back as a `Timestamp`.
         let rows: Vec<ClaimedRow> = sqlx::query_as(
             "WITH claimed AS (
                  UPDATE outbox_messages
@@ -172,10 +187,12 @@ impl OutboxStore for PostgresOutbox {
                      FOR UPDATE SKIP LOCKED
                  )
                  RETURNING id, created_at, type, source, subject, partition_key,
-                           data_content_type, data_schema, attributes, data, attempts
+                           data_content_type, data_schema, attributes, data, attempts,
+                           available_at
              )
              SELECT id, to_json(created_at) #>> '{}', type, source, subject, partition_key,
-                    data_content_type, data_schema, attributes, data, attempts
+                    data_content_type, data_schema, attributes, data, attempts,
+                    to_json(available_at) #>> '{}'
              FROM claimed ORDER BY id",
         )
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -186,22 +203,22 @@ impl OutboxStore for PostgresOutbox {
 
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
-            let (id, written_at) = (row.0, row.1.clone());
-            match envelope(row) {
-                Ok((envelope, created_at, attempts)) => {
-                    records.push(OutboxRecord::new(envelope, created_at, attempts));
-                }
+            let (id, written_at, leased_until) = (row.0, row.1.clone(), row.11.clone());
+            match record(row) {
+                Ok(record) => records.push(record),
                 // No retry makes the row readable, so it waits for a person, and the other rows
                 // still go out.
                 Err(error) => {
                     sqlx::query(
                         "UPDATE outbox_messages
                          SET status = 'failed', attempts = attempts + 1, last_error = $3
-                         WHERE created_at = $1::timestamptz AND id = $2",
+                         WHERE created_at = $1::timestamptz AND id = $2 AND status = 'pending'
+                           AND available_at = $4::timestamptz",
                     )
                     .bind(written_at)
                     .bind(id)
                     .bind(format!("not a valid envelope: {error}"))
+                    .bind(leased_until)
                     .execute(&self.pool)
                     .await
                     .map_err(database("marking an unreadable outbox row failed"))?;
@@ -220,13 +237,20 @@ impl OutboxStore for PostgresOutbox {
             .iter()
             .map(|record| *record.envelope.id.as_uuid())
             .collect();
+        let leased_until: Vec<String> = records
+            .iter()
+            .map(|record| record.leased_until.to_string())
+            .collect();
         sqlx::query(
             "UPDATE outbox_messages SET status = 'dispatched', dispatched_at = now()
-             WHERE (created_at, id) IN (SELECT * FROM unnest($1::text[]::timestamptz[], $2::uuid[]))
+             WHERE (created_at, id, available_at) IN (
+                 SELECT * FROM unnest($1::text[]::timestamptz[], $2::uuid[],
+                                      $3::text[]::timestamptz[]))
                AND status = 'pending'",
         )
         .bind(created_at)
         .bind(ids)
+        .bind(leased_until)
         .execute(&self.pool)
         .await
         .map_err(database("marking outbox rows dispatched"))?;
@@ -242,12 +266,14 @@ impl OutboxStore for PostgresOutbox {
         sqlx::query(
             "UPDATE outbox_messages
              SET attempts = attempts + 1, last_error = $3, available_at = now() + $4
-             WHERE created_at = $1::timestamptz AND id = $2 AND status = 'pending'",
+             WHERE created_at = $1::timestamptz AND id = $2 AND status = 'pending'
+               AND available_at = $5::timestamptz",
         )
         .bind(record.created_at.to_string())
         .bind(record.envelope.id.as_uuid())
         .bind(error)
         .bind(delay)
+        .bind(record.leased_until.to_string())
         .execute(&self.pool)
         .await
         .map_err(database("putting an outbox row back"))?;
@@ -259,11 +285,13 @@ impl OutboxStore for PostgresOutbox {
         sqlx::query(
             "UPDATE outbox_messages
              SET status = 'failed', attempts = attempts + 1, last_error = $3, available_at = now()
-             WHERE created_at = $1::timestamptz AND id = $2 AND status = 'pending'",
+             WHERE created_at = $1::timestamptz AND id = $2 AND status = 'pending'
+               AND available_at = $4::timestamptz",
         )
         .bind(record.created_at.to_string())
         .bind(record.envelope.id.as_uuid())
         .bind(error)
+        .bind(record.leased_until.to_string())
         .execute(&self.pool)
         .await
         .map_err(database("marking an outbox row failed"))?;
