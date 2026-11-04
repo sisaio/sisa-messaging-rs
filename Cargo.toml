@@ -33,7 +33,7 @@ sisa-messaging-runtime = { path = "crates/runtime", version = "0.1.0" }
 async-nats = { version = "0.51.0" }
 
 # PostgreSQL through sqlx, without the default macros and migrate features: queries are checked by
-# the tests, and the schema is created by the crate's own `migrate`.
+# the tests, and the tables come from the SQL in migrations/postgresql, which applications run.
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json"] }
 
 # Message ids: UUID version 7, so ids sort by creation time.
