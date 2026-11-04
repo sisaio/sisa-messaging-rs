@@ -4,12 +4,16 @@ use std::error::Error;
 use std::sync::Arc;
 
 use async_nats::{HeaderMap, HeaderValue, jetstream};
+use bytes::Bytes;
 use sisa_messaging_core::{Envelope, MessageType, TransportError, TransportPublisher};
 
 use crate::NatsSettings;
 
 /// The header that JetStream deduplicates publishes by.
-const MSG_ID: &str = "Nats-Msg-Id";
+pub(crate) const MSG_ID: &str = "Nats-Msg-Id";
+
+/// The prefix of the CloudEvents attributes' headers in the NATS binding.
+pub(crate) const CE: &str = "ce-";
 
 /// The NATS JetStream transport. Clones share one connection.
 ///
@@ -60,27 +64,41 @@ impl NatsTransport {
         &self.settings
     }
 
-    fn subject(&self, message_type: &MessageType) -> String {
+    pub(crate) fn jetstream(&self) -> &jetstream::Context {
+        &self.jetstream
+    }
+
+    pub(crate) fn subject(&self, message_type: &MessageType) -> String {
         format!("{}.{message_type}", self.settings.prefix)
+    }
+
+    // Publishes and waits for the JetStream acknowledgement. A duplicate is acked too: the stream
+    // already has the message.
+    pub(crate) async fn publish_to(
+        &self,
+        subject: String,
+        headers: HeaderMap,
+        data: Bytes,
+    ) -> Result<(), TransportError> {
+        let ack = self
+            .jetstream
+            .publish_with_headers(subject, headers, data)
+            .await
+            .map_err(|error| broker("publishing to JetStream", error))?;
+        ack.await
+            .map_err(|error| broker("waiting for the JetStream acknowledgement", error))?;
+        Ok(())
     }
 }
 
 impl TransportPublisher for NatsTransport {
     async fn publish(&self, envelope: &Envelope) -> Result<(), TransportError> {
-        let headers = headers(envelope)?;
-        let ack = self
-            .jetstream
-            .publish_with_headers(
-                self.subject(&envelope.message_type),
-                headers,
-                envelope.data.clone(),
-            )
-            .await
-            .map_err(|error| broker("publishing to JetStream", error))?;
-        // A duplicate is acked too: the stream already has the message.
-        ack.await
-            .map_err(|error| broker("waiting for the JetStream acknowledgement", error))?;
-        Ok(())
+        self.publish_to(
+            self.subject(&envelope.message_type),
+            headers(envelope)?,
+            envelope.data.clone(),
+        )
+        .await
     }
 }
 
@@ -93,15 +111,18 @@ fn headers(envelope: &Envelope) -> Result<HeaderMap, TransportError> {
         let value: HeaderValue = value
             .parse()
             .map_err(|error| broker("writing the CloudEvents headers", error))?;
-        headers.insert(format!("ce-{name}"), value);
+        headers.insert(format!("{CE}{name}"), value);
     }
     headers.insert(MSG_ID, envelope.id.to_string());
     Ok(headers)
 }
 
-fn broker(context: &'static str, error: impl Error + Send + Sync + 'static) -> TransportError {
+pub(crate) fn broker(
+    context: &'static str,
+    error: impl Into<Box<dyn Error + Send + Sync>>,
+) -> TransportError {
     TransportError::Broker {
         context,
-        source: Box::new(error),
+        source: error.into(),
     }
 }

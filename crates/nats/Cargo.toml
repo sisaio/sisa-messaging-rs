@@ -25,11 +25,14 @@ sisa-messaging-core = { workspace = true }
 async-nats = { workspace = true }
 # The settings, read from the application's config.
 serde = { workspace = true }
+# The bytes of a message, as the client takes them.
+bytes = { workspace = true }
+# To adapt the client's message stream into deliveries.
+futures-util = { workspace = true }
 
 [dev-dependencies]
 # A NATS server per test, in Docker.
 sisa-messaging-testing = { workspace = true }
-bytes = { workspace = true }
 tokio = { workspace = true }
 
 [package.metadata.docs.rs]

@@ -2279,6 +2279,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "bytes",
+ "futures-util",
  "serde",
  "sisa-messaging-core",
  "sisa-messaging-testing",
