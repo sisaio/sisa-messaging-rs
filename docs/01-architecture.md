@@ -329,7 +329,7 @@ consumers that don't know CloudEvents still read a plain body.
 | `id` | Yes | The message id, a UUID version 7 |
 | `source` | Yes | A URI reference naming the publishing service, set once per bus, such as `/orders` |
 | `type` | Yes | The message type, such as `orders.order_placed.v1` |
-| `time` | Yes | When it was published, RFC 3339 |
+| `time` | Yes | When it was published, RFC 3339 with a year from 0000 to 9999 and no leap second |
 | `datacontenttype` | Yes | The codec's content type, such as `application/json` |
 | `subject` | No | What the message is about within the source, such as an order id |
 | `dataschema` | No | The schema's URI, for Avro and other schema codecs |

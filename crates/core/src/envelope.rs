@@ -35,7 +35,8 @@ fn has_control_or_space(value: &str) -> bool {
 /// The publishing service: the CloudEvents `source`, a URI reference such as `/orders`.
 ///
 /// A bus sets it once for everything it publishes. It must not be empty or hold spaces or
-/// control characters.
+/// control characters; beyond that it isn't checked against the full URI grammar, so keep it a
+/// simple path such as `/orders` or an absolute URI.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Source(String);
 
@@ -153,8 +154,8 @@ impl TraceContext {
 
 /// The CloudEvents attributes the envelope has no field for, kept as they came.
 ///
-/// A name is lowercase ASCII letters and digits, as CloudEvents requires, and can't be one of the
-/// attributes the envelope has a field for.
+/// A name is 1 to 20 lowercase ASCII letters and digits, as CloudEvents asks, and can't be one of
+/// the attributes the envelope has a field for.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Extensions(BTreeMap<String, String>);
 
@@ -169,8 +170,8 @@ impl Extensions {
     ///
     /// # Errors
     ///
-    /// [`EnvelopeError::InvalidAttribute`] when the name isn't lowercase letters and digits, or is
-    /// an attribute the envelope has a field for.
+    /// [`EnvelopeError::InvalidAttribute`] when the name isn't lowercase letters and digits, is
+    /// longer than 20 characters, or is an attribute the envelope has a field for.
     pub fn insert(
         &mut self,
         name: impl Into<String>,
@@ -186,6 +187,9 @@ impl Extensions {
                 name,
                 "not lowercase letters and digits",
             ));
+        }
+        if name.len() > 20 {
+            return Err(EnvelopeError::invalid(name, "longer than 20 characters"));
         }
         if RESERVED.contains(&name.as_str()) {
             return Err(EnvelopeError::invalid(
@@ -635,6 +639,20 @@ mod tests {
                 "",
                 "not lowercase letters and digits"
             ))
+        );
+    }
+
+    #[test]
+    fn rejects_an_extension_name_longer_than_20_characters() {
+        let mut extensions = Extensions::new();
+
+        assert!(extensions.insert("a".repeat(20), "x").is_ok());
+        assert_eq!(
+            extensions.insert("a".repeat(21), "x"),
+            Err(EnvelopeError::invalid(
+                "a".repeat(21),
+                "longer than 20 characters"
+            )),
         );
     }
 

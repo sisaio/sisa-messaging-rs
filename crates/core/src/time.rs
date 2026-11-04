@@ -8,6 +8,10 @@ use crate::{EnvelopeError, clock};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
+// RFC 3339 writes years 0000 to 9999: from 0000-01-01T00:00:00Z up to, not including,
+// 10000-01-01T00:00:00Z.
+const FIRST_SECOND: i64 = -62_167_219_200;
+const END_SECOND: i64 = 253_402_300_800;
 
 // Days since 1970-01-01 to a proleptic Gregorian date, after Howard Hinnant's `civil_from_days`.
 fn date_from_days(days: i64) -> (i64, u32, u32) {
@@ -124,13 +128,18 @@ fn parse(text: &str) -> Option<Timestamp> {
     let seconds = days_from_date(year, month, day) * SECONDS_PER_DAY
         + i64::from(hour * 3_600 + minute * 60 + second)
         - offset_seconds;
-    Some(Timestamp { seconds, nanos })
+    // An offset can carry 9999-12-31 into year 10000, which RFC 3339 can't write back.
+    (FIRST_SECOND..END_SECOND)
+        .contains(&seconds)
+        .then_some(Timestamp { seconds, nanos })
 }
 
 /// A point in time, to the nanosecond: the CloudEvents `time`.
 ///
-/// It reads and writes RFC 3339, the format CloudEvents uses. [`Display`](fmt::Display) writes UTC
-/// with a `Z`, and only as many fraction digits as the time needs.
+/// It reads and writes RFC 3339, the format CloudEvents uses, with two limits: years run from
+/// 0000 to 9999 in UTC, the range RFC 3339 can write, and the leap second `:60` isn't read.
+/// [`Display`](fmt::Display) writes UTC with a `Z`, and only as many fraction digits as the time
+/// needs, so whatever it writes reads back as the same time.
 ///
 /// ```
 /// use sisa_messaging_core::Timestamp;
@@ -153,15 +162,17 @@ impl Timestamp {
         Self::from(clock::now())
     }
 
-    /// The time this many nanoseconds after 1970-01-01T00:00:00Z, or before it when negative.
+    /// The time this many nanoseconds after 1970-01-01T00:00:00Z, or before it when negative,
+    /// clamped to years 0000 to 9999.
     #[must_use]
     pub fn from_unix_nanos(nanos: i128) -> Self {
-        // An i128 of nanoseconds spans far more years than an i64 of seconds can hold.
-        let seconds = nanos
-            .div_euclid(NANOS_PER_SECOND)
-            .clamp(i64::MIN.into(), i64::MAX.into());
+        let first = i128::from(FIRST_SECOND) * NANOS_PER_SECOND;
+        let last = i128::from(END_SECOND) * NANOS_PER_SECOND - 1;
+        let nanos = nanos.clamp(first, last);
+        // Both fit after the clamp: the seconds are within years 0000 to 9999, and the
+        // remainder is below a billion.
         Self {
-            seconds: seconds as i64,
+            seconds: nanos.div_euclid(NANOS_PER_SECOND) as i64,
             nanos: nanos.rem_euclid(NANOS_PER_SECOND) as u32,
         }
     }
@@ -286,6 +297,30 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn spans_years_0000_to_9999() {
+        assert_eq!(days_from_date(0, 1, 1) * SECONDS_PER_DAY, FIRST_SECOND);
+        assert_eq!(days_from_date(10_000, 1, 1) * SECONDS_PER_DAY, END_SECOND);
+    }
+
+    #[test]
+    fn rejects_an_offset_that_carries_the_time_past_year_9999() {
+        assert!("9999-12-31T23:59:59Z".parse::<Timestamp>().is_ok());
+        assert!("9999-12-31T23:59:59-01:00".parse::<Timestamp>().is_err());
+        assert!("0000-01-01T00:00:00+01:00".parse::<Timestamp>().is_err());
+    }
+
+    #[test]
+    fn clamps_to_the_years_it_can_write_and_reads_back_what_it_wrote() {
+        let latest = Timestamp::from_unix_nanos(i128::MAX);
+        let earliest = Timestamp::from_unix_nanos(i128::MIN);
+
+        assert_eq!(latest.to_string(), "9999-12-31T23:59:59.999999999Z");
+        assert_eq!(earliest.to_string(), "0000-01-01T00:00:00Z");
+        assert_eq!(latest.to_string().parse::<Timestamp>(), Ok(latest));
+        assert_eq!(earliest.to_string().parse::<Timestamp>(), Ok(earliest));
     }
 
     #[test]

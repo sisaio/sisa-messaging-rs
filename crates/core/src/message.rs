@@ -284,6 +284,29 @@ mod tests {
     }
 
     #[test]
+    fn makes_increasing_ids_on_every_thread() {
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                std::thread::spawn(|| (0..1_000).map(|_| MessageId::new()).collect::<Vec<_>>())
+            })
+            .collect();
+        let per_thread: Vec<Vec<MessageId>> = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
+
+        assert!(
+            per_thread
+                .iter()
+                .all(|ids| ids.windows(2).all(|pair| pair[0] < pair[1]))
+        );
+        let mut all: Vec<MessageId> = per_thread.into_iter().flatten().collect();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), 4_000);
+    }
+
+    #[test]
     fn reads_any_uuid_as_an_id_and_writes_it_back() {
         let text = "0b8d6f3e-2a51-4c1e-9f4a-6c2d3e4f5a6b";
 
