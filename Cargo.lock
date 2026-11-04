@@ -2284,7 +2284,11 @@ dependencies = [
 name = "sisa-messaging-postgres"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "sisa-messaging-core",
+ "sisa-messaging-testing",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]
