@@ -40,6 +40,8 @@ async fn create_partitions(connection: &mut PgConnection, schema: &str) -> sqlx:
                 schema = quote(schema),
                 partition = quote(&format!("{table}_p{suffix}")),
                 table = quote(table),
+                from = from,
+                to = to,
             );
             // The names are quoted and the bounds are dates the database made.
             sqlx::raw_sql(AssertSqlSafe(sql))
