@@ -369,11 +369,13 @@ The prefix keeps deployments that share a server apart, such as `prod` and `stag
 
 Created by the SQL migrations in [`migrations/postgresql`](../migrations/postgresql), which the
 application runs itself: with `sqlx migrate run --source migrations/postgresql` in its deploy
-pipeline, or by hand with psql. The SQL names no schema, so the connection's `search_path` picks
-it, for the migrations and for the queries alike, such as `options=-c search_path=messaging` in the
-URL. A schema of its own also keeps sqlx's `_sqlx_migrations` table for these migrations apart from
-the application's. Columns that hold a CloudEvents attribute take its name. A primary key on a partitioned table must hold the
-partition key, so each one starts with it.
+pipeline, or by hand with psql, into a schema created beforehand. Pick one way per schema: a psql
+run leaves no row in `_sqlx_migrations`, so a later `sqlx migrate run` would run the migration again
+and fail. The SQL names no schema, so the connection's `search_path` picks it, for the migrations
+and for the queries alike, such as `options=-c search_path=messaging` in the URL. A schema of its
+own also keeps sqlx's `_sqlx_migrations` table for these migrations apart from the application's.
+Columns that hold a CloudEvents attribute take its name. A primary key on a partitioned table must
+hold the partition key, so each one starts with it.
 
 Every constraint and index is named in the SQL, never left to PostgreSQL or a tool to generate,
 so the names stay the same across versions and the next migration can refer to them. A name is a
