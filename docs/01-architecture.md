@@ -188,7 +188,9 @@ pub trait InboxStore: Send + Sync + 'static {
 
 pub trait PartitionStore: Send + Sync + 'static {
     async fn try_lock(&self) -> Result<Option<PartitionLock>>;  // one instance at a time
-    async fn ensure_partitions(&self, from: Date, count: u32) -> Result<()>;
+    /// Fills the days that no partition holds yet, so a changed interval starts where the old partitions end.
+    async fn ensure_partitions(&self, interval: PartitionInterval, from: Date, count: u32) -> Result<()>;
+    async fn default_rows(&self) -> Result<u64>;  // the worker warns while it isn't 0
     async fn expirable(&self, older_than: Date) -> Result<Vec<PartitionInfo>>;  // with pending and failed counts
     async fn expire(&self, partition: &PartitionInfo, mode: Expiry) -> Result<()>;
 }
@@ -300,11 +302,12 @@ sent and handled. Both tables are range-partitioned by time, one partition per d
 - **The inbox** is partitioned by `message_time`, the envelope's own `time`, not by when the
   receipt was written. A redelivery carries the same envelope, so its receipt falls in the same
   partition and the primary key catches it, however many days later it comes.
-- **Maintenance** is a runtime worker the bus starts with an outbox or inbox store; the store
-  only runs the DDL. Once an hour, with
-  one instance at a time through an advisory lock, it creates the partitions for the next 7
-  intervals and applies the retention. `partitions = "external"` turns it off for teams that use
-  pg_partman or their own jobs.
+- **Maintenance** is a runtime worker the bus starts for each table given to
+  `BusBuilder::partitions`, such as `PostgresPartitions::outbox(pool)`; the store only runs the
+  DDL. Once an hour, with one instance at a time through a session advisory lock on the table, it
+  creates the partitions for the current interval and the next 7, a `day`, `week` or `month` each,
+  and applies the retention. `partitions = "external"` turns it off for teams that use pg_partman
+  or their own jobs.
 - **Retention** is off by default. When set, such as `retention_days = 90`, a partition older than
   that is detached, which keeps it as an ordinary table for archiving, or dropped with
   `on_expiry = "drop"`. An outbox partition that still holds `pending` or `failed` rows is never

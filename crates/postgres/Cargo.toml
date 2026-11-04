@@ -24,7 +24,8 @@ sisa-messaging-core = { workspace = true }
 sqlx = { workspace = true }
 
 [dev-dependencies]
-# The bus that publishes through the outbox, and messages and envelopes to publish.
+# The bus that publishes through the outbox and keeps the partitions, and messages and envelopes
+# to publish.
 bytes = { workspace = true }
 serde = { workspace = true }
 sisa-messaging-runtime = { workspace = true }

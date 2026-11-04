@@ -1,4 +1,5 @@
-//! The store contracts: what a database crate implements so the runtime can keep an outbox.
+//! The store contracts: what a database crate implements so the runtime can keep an outbox; the
+//! partition contract is in `partition.rs`.
 
 use std::error::Error;
 

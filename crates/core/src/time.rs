@@ -134,6 +134,134 @@ fn parse(text: &str) -> Option<Timestamp> {
         .then_some(Timestamp { seconds, nanos })
 }
 
+/// A day of the UTC calendar, from 0000-01-01 to 9999-12-31: the bounds of a table partition.
+///
+/// It reads and writes `YYYY-MM-DD`.
+///
+/// ```
+/// use sisa_messaging_core::{Date, Timestamp};
+///
+/// let time: Timestamp = "2026-11-02T23:30:00-05:00".parse()?;
+/// assert_eq!(time.date().to_string(), "2026-11-03");
+/// assert_eq!(time.date().add_days(-3), "2026-10-31".parse()?);
+/// # Ok::<(), sisa_messaging_core::EnvelopeError>(())
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Date {
+    // Days since 1970-01-01.
+    days: i64,
+}
+
+impl Date {
+    const FIRST_DAY: i64 = FIRST_SECOND / SECONDS_PER_DAY;
+    const LAST_DAY: i64 = END_SECOND / SECONDS_PER_DAY - 1;
+
+    // The date `days` after 1970-01-01, clamped to years 0000 to 9999.
+    fn from_days(days: i64) -> Self {
+        Self {
+            days: days.clamp(Self::FIRST_DAY, Self::LAST_DAY),
+        }
+    }
+
+    /// The date of `year`, `month` and `day`, or `None` when there is no such day in years 0000
+    /// to 9999.
+    #[must_use]
+    pub fn new(year: u32, month: u32, day: u32) -> Option<Self> {
+        let year_in_range = year <= 9_999;
+        let valid = year_in_range
+            && (1..=12).contains(&month)
+            && (1..=days_in_month(i64::from(year), month)).contains(&day);
+        valid.then(|| Self {
+            days: days_from_date(i64::from(year), month, day),
+        })
+    }
+
+    /// The year, 0 to 9999.
+    #[must_use]
+    pub fn year(&self) -> u32 {
+        // It fits: the date is within years 0000 to 9999.
+        date_from_days(self.days).0 as u32
+    }
+
+    /// The month, 1 to 12.
+    #[must_use]
+    pub fn month(&self) -> u32 {
+        date_from_days(self.days).1
+    }
+
+    /// The day of the month, 1 to 31.
+    #[must_use]
+    pub fn day(&self) -> u32 {
+        date_from_days(self.days).2
+    }
+
+    /// The date `days` later, or earlier when negative, clamped to years 0000 to 9999.
+    #[must_use]
+    pub fn add_days(self, days: i64) -> Self {
+        Self::from_days(self.days.saturating_add(days))
+    }
+
+    /// The Monday of this date's ISO 8601 week.
+    #[must_use]
+    pub(crate) fn monday(self) -> Self {
+        // 1970-01-01 was a Thursday, three days after a Monday.
+        Self::from_days(self.days - (self.days + 3).rem_euclid(7))
+    }
+
+    /// The first day of this date's month.
+    #[must_use]
+    pub(crate) fn first_of_month(self) -> Self {
+        let (year, month, _) = date_from_days(self.days);
+        Self::from_days(days_from_date(year, month, 1))
+    }
+
+    /// The first day of the next month.
+    #[must_use]
+    pub(crate) fn first_of_next_month(self) -> Self {
+        let (year, month, _) = date_from_days(self.days);
+        let (year, month) = if month == 12 {
+            (year + 1, 1)
+        } else {
+            (year, month + 1)
+        };
+        Self::from_days(days_from_date(year, month, 1))
+    }
+}
+
+// Writes `YYYY-MM-DD`.
+impl fmt::Display for Date {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (year, month, day) = date_from_days(self.days);
+        write!(formatter, "{year:04}-{month:02}-{day:02}")
+    }
+}
+
+// Shows `YYYY-MM-DD`, which reads better than the raw days.
+impl fmt::Debug for Date {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "Date({self})")
+    }
+}
+
+// Reads `YYYY-MM-DD`.
+impl FromStr for Date {
+    type Err = EnvelopeError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let bytes = text.as_bytes();
+        let date = (bytes.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-')
+            .then(|| {
+                Self::new(
+                    number(bytes, 0, 4)?,
+                    number(bytes, 5, 7)?,
+                    number(bytes, 8, 10)?,
+                )
+            })
+            .flatten();
+        date.ok_or_else(|| EnvelopeError::invalid("date", "not a YYYY-MM-DD date"))
+    }
+}
+
 /// A point in time, to the nanosecond: the CloudEvents `time`.
 ///
 /// It reads and writes RFC 3339, the format CloudEvents uses, with two limits: years run from
@@ -175,6 +303,12 @@ impl Timestamp {
             seconds: nanos.div_euclid(NANOS_PER_SECOND) as i64,
             nanos: nanos.rem_euclid(NANOS_PER_SECOND) as u32,
         }
+    }
+
+    /// The UTC day this time falls on.
+    #[must_use]
+    pub fn date(&self) -> Date {
+        Date::from_days(self.seconds.div_euclid(SECONDS_PER_DAY))
     }
 
     /// Nanoseconds since 1970-01-01T00:00:00Z, negative before it.
@@ -342,5 +476,42 @@ mod tests {
             Timestamp::from(UNIX_EPOCH - second).unix_nanos(),
             -NANOS_PER_SECOND
         );
+    }
+
+    #[test]
+    fn a_date_reads_what_it_writes_and_rejects_days_that_dont_exist() {
+        let date: Date = "2028-02-29".parse().unwrap();
+
+        assert_eq!(date.to_string(), "2028-02-29");
+        assert_eq!((date.year(), date.month(), date.day()), (2028, 2, 29));
+        for text in [
+            "2026-02-29",
+            "2026-13-01",
+            "2026-1-01",
+            "20261104",
+            "2026-11-04T",
+        ] {
+            assert!(text.parse::<Date>().is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_date_finds_its_monday_and_its_month() {
+        let date: Date = "2026-12-31".parse().unwrap(); // a Thursday
+
+        assert_eq!(date.monday().to_string(), "2026-12-28");
+        assert_eq!(date.monday().monday(), date.monday());
+        assert_eq!(date.first_of_month().to_string(), "2026-12-01");
+        assert_eq!(date.first_of_next_month().to_string(), "2027-01-01");
+        assert_eq!(date.add_days(1).to_string(), "2027-01-01");
+    }
+
+    #[test]
+    fn a_time_falls_on_its_utc_day() {
+        let before_midnight: Timestamp = "2026-11-04T23:59:59.9Z".parse().unwrap();
+        let before_epoch: Timestamp = "1969-12-31T12:00:00Z".parse().unwrap();
+
+        assert_eq!(before_midnight.date().to_string(), "2026-11-04");
+        assert_eq!(before_epoch.date().to_string(), "1969-12-31");
     }
 }

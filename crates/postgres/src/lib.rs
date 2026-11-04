@@ -20,6 +20,11 @@
 //! schema of its own, such as `messaging`, also keeps sqlx's `_sqlx_migrations` table for these
 //! migrations apart from the application's.
 //!
+//! # Partitions
+//!
+//! Both tables are partitioned by time. [`PostgresPartitions`] lets the bus's maintenance worker
+//! create partitions ahead and expire old ones.
+//!
 //! The inbox lands with the first milestone.
 
 #![forbid(unsafe_code)]
@@ -27,5 +32,7 @@
 #![warn(missing_docs)]
 
 mod outbox;
+mod partitions;
 
 pub use outbox::PostgresOutbox;
+pub use partitions::PostgresPartitions;
