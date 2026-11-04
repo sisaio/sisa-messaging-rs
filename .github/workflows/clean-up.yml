@@ -43,6 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A zero or negative count would move the cutoff to today or later.
+          if ! [[ "$DAYS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "days must be a positive whole number: $DAYS" >&2
+            exit 1
+          fi
           cutoff=$(date -u -d "$DAYS days ago" +%F)
           repo="repos/$GITHUB_REPOSITORY/actions"
 
