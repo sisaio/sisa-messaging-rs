@@ -10,12 +10,14 @@
 #![warn(missing_docs)]
 
 mod clock;
+mod codec;
 mod envelope;
 mod error;
 mod message;
 mod publisher;
 mod time;
 
+pub use codec::{Codec, CodecError, JsonCodec};
 pub use envelope::{ContentType, Correlation, Envelope, Extensions, Source, TraceContext};
 pub use error::EnvelopeError;
 pub use message::{Message, MessageId, MessageType};
