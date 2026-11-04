@@ -13,6 +13,7 @@ mod bus;
 mod endpoint;
 mod handler;
 mod in_memory;
+mod inbox;
 mod maintenance;
 mod outbox;
 mod publish;
@@ -24,6 +25,9 @@ pub use endpoint::EndpointBuilder;
 pub use handler::HandlerFn;
 pub use handler::{Handler, HandlerContext, HandlerError};
 pub use in_memory::{InMemoryDelivery, InMemoryTransport};
+pub use inbox::NoInbox;
+#[doc(hidden)]
+pub use inbox::{EndpointInbox, HandlerOutbox, InboxPipeline};
 pub use maintenance::{PartitionMode, PartitionSettings};
 pub use outbox::OutboxPublisher;
 pub use publish::PublishError;

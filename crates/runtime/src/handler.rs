@@ -3,6 +3,7 @@
 use std::any::type_name;
 use std::error::Error;
 use std::fmt;
+use std::ops::DerefMut;
 
 use sisa_messaging_core::{Correlation, Envelope, Message, Publisher, Source};
 
@@ -57,18 +58,24 @@ impl fmt::Display for HandlerError {
     }
 }
 
-/// What a handler gets with its message: the delivered envelope, and a [`Publisher`] for the
-/// messages it sends in turn.
+/// What a handler gets with its message: the delivered envelope, a [`Publisher`] for the
+/// messages it sends in turn, and on an endpoint with an inbox, the delivery's transaction.
 ///
 /// Its publishes have the handled message as their cause, carry its correlation id and trace
-/// context over, and are held until the handler returns `Ok`. The endpoint sends them before it
-/// acks the delivery, and drops them when the handler fails.
-pub struct HandlerContext {
+/// context over, and are held until the handler returns `Ok`. The endpoint drops them when the
+/// handler fails. Otherwise, on an endpoint with an inbox and a bus with an outbox, it writes them
+/// to the outbox in the handler's transaction; in every other case it sends them after any commit
+/// and before it acks the delivery.
+///
+/// `Transaction` is the inbox store's transaction, such as `sqlx::PgTransaction<'static>`, and
+/// `()` on an endpoint without an inbox.
+pub struct HandlerContext<Transaction = ()> {
     source: Source,
     endpoint: String,
     envelope: Envelope,
     attempt: u32,
     pub(crate) held: Vec<Envelope>,
+    pub(crate) transaction: Transaction,
 }
 
 impl HandlerContext {
@@ -79,7 +86,26 @@ impl HandlerContext {
             envelope,
             attempt,
             held: Vec::new(),
+            transaction: (),
         }
+    }
+}
+
+impl<Transaction> HandlerContext<Transaction> {
+    // The same context with another transaction, and the transaction it had.
+    pub(crate) fn with_transaction<Other>(
+        self,
+        transaction: Other,
+    ) -> (HandlerContext<Other>, Transaction) {
+        let context = HandlerContext {
+            source: self.source,
+            endpoint: self.endpoint,
+            envelope: self.envelope,
+            attempt: self.attempt,
+            held: self.held,
+            transaction,
+        };
+        (context, self.transaction)
     }
 
     /// The delivered envelope, the handled message's id, correlation and extensions included.
@@ -101,8 +127,17 @@ impl HandlerContext {
     }
 }
 
+impl<Transaction: DerefMut> HandlerContext<Transaction> {
+    /// The delivery's transaction, on an endpoint with an inbox, such as a `&mut PgConnection`
+    /// for sqlx queries. The handler's database work goes here, so it commits with the inbox
+    /// receipt, and rolls back with it when the handler fails.
+    pub fn transaction(&mut self) -> &mut Transaction::Target {
+        &mut self.transaction
+    }
+}
+
 // Holds each publish, tied to the handled message, until the handler returns `Ok`.
-impl Publisher for HandlerContext {
+impl<Transaction: Send> Publisher for HandlerContext<Transaction> {
     type Error = PublishError;
 
     async fn publish<Msg: Message>(&mut self, message: &Msg) -> Result<(), PublishError> {
@@ -118,7 +153,7 @@ impl Publisher for HandlerContext {
 }
 
 // Shows which delivery this is and how many publishes it holds, not the data.
-impl fmt::Debug for HandlerContext {
+impl<Transaction> fmt::Debug for HandlerContext<Transaction> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HandlerContext")
@@ -134,7 +169,8 @@ impl fmt::Debug for HandlerContext {
 /// Handles one message type on an endpoint.
 ///
 /// An `async fn` taking the message and `&mut HandlerContext` is a handler, and so is a type
-/// that implements this trait.
+/// that implements this trait. On an endpoint with an inbox, a handler takes
+/// `&mut HandlerContext<Transaction>`, with the inbox store's transaction, to work in it.
 ///
 /// ```
 /// use serde::{Deserialize, Serialize};
@@ -158,47 +194,47 @@ impl fmt::Debug for HandlerContext {
 ///     Ok(())
 /// }
 /// ```
-pub trait Handler<Msg>: Send + Sync + 'static {
+pub trait Handler<Msg, Transaction = ()>: Send + Sync + 'static {
     /// Handles a message. An error makes the endpoint retry the delivery, as its
     /// [`RetryPolicy`](crate::RetryPolicy) says.
     fn handle(
         &self,
         message: Msg,
-        context: &mut HandlerContext,
+        context: &mut HandlerContext<Transaction>,
     ) -> impl Future<Output = Result<(), HandlerError>> + Send;
 }
 
 /// A function that is a [`Handler`] for every lifetime of its context, which Rust can't say in
 /// one bound on stable. Implemented for every such function; not for use on its own.
 #[doc(hidden)]
-pub trait HandlerFn<'ctx, Msg>: Send + Sync + 'static {
+pub trait HandlerFn<'ctx, Msg, Transaction: 'ctx>: Send + Sync + 'static {
     type Future: Future<Output = Result<(), HandlerError>> + Send + 'ctx;
 
-    fn call(&self, message: Msg, context: &'ctx mut HandlerContext) -> Self::Future;
+    fn call(&self, message: Msg, context: &'ctx mut HandlerContext<Transaction>) -> Self::Future;
 }
 
 // Names the future of a handler function, whose type depends on the context's lifetime.
-impl<'ctx, Msg, Function, Fut> HandlerFn<'ctx, Msg> for Function
+impl<'ctx, Msg, Transaction: 'ctx, Function, Fut> HandlerFn<'ctx, Msg, Transaction> for Function
 where
-    Function: Fn(Msg, &'ctx mut HandlerContext) -> Fut + Send + Sync + 'static,
+    Function: Fn(Msg, &'ctx mut HandlerContext<Transaction>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), HandlerError>> + Send + 'ctx,
 {
     type Future = Fut;
 
-    fn call(&self, message: Msg, context: &'ctx mut HandlerContext) -> Fut {
+    fn call(&self, message: Msg, context: &'ctx mut HandlerContext<Transaction>) -> Fut {
         self(message, context)
     }
 }
 
-// Lets an `async fn(Msg, &mut HandlerContext)` be a handler.
-impl<Msg, Function> Handler<Msg> for Function
+// Lets an `async fn(Msg, &mut HandlerContext<Transaction>)` be a handler.
+impl<Msg, Transaction: 'static, Function> Handler<Msg, Transaction> for Function
 where
-    Function: for<'ctx> HandlerFn<'ctx, Msg>,
+    Function: for<'ctx> HandlerFn<'ctx, Msg, Transaction>,
 {
     fn handle(
         &self,
         message: Msg,
-        context: &mut HandlerContext,
+        context: &mut HandlerContext<Transaction>,
     ) -> impl Future<Output = Result<(), HandlerError>> + Send {
         self.call(message, context)
     }
