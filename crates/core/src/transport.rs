@@ -99,6 +99,20 @@ pub trait TransportSubscriber: Send + Sync + 'static {
         &self,
         endpoint: &EndpointSpec,
     ) -> impl Future<Output = Result<Deliveries<Self::Delivery>, TransportError>> + Send;
+
+    /// Publishes an envelope the endpoint gave up on to the endpoint's error destination, such
+    /// as `{prefix}._error.{endpoint}` on NATS, where a person or a tool can look at it and send
+    /// it again. It returns as [`TransportPublisher::publish`] does, and must not drop the
+    /// envelope as a duplicate of the original, which has the same id.
+    ///
+    /// # Errors
+    ///
+    /// [`TransportError`] when the broker didn't confirm it has the envelope.
+    fn publish_error(
+        &self,
+        endpoint: &str,
+        envelope: &Envelope,
+    ) -> impl Future<Output = Result<(), TransportError>> + Send;
 }
 
 /// One message received on an endpoint, until it is settled with

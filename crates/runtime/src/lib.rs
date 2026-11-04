@@ -9,6 +9,18 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod bus;
+mod endpoint;
+mod handler;
 mod in_memory;
+mod publish;
+mod retry;
 
+pub use bus::{Bus, BusBuilder, NoOutbox, StartError};
+pub use endpoint::EndpointBuilder;
+#[doc(hidden)]
+pub use handler::HandlerFn;
+pub use handler::{Handler, HandlerContext, HandlerError};
 pub use in_memory::{InMemoryDelivery, InMemoryTransport};
+pub use publish::PublishError;
+pub use retry::RetryPolicy;
