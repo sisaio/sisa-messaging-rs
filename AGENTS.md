@@ -39,6 +39,8 @@ exit codes rather than piped output. The NATS and PostgreSQL tests need Docker.
 ## Code
 
 - Keep code minimal, readable, and working; the smallest change that does the job wins.
+- A performance change shows its numbers before and after, measured in alternating rounds of
+  the old and the new code, and with instruction counts when the difference is under 5%.
 - A delivery is acked only after its work is durable, and an outbox row is written only on the
   caller's connection. Don't add a path around either.
 - Name every constraint and index in SQL, with a two-letter prefix: `pk_`, `uq_`, `fk_`, `ck_`,
