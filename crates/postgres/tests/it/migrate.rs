@@ -1,68 +1,107 @@
-use sisa_messaging_postgres::{PostgresSettings, migrate};
-use sisa_messaging_testing::Postgres;
-use sqlx::PgPool;
+use std::path::{Path, PathBuf};
 
-/// The partitions of `table` in the default schema, by name.
-async fn partitions(pool: &PgPool, table: &str) -> Vec<String> {
+use sisa_messaging_testing::Postgres;
+use sqlx::{PgPool, migrate::Migrator};
+
+fn migrations() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations/postgresql")
+}
+
+/// A pool whose `search_path` is the new schema `messaging`, as an application configures it.
+async fn messaging_pool(postgres: &Postgres) -> PgPool {
+    sqlx::query("CREATE SCHEMA messaging")
+        .execute(&postgres.pool().await)
+        .await
+        .unwrap();
+
+    PgPool::connect(&format!(
+        "{}?options=-c%20search_path%3Dmessaging",
+        postgres.url()
+    ))
+    .await
+    .unwrap()
+}
+
+/// Runs the migrations as `sqlx migrate run --source migrations/postgresql` does.
+async fn migrated(postgres: &Postgres) -> PgPool {
+    let pool = messaging_pool(postgres).await;
+    Migrator::new(migrations().as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    pool
+}
+
+async fn tables(pool: &PgPool, schema: &str) -> Vec<String> {
     sqlx::query_scalar(
-        "SELECT child.relname::text FROM pg_inherits
-         JOIN pg_class child ON child.oid = pg_inherits.inhrelid
-         JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
-         JOIN pg_namespace ON pg_namespace.oid = parent.relnamespace
-         WHERE pg_namespace.nspname = 'sisa_messaging' AND parent.relname = $1
-         ORDER BY 1",
+        "SELECT relname::text FROM pg_class
+         JOIN pg_namespace ON pg_namespace.oid = relnamespace
+         WHERE nspname = $1 AND relkind IN ('r', 'p') ORDER BY 1",
     )
-    .bind(table)
+    .bind(schema)
     .fetch_all(pool)
     .await
     .unwrap()
 }
 
-async fn versions(pool: &PgPool, schema: &str) -> Vec<i32> {
-    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT version FROM \"{schema}\".schema_version ORDER BY 1"
-    )))
-    .fetch_all(pool)
-    .await
-    .unwrap()
+async fn today(pool: &PgPool) -> String {
+    sqlx::query_scalar("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDD')")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
-async fn migrate_creates_both_tables_with_a_default_and_eight_daily_partitions() {
+async fn the_migrations_create_both_tables_in_the_search_path_schema() {
     let postgres = Postgres::start().await;
-    let pool = postgres.pool().await;
+    let pool = migrated(&postgres).await;
 
-    migrate(&pool, &PostgresSettings::default()).await.unwrap();
-
-    let today: String = sqlx::query_scalar("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDD')")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let names = tables(&pool, "messaging").await;
+    let today = today(&pool).await;
     for table in ["outbox_messages", "inbox_receipts"] {
-        let names = partitions(&pool, table).await;
-        assert_eq!(names.len(), 9, "{names:?}");
+        let partitions: Vec<_> = names
+            .iter()
+            .filter(|name| name.starts_with(&format!("{table}_")))
+            .collect();
+        assert_eq!(partitions.len(), 9, "a default and 8 days: {partitions:?}");
         assert!(names.contains(&format!("{table}_default")), "{names:?}");
         assert!(names.contains(&format!("{table}_p{today}")), "{names:?}");
     }
-    assert_eq!(versions(&pool, "sisa_messaging").await, [1]);
+    assert!(names.contains(&"_sqlx_migrations".to_owned()), "{names:?}");
+    assert!(tables(&pool, "public").await.is_empty());
 }
 
 #[tokio::test]
-async fn migrate_names_every_constraint_and_index() {
+async fn the_script_run_by_hand_creates_the_same_tables() {
     let postgres = Postgres::start().await;
-    let pool = postgres.pool().await;
+    let pool = messaging_pool(&postgres).await;
+    let script = migrations().join("20261104000000_create_outbox_and_inbox.sql");
 
-    migrate(&pool, &PostgresSettings::default()).await.unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(
+        std::fs::read_to_string(script).unwrap(),
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(tables(&pool, "messaging").await.len(), 20);
+}
+
+#[tokio::test]
+async fn every_constraint_and_index_is_named() {
+    let postgres = Postgres::start().await;
+    let pool = migrated(&postgres).await;
 
     let names: Vec<String> = sqlx::query_scalar(
         "SELECT conname::text FROM pg_constraint
          JOIN pg_class ON pg_class.oid = conrelid
-         WHERE relname IN ('outbox_messages', 'inbox_receipts', 'schema_version')
+         WHERE relname IN ('outbox_messages', 'inbox_receipts')
            AND contype <> 'n' -- PostgreSQL 18 records NOT NULL as a constraint too
          UNION
          SELECT indexname::text FROM pg_indexes
-         WHERE schemaname = 'sisa_messaging'
-           AND tablename IN ('outbox_messages', 'inbox_receipts', 'schema_version')
+         WHERE schemaname = 'messaging' AND tablename IN ('outbox_messages', 'inbox_receipts')
          ORDER BY 1",
     )
     .fetch_all(&pool)
@@ -77,58 +116,15 @@ async fn migrate_names_every_constraint_and_index() {
             "ix_outbox_messages_id",
             "pk_inbox_receipts",
             "pk_outbox_messages",
-            "pk_schema_version",
             "uq_inbox_receipts_endpoint_message",
         ]
     );
 }
 
 #[tokio::test]
-async fn a_second_migrate_changes_nothing() {
-    let postgres = Postgres::start().await;
-    let pool = postgres.pool().await;
-    migrate(&pool, &PostgresSettings::default()).await.unwrap();
-
-    migrate(&pool, &PostgresSettings::default()).await.unwrap();
-
-    assert_eq!(versions(&pool, "sisa_messaging").await, [1]);
-    assert_eq!(partitions(&pool, "outbox_messages").await.len(), 9);
-}
-
-#[tokio::test]
-async fn concurrent_migrates_both_succeed_and_leave_one_schema() {
-    let postgres = Postgres::start().await;
-    let pool = postgres.pool().await;
-    let settings = PostgresSettings::default();
-
-    let (first, second) = tokio::join!(migrate(&pool, &settings), migrate(&pool, &settings));
-
-    first.unwrap();
-    second.unwrap();
-    assert_eq!(versions(&pool, "sisa_messaging").await, [1]);
-}
-
-#[tokio::test]
-async fn migrate_uses_the_configured_schema() {
-    let postgres = Postgres::start().await;
-    let pool = postgres.pool().await;
-    let mut settings = PostgresSettings::default();
-    settings.schema = "Billing Messages".into();
-
-    migrate(&pool, &settings).await.unwrap();
-
-    assert_eq!(versions(&pool, "Billing Messages").await, [1]);
-    sqlx::query("SELECT * FROM \"Billing Messages\".outbox_messages")
-        .execute(&pool)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn a_row_lands_in_the_partition_of_its_utc_day() {
     let postgres = Postgres::start().await;
-    let pool = postgres.pool().await;
-    migrate(&pool, &PostgresSettings::default()).await.unwrap();
+    let pool = migrated(&postgres).await;
 
     // A session 14 hours ahead of UTC, so a bound in local time would pick tomorrow's partition.
     let mut connection = pool.acquire().await.unwrap();
@@ -137,7 +133,7 @@ async fn a_row_lands_in_the_partition_of_its_utc_day() {
         .await
         .unwrap();
     let partition: String = sqlx::query_scalar(
-        "INSERT INTO sisa_messaging.inbox_receipts
+        "INSERT INTO inbox_receipts
              (id, message_time, endpoint, message_id, type, source, attributes)
          VALUES (gen_random_uuid(), date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
                  'billing', gen_random_uuid(), 'orders.order_placed.v1', '/orders', '{}')
@@ -147,9 +143,5 @@ async fn a_row_lands_in_the_partition_of_its_utc_day() {
     .await
     .unwrap();
 
-    let today: String = sqlx::query_scalar("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDD')")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(partition, format!("sisa_messaging.inbox_receipts_p{today}"));
+    assert_eq!(partition, format!("inbox_receipts_p{}", today(&pool).await));
 }

@@ -34,7 +34,7 @@ Report findings; don't push fixes unless asked.
       (`feat` only for something users can do now, `!` for a breaking change).
 - [ ] Look for bugs: a lock held across `.await`, a delivery acked before its commit, a message id
       made again on a retry instead of kept, an error swallowed without a log, SQL that names a
-      table without its configured schema, and the patterns past reviews found (below).
+      schema instead of leaving it to the `search_path`, and the patterns past reviews found (below).
 - [ ] Look for what only shows at scale or during an outage: a std lock or a long loop on an
       async thread, a second copy of something meant to run once (such as two dispatchers for one
       bus), a queue or buffer with no bound, a claim without `SKIP LOCKED` or without a limit, and

@@ -369,8 +369,12 @@ The prefix keeps deployments that share a server apart, such as `prod` and `stag
 
 ### PostgreSQL tables
 
-In a schema of their own, `sisa_messaging` by default, created by `migrate`. Columns that hold
-a CloudEvents attribute take its name. A primary key on a partitioned table must hold the
+Created by the SQL migrations in [`migrations/postgresql`](../migrations/postgresql), which the
+application runs itself: with `sqlx migrate run --source migrations/postgresql` in its deploy
+pipeline, or by hand with psql. The SQL names no schema, so the connection's `search_path` picks
+it, for the migrations and for the queries alike, such as `options=-c search_path=messaging` in the
+URL. A schema of its own also keeps sqlx's `_sqlx_migrations` table for these migrations apart from
+the application's. Columns that hold a CloudEvents attribute take its name. A primary key on a partitioned table must hold the
 partition key, so each one starts with it.
 
 Every constraint and index is named in the SQL, never left to PostgreSQL or a tool to generate,
@@ -391,7 +395,7 @@ its table. A partition's own copies of these get names PostgreSQL derives from t
 table; nothing refers to them.
 
 ```sql
-CREATE TABLE sisa_messaging.outbox_messages (
+CREATE TABLE outbox_messages (
     id                uuid        NOT NULL,              -- the message id, UUID v7: claim order
     created_at        timestamptz NOT NULL DEFAULT now(), -- the partition key
     type              text        NOT NULL,              -- the message type, which picks the destination
@@ -410,11 +414,11 @@ CREATE TABLE sisa_messaging.outbox_messages (
     CONSTRAINT pk_outbox_messages PRIMARY KEY (created_at, id),
     CONSTRAINT ck_outbox_messages_status CHECK (status IN ('pending', 'dispatched', 'failed'))
 ) PARTITION BY RANGE (created_at);
-CREATE INDEX ix_outbox_messages_due ON sisa_messaging.outbox_messages (available_at, id)
+CREATE INDEX ix_outbox_messages_due ON outbox_messages (available_at, id)
     WHERE status = 'pending';
-CREATE INDEX ix_outbox_messages_id ON sisa_messaging.outbox_messages (id);
+CREATE INDEX ix_outbox_messages_id ON outbox_messages (id);
 
-CREATE TABLE sisa_messaging.inbox_receipts (
+CREATE TABLE inbox_receipts (
     id             uuid        NOT NULL,                 -- the receipt's own id, UUID v7
     message_time   timestamptz NOT NULL,                 -- the envelope's time: the partition key
     endpoint       text        NOT NULL,
@@ -431,20 +435,14 @@ CREATE TABLE sisa_messaging.inbox_receipts (
 ) PARTITION BY RANGE (message_time);
 
 -- For each table, the partitions for today and the next 7 intervals and a default partition,
--- made by `migrate` so the first write has a partition, then kept ahead by the maintenance worker.
--- Days are UTC days: the bounds carry `+00`, so the session's time zone doesn't move them.
--- `migrate` creates the schema and `schema_version` first, and records version 1 there.
-CREATE TABLE sisa_messaging.outbox_messages_p20261102 PARTITION OF sisa_messaging.outbox_messages
+-- made by the migration so the first write has a partition, then kept ahead by the maintenance
+-- worker. Days are UTC days: the bounds carry `+00`, so the session's time zone doesn't move them.
+CREATE TABLE outbox_messages_p20261102 PARTITION OF outbox_messages
     FOR VALUES FROM ('2026-11-02 00:00+00') TO ('2026-11-03 00:00+00');
-CREATE TABLE sisa_messaging.outbox_messages_default PARTITION OF sisa_messaging.outbox_messages DEFAULT;
-CREATE TABLE sisa_messaging.inbox_receipts_p20261102 PARTITION OF sisa_messaging.inbox_receipts
+CREATE TABLE outbox_messages_default PARTITION OF outbox_messages DEFAULT;
+CREATE TABLE inbox_receipts_p20261102 PARTITION OF inbox_receipts
     FOR VALUES FROM ('2026-11-02 00:00+00') TO ('2026-11-03 00:00+00');
-CREATE TABLE sisa_messaging.inbox_receipts_default PARTITION OF sisa_messaging.inbox_receipts DEFAULT;
-
-CREATE TABLE sisa_messaging.schema_version (
-    version integer NOT NULL,
-    CONSTRAINT pk_schema_version PRIMARY KEY (version)
-);
+CREATE TABLE inbox_receipts_default PARTITION OF inbox_receipts DEFAULT;
 ```
 
 The outbox orders by `id` instead of a sequence column: a UUID version 7 starts with its
@@ -457,10 +455,10 @@ rows:
 
 ```sql
 WITH claimed AS (
-    UPDATE sisa_messaging.outbox_messages
+    UPDATE outbox_messages
     SET available_at = now() + $2, attempts = attempts + 1
     WHERE (created_at, id) IN (
-        SELECT created_at, id FROM sisa_messaging.outbox_messages
+        SELECT created_at, id FROM outbox_messages
         WHERE status = 'pending' AND available_at <= now()
         ORDER BY id
         LIMIT $1
@@ -501,7 +499,7 @@ proposal.
 | Outbox and inbox rows are never deleted one by one; whole partitions expire, and only when a retention is set | The rows are business data. Expiring a partition is one cheap statement that leaves no bloat, where deleting rows needs vacuum and slows the claim |
 | The inbox is partitioned by the envelope's `time`, not by when the receipt was written | A primary key on a partitioned table only holds inside one partition, so a redelivery must land in the same partition as its first receipt |
 | An expired partition is detached by default, dropped only when asked | Detaching keeps the data as a table to archive or query; dropping it is the step nobody can undo |
-| The tables live in their own schema, created by our own `migrate` with a version table, not sqlx's migrator | sqlx's `_sqlx_migrations` table belongs to the application, and two migrators in one table refuse each other's rows. The SQL is also published for teams that run migrations themselves |
+| The tables come from plain SQL migrations in `migrations/postgresql`, which the application runs with sqlx-cli or by hand; the SQL names no schema, and the connection's `search_path` picks it | Applications already run sqlx migrations in their deploy pipelines, and a schema per deployment needs no setting of ours. Run in a schema of their own, the migrations keep their own `_sqlx_migrations` table there |
 | NATS uses JetStream, not core NATS | Core NATS has no acknowledgement or redelivery, so it can't be at least once |
 | Transports, persistences and codecs are open traits | Users asked to bring their own; sealing them would rule that out. Their docs say which changes a minor release may make |
 | The engine lives in `sisa-messaging-runtime`; database crates implement only store traits; the facade has no code | The dispatcher, the inbox step and partition maintenance would otherwise be copied into every database crate, where only the SQL differs |
@@ -518,7 +516,7 @@ proposal.
   path.
 - No transaction is held across a transport call: publishes held by a handler go out after the
   commit, and the dispatcher's claim commits before it publishes.
-- The outbox and inbox SQL always names the configured schema.
+- The outbox and inbox SQL never names a schema; the connection's `search_path` picks it.
 - Only the clock module reads the wall clock.
 - No code deletes outbox or inbox rows; data leaves only by expiring a partition, and an outbox
   partition with pending or failed rows never expires.
