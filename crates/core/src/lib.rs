@@ -15,6 +15,7 @@ mod envelope;
 mod error;
 mod message;
 mod publisher;
+mod store;
 mod time;
 mod transport;
 
@@ -23,6 +24,7 @@ pub use envelope::{ContentType, Correlation, Envelope, Extensions, Source, Trace
 pub use error::EnvelopeError;
 pub use message::{Message, MessageId, MessageType};
 pub use publisher::Publisher;
+pub use store::{OutboxStore, StoreError};
 pub use time::Timestamp;
 pub use transport::{
     Deliveries, Delivery, EndpointSpec, TransportError, TransportPublisher, TransportSubscriber,

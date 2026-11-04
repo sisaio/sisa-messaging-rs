@@ -46,7 +46,7 @@ impl Message for OrderPlaced {
 }
 
 let bus = Bus::builder("/orders", NatsTransport::connect("nats://127.0.0.1:4222", &nats).await?)
-    .outbox(PostgresOutbox::new(pool.clone(), &postgres).await?)
+    .outbox(PostgresOutbox::new(pool.clone()))
     .start()
     .await?;
 

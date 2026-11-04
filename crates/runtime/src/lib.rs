@@ -13,6 +13,7 @@ mod bus;
 mod endpoint;
 mod handler;
 mod in_memory;
+mod outbox;
 mod publish;
 mod retry;
 
@@ -22,5 +23,6 @@ pub use endpoint::EndpointBuilder;
 pub use handler::HandlerFn;
 pub use handler::{Handler, HandlerContext, HandlerError};
 pub use in_memory::{InMemoryDelivery, InMemoryTransport};
+pub use outbox::OutboxPublisher;
 pub use publish::PublishError;
 pub use retry::RetryPolicy;

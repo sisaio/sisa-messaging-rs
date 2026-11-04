@@ -20,8 +20,12 @@
 //! schema of its own, such as `messaging`, also keeps sqlx's `_sqlx_migrations` table for these
 //! migrations apart from the application's.
 //!
-//! The outbox and inbox land with the first milestone.
+//! The inbox lands with the first milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
+
+mod outbox;
+
+pub use outbox::PostgresOutbox;

@@ -20,8 +20,14 @@ workspace = true
 [dependencies]
 # The shared contracts that this crate implements.
 sisa-messaging-core = { workspace = true }
+# The PostgreSQL client: the caller's connection type, and the store's own pool.
+sqlx = { workspace = true }
 
 [dev-dependencies]
+# The bus that publishes through the outbox, and messages and envelopes to publish.
+bytes = { workspace = true }
+serde = { workspace = true }
+sisa-messaging-runtime = { workspace = true }
 # A PostgreSQL server per test, in Docker, and sqlx's migrator to run the migrations as sqlx-cli does.
 sisa-messaging-testing = { workspace = true }
 sqlx = { workspace = true, features = ["migrate"] }
