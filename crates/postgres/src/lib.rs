@@ -24,15 +24,15 @@
 //!
 //! Both tables are partitioned by time. [`PostgresPartitions`] lets the bus's maintenance worker
 //! create partitions ahead and expire old ones.
-//!
-//! The inbox lands with the first milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod inbox;
 mod outbox;
 mod partitions;
 
+pub use inbox::PostgresInbox;
 pub use outbox::PostgresOutbox;
 pub use partitions::PostgresPartitions;

@@ -14,6 +14,8 @@ use sisa_messaging_core::{
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 
+use crate::endpoint::Endpoint;
+use crate::inbox::{EndpointInbox, InboxPipeline};
 use crate::maintenance::{self, PartitionMode, PartitionSettings};
 use crate::publish::{PublishError, encode};
 use crate::{EndpointBuilder, OutboxPublisher};
@@ -36,6 +38,10 @@ pub enum StartError {
         /// The message type handled twice.
         message_type: String,
     },
+    /// An endpoint with an inbox was added before the outbox, so its handlers' publishes would
+    /// bypass the outbox. Add the outbox first.
+    #[error("endpoint `{0}` has an inbox and is added before the outbox")]
+    InboxBeforeOutbox(String),
     /// The transport couldn't subscribe an endpoint.
     #[error("could not subscribe endpoint `{endpoint}`: {source}")]
     Subscribe {
@@ -55,7 +61,7 @@ struct Inner<Transport, Outbox> {
     source: Source,
     transport: Arc<Transport>,
     endpoints: Vec<String>,
-    outbox: Outbox,
+    outbox: Arc<Outbox>,
     // Sends on shutdown; dropped with the last clone, which closes it. Either stops the workers.
     stop: watch::Sender<()>,
     // Held while `shutdown` waits, so a second call waits for the same workers.
@@ -125,7 +131,7 @@ impl<Transport> Bus<Transport> {
             transport,
             endpoints: Vec::new(),
             maintenance: Vec::new(),
-            outbox: NoOutbox,
+            outbox: Arc::new(NoOutbox),
         }
     }
 }
@@ -206,37 +212,55 @@ type Maintenance = Box<dyn FnOnce(watch::Receiver<()>) -> BoxFuture<'static, ()>
 pub struct BusBuilder<Transport, Outbox = NoOutbox> {
     source: String,
     transport: Transport,
-    endpoints: Vec<EndpointBuilder>,
+    // Built as they are added, with their names; an error is reported by `start`.
+    endpoints: Vec<(String, Result<Endpoint, StartError>)>,
     maintenance: Vec<Maintenance>,
-    outbox: Outbox,
+    outbox: Arc<Outbox>,
 }
 
 impl<Transport> BusBuilder<Transport> {
     /// Keeps an outbox in `store`, which makes [`Bus::outbox`] available on the bus. The store is
     /// part of the bus's type, such as `Bus<NatsTransport, PostgresOutbox>`.
+    ///
+    /// Endpoints with an inbox write their handlers' publishes to it, so add it before them.
     #[must_use]
     pub fn outbox<Store: OutboxStore>(self, store: Store) -> BusBuilder<Transport, Store> {
+        let endpoints = self
+            .endpoints
+            .into_iter()
+            .map(|(name, endpoint)| match endpoint {
+                Ok(endpoint) if endpoint.transactional => {
+                    (name.clone(), Err(StartError::InboxBeforeOutbox(name)))
+                }
+                other => (name, other),
+            })
+            .collect();
         BusBuilder {
             source: self.source,
             transport: self.transport,
-            endpoints: self.endpoints,
+            endpoints,
             maintenance: self.maintenance,
-            outbox: store,
+            outbox: Arc::new(store),
         }
     }
 }
 
 impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
     /// Adds an endpoint: a durable subscription named `name`, such as `billing`, that every
-    /// instance of the service shares. `configure` adds its handlers.
+    /// instance of the service shares. `configure` adds its handlers, and its
+    /// [inbox](EndpointBuilder::inbox) if it has one.
     #[must_use]
-    pub fn endpoint(
+    pub fn endpoint<Inbox>(
         mut self,
         name: impl Into<String>,
-        configure: impl FnOnce(EndpointBuilder) -> EndpointBuilder,
-    ) -> Self {
+        configure: impl FnOnce(EndpointBuilder) -> EndpointBuilder<Inbox>,
+    ) -> Self
+    where
+        Inbox: EndpointInbox + InboxPipeline<Outbox>,
+    {
+        let builder = configure(EndpointBuilder::new(name.into()));
         self.endpoints
-            .push(configure(EndpointBuilder::new(name.into())));
+            .push((builder.name.clone(), builder.build(&self.outbox)));
         self
     }
 
@@ -271,17 +295,17 @@ where
         let source = Source::new(self.source)?;
         let mut names = HashSet::new();
         let mut endpoints = Vec::new();
-        for builder in self.endpoints {
-            if !names.insert(builder.name.clone()) {
-                return Err(StartError::DuplicateEndpoint(builder.name));
+        for (name, endpoint) in self.endpoints {
+            if !names.insert(name.clone()) {
+                return Err(StartError::DuplicateEndpoint(name));
             }
-            endpoints.push(builder.build()?);
+            endpoints.push(endpoint?);
         }
 
         let transport = Arc::new(self.transport);
         let mut subscribed = Vec::new();
         for endpoint in endpoints {
-            let spec = EndpointSpec::new(endpoint.name.clone(), endpoint.message_types());
+            let spec = EndpointSpec::new(endpoint.name.clone(), endpoint.message_types.clone());
             match transport.subscribe(&spec).await {
                 Ok(deliveries) => subscribed.push((endpoint, deliveries)),
                 Err(error) => {
@@ -340,7 +364,7 @@ impl<Transport, Outbox> fmt::Debug for BusBuilder<Transport, Outbox> {
         let endpoints: Vec<&str> = self
             .endpoints
             .iter()
-            .map(|endpoint| endpoint.name.as_str())
+            .map(|(name, _)| name.as_str())
             .collect();
         formatter
             .debug_struct("BusBuilder")

@@ -178,7 +178,7 @@ pub trait OutboxStore: Send + Sync + 'static {
 }
 
 pub trait InboxStore: Send + Sync + 'static {
-    type Transaction: Send;
+    type Transaction: Send;  // sqlx::PgTransaction<'static>; dropping it rolls it back
 
     async fn begin(&self) -> Result<Self::Transaction>;
     /// Writes the receipt; false when the endpoint recorded this message before.
@@ -220,7 +220,7 @@ type AppBus = Bus<NatsTransport, PostgresOutbox>;
 let bus: AppBus = Bus::builder("/orders", NatsTransport::connect(nats_url, &nats).await?)
     .outbox(PostgresOutbox::new(pool.clone())) // optional; changes the type
     .endpoint("billing", |endpoint| {
-        endpoint.inbox(PostgresInbox::new(pool.clone(), &postgres)) // optional
+        endpoint.inbox(PostgresInbox::new(pool.clone())) // optional; after the outbox
             .handle::<OrderPlaced>(charge_order)
     })
     .start()
@@ -246,7 +246,23 @@ transaction only for the call, so the application keeps using `tx` between publi
 
 A handler gets the message and a `HandlerContext`. The context publishes with the handled message
 as the causation and its correlation id carried over, and, on a transactional endpoint, hands out
-the transaction.
+the transaction: the handler takes `&mut HandlerContext<PgTransaction<'static>>` and runs its
+queries on `context.transaction()`.
+
+```rust,ignore
+async fn charge_order(
+    order: OrderPlaced,
+    context: &mut HandlerContext<PgTransaction<'static>>,
+) -> Result<(), HandlerError> {
+    sqlx::query("insert into charges ...").execute(context.transaction()).await?;
+    context.publish(&InvoiceSent { order: order.id }).await?; // an outbox row in the same transaction
+    Ok(())
+}
+```
+
+An endpoint's inbox must write in a transaction the bus's outbox can write in too, so an inbox and
+an outbox on different databases don't compile. The bus checks this when the endpoint is added,
+so the outbox comes first; an endpoint with an inbox added before it fails `start`.
 
 ## How each mode behaves
 
@@ -432,7 +448,7 @@ CREATE TABLE inbox_receipts (
     source         text        NOT NULL,
     correlation_id uuid,
     attributes     jsonb       NOT NULL,
-    data           bytea,                                -- kept only with `keep_data = true`
+    data           bytea,                                -- kept only with `keep_data(true)`
     received_at    timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_inbox_receipts PRIMARY KEY (message_time, id),
     CONSTRAINT uq_inbox_receipts_endpoint_message        -- the deduplication

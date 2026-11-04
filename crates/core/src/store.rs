@@ -1,5 +1,5 @@
-//! The store contracts: what a database crate implements so the runtime can keep an outbox; the
-//! partition contract is in `partition.rs`.
+//! The store contracts: what a database crate implements so the runtime can keep an outbox and
+//! an inbox; the partition contract is in `partition.rs`.
 
 use std::error::Error;
 
@@ -43,5 +43,52 @@ pub trait OutboxStore: Send + Sync + 'static {
         &self,
         connection: &mut Self::Connection,
         envelopes: &[Envelope],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// The inbox table of one database: a receipt per endpoint and message handled, written in the
+/// handler's transaction, so a redelivered message is acknowledged without running its handler
+/// again.
+///
+/// Every store keeps these promises:
+///
+/// - The receipt and the handler's work share the transaction from [`begin`](InboxStore::begin),
+///   so they commit or roll back together.
+/// - Dropping a transaction without [`commit`](InboxStore::commit) rolls it back.
+/// - [`record`](InboxStore::record) finds a duplicate however long after the first delivery it
+///   comes, while the first receipt is kept.
+pub trait InboxStore: Send + Sync + 'static {
+    /// A transaction on the store's database, such as `sqlx::PgTransaction<'static>`, which the
+    /// handler gets for its own work.
+    type Transaction: Send;
+
+    /// Begins a transaction on a connection of the store's own.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database can't be reached.
+    fn begin(&self) -> impl Future<Output = Result<Self::Transaction, StoreError>> + Send;
+
+    /// Writes the receipt of `envelope` on `endpoint` in `transaction`. Returns `false`, and
+    /// writes nothing, when the endpoint has a receipt for this message already.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database didn't take the receipt.
+    fn record(
+        &self,
+        transaction: &mut Self::Transaction,
+        endpoint: &str,
+        envelope: &Envelope,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Commits `transaction`: the receipt with the handler's work.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the commit failed; nothing was written then.
+    fn commit(
+        &self,
+        transaction: Self::Transaction,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
