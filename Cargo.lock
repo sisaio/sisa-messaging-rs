@@ -2277,7 +2277,12 @@ dependencies = [
 name = "sisa-messaging-nats"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
+ "bytes",
+ "serde",
  "sisa-messaging-core",
+ "sisa-messaging-testing",
+ "tokio",
 ]
 
 [[package]]
