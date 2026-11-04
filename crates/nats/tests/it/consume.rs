@@ -250,6 +250,55 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_subject() {
 }
 
 #[tokio::test]
+async fn a_subscribe_with_fewer_types_keeps_the_endpoint_s_other_types() {
+    let nats = Nats::start().await;
+    let transport = NatsTransport::connect(settings(&nats)).await.unwrap();
+    let newer = EndpointSpec::new(
+        "billing",
+        vec![
+            MessageType::new("orders.order_placed.v1").unwrap(),
+            MessageType::new("orders.order_paid.v1").unwrap(),
+        ],
+    );
+    drop(transport.subscribe(&newer).await.unwrap());
+
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let paid = envelope_of("orders.order_paid.v1");
+    transport.publish(&paid).await.unwrap();
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope().id, paid.id);
+    delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn ce_headers_are_read_without_regard_to_case() {
+    let nats = Nats::start().await;
+    let transport = NatsTransport::connect(settings(&nats)).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let envelope = envelope();
+    let mut headers = async_nats::HeaderMap::new();
+    for (name, value) in envelope.to_attributes() {
+        headers.insert(format!("Ce-{name}"), value);
+    }
+    nats.jetstream()
+        .await
+        .publish_with_headers(
+            "sisa.orders.order_placed.v1",
+            headers,
+            envelope.data.clone(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope(), &envelope);
+    delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
 async fn an_endpoint_without_message_types_is_refused() {
     let nats = Nats::start().await;
     let transport = NatsTransport::connect(settings(&nats)).await.unwrap();
