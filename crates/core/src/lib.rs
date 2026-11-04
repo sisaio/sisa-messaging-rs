@@ -16,6 +16,7 @@ mod error;
 mod message;
 mod publisher;
 mod time;
+mod transport;
 
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use envelope::{ContentType, Correlation, Envelope, Extensions, Source, TraceContext};
@@ -23,3 +24,6 @@ pub use error::EnvelopeError;
 pub use message::{Message, MessageId, MessageType};
 pub use publisher::Publisher;
 pub use time::Timestamp;
+pub use transport::{
+    Deliveries, Delivery, EndpointSpec, TransportError, TransportPublisher, TransportSubscriber,
+};

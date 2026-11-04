@@ -16,3 +16,10 @@ workspace = true
 
 [dependencies]
 sisa-messaging-core = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+# Paused time, so the retry tests don't wait.
+tokio = { workspace = true, features = ["test-util"] }
