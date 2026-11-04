@@ -261,25 +261,16 @@ jobs:
       - name: Check the links
         run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 
-  # The oldest and newest supported servers, paired, rather than every combination: the transport
-  # and the database don't depend on each other's version.
+  # The newest NATS and PostgreSQL releases only; older servers aren't tested.
   test:
-    name: test (${{ matrix.nats }}, ${{ matrix.postgres }})
+    name: test
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - nats: nats:2.11-alpine
-            postgres: postgres:15-alpine
-          - nats: nats:2.12-alpine
-            postgres: postgres:18-alpine
     env:
-      NATS_IMAGE: ${{ matrix.nats }}
-      POSTGRES_IMAGE: ${{ matrix.postgres }}
+      NATS_IMAGE: nats:2.15-alpine
+      POSTGRES_IMAGE: postgres:18-alpine
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -296,18 +287,11 @@ jobs:
       - name: Pull the server images
         run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE"
 
-      # Only the NATS and PostgreSQL crates talk to the servers, so the rest of the workspace, its
-      # doctests among them, runs with the newest pair only.
       - name: Run all tests including NATS and PostgreSQL
-        if: matrix.nats == 'nats:2.12-alpine'
         run: cargo test --workspace --all-features --locked
 
-      - name: Run the NATS and PostgreSQL tests
-        if: matrix.nats != 'nats:2.12-alpine'
-        run: cargo test -p sisa-messaging-nats -p sisa-messaging-postgres --all-features --locked
-
   # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
-  # matrix job reports no `test (...)` check, so those can't be required directly.
+  # job reports no check, so the jobs themselves can't be required directly.
   ci:
     name: ci
     if: always()
@@ -319,8 +303,8 @@ jobs:
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
 
-  # Line coverage for the README badge, on main only to keep Actions minutes down. One pair of
-  # servers is enough: the others run the same code paths. The test helpers crate is left out.
+  # Line coverage for the README badge, on main only to keep Actions minutes down. The test
+  # helpers crate is left out.
   coverage:
     name: coverage
     needs: changes
@@ -328,7 +312,7 @@ jobs:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     env:
-      NATS_IMAGE: nats:2.12-alpine
+      NATS_IMAGE: nats:2.15-alpine
       POSTGRES_IMAGE: postgres:18-alpine
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

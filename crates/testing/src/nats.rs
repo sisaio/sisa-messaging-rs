@@ -10,7 +10,7 @@ use crate::server::{free_port, image, wait_for};
 const PORT: u16 = 4222;
 
 fn request() -> ContainerRequest<GenericImage> {
-    image("NATS_IMAGE", "nats:2.12-alpine")
+    image("NATS_IMAGE", "nats:2.15-alpine")
         .with_exposed_port(PORT.tcp())
         .with_cmd(["--jetstream"])
 }
@@ -18,7 +18,7 @@ fn request() -> ContainerRequest<GenericImage> {
 /// A NATS server of its own for one test, in Docker, with JetStream on. It is removed when this
 /// value drops.
 ///
-/// `NATS_IMAGE` picks the image, such as `nats:2.11-alpine`; the default is `nats:2.12-alpine`.
+/// `NATS_IMAGE` picks the image, such as `nats:2.14-alpine`; the default is `nats:2.15-alpine`.
 pub struct Nats {
     container: ContainerAsync<GenericImage>,
     url: String,

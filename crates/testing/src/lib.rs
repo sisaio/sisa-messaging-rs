@@ -5,7 +5,7 @@
 //! - [`Postgres`]: the same for a PostgreSQL server, with an empty database.
 //! - [`eventually`]: waits for something another task does.
 //!
-//! `NATS_IMAGE` picks the NATS server, `nats:2.12-alpine` by default, and `POSTGRES_IMAGE` the
+//! `NATS_IMAGE` picks the NATS server, `nats:2.15-alpine` by default, and `POSTGRES_IMAGE` the
 //! database, `postgres:18-alpine` by default.
 
 mod nats;

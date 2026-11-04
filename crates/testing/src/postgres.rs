@@ -19,7 +19,7 @@ fn request() -> ContainerRequest<GenericImage> {
 /// A PostgreSQL server of its own for one test, in Docker, so its database starts empty. It is
 /// removed when this value drops.
 ///
-/// `POSTGRES_IMAGE` picks the image, such as `postgres:15-alpine`; the default is
+/// `POSTGRES_IMAGE` picks the image, such as `postgres:18.1-alpine`; the default is
 /// `postgres:18-alpine`.
 pub struct Postgres {
     container: ContainerAsync<GenericImage>,
