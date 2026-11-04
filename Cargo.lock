@@ -2293,6 +2293,7 @@ dependencies = [
  "bytes",
  "serde",
  "sisa-messaging-core",
+ "sisa-messaging-nats",
  "sisa-messaging-runtime",
  "sisa-messaging-testing",
  "sqlx",

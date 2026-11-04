@@ -3,8 +3,9 @@
 
 use std::error::Error;
 use std::ops::DerefMut;
+use std::time::Duration;
 
-use crate::Envelope;
+use crate::{Envelope, Timestamp};
 
 /// Why a store couldn't do what was asked.
 #[derive(Debug, thiserror::Error)]
@@ -20,6 +21,31 @@ pub enum StoreError {
     },
 }
 
+/// An outbox row the dispatcher claimed: the envelope to publish, and what the store needs to
+/// mark the row afterwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OutboxRecord {
+    /// The envelope as it was written, with its message id.
+    pub envelope: Envelope,
+    /// When the row was written, which finds its partition.
+    pub created_at: Timestamp,
+    /// How many publishes of the row failed before this claim.
+    pub attempts: u32,
+}
+
+impl OutboxRecord {
+    /// A claimed row, as a store reads it.
+    #[must_use]
+    pub fn new(envelope: Envelope, created_at: Timestamp, attempts: u32) -> Self {
+        Self {
+            envelope,
+            created_at,
+            attempts,
+        }
+    }
+}
+
 /// The outbox table of one database: rows written in the caller's transaction, which the
 /// dispatcher publishes after the commit.
 ///
@@ -28,6 +54,11 @@ pub enum StoreError {
 /// - [`insert`](OutboxStore::insert) writes on the connection it is given, never on one of its
 ///   own, so the rows commit or roll back with the caller's transaction.
 /// - A row holds the whole envelope, so the dispatcher publishes it as it was written.
+/// - The dispatcher's side, [`claim`](OutboxStore::claim) and the marks, runs on the store's own
+///   connections, and each call commits before it returns, so no transaction is open while the
+///   dispatcher publishes.
+/// - No method deletes a row.
+/// - Due times come from the database's clock, so instances whose clocks differ agree on them.
 pub trait OutboxStore: Send + Sync + 'static {
     /// The connection the caller's transaction runs on, such as `sqlx::PgConnection`. A bus
     /// with this store takes only this type, so a transaction from another database doesn't
@@ -44,6 +75,58 @@ pub trait OutboxStore: Send + Sync + 'static {
         &self,
         connection: &mut Self::Connection,
         envelopes: &[Envelope],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Claims up to `limit` pending rows that are due, oldest id first, and moves their due time
+    /// `lease` ahead, so no other dispatcher claims them meanwhile. Rows another claim holds are
+    /// skipped, not waited for. A dispatcher that stops before marking a row gets it back once
+    /// the lease runs out, with the same message id.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database couldn't claim; no row is claimed then.
+    fn claim(
+        &self,
+        limit: usize,
+        lease: Duration,
+    ) -> impl Future<Output = Result<Vec<OutboxRecord>, StoreError>> + Send;
+
+    /// Marks the rows `dispatched`, with the time: the broker has them.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database didn't take the mark; the rows are claimed again once
+    /// their lease runs out, and published again with the same message id.
+    fn mark_dispatched(
+        &self,
+        records: &[OutboxRecord],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Puts the row back after a failed publish: one more failed attempt, the `error`, and a due
+    /// time `delay` from now.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database didn't take the mark; the row is claimed again once its
+    /// lease runs out.
+    fn mark_retry(
+        &self,
+        record: &OutboxRecord,
+        error: &str,
+        delay: Duration,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Marks the row `failed` after its last failed attempt, with the `error`. It stays for a
+    /// person to look at; setting its status back to `pending` sends it again.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database didn't take the mark; the row is claimed again once its
+    /// lease runs out.
+    fn mark_failed(
+        &self,
+        record: &OutboxRecord,
+        error: &str,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
