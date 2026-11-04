@@ -69,6 +69,15 @@ async fn the_migrations_create_both_tables_in_the_search_path_schema() {
         assert!(names.contains(&format!("{table}_default")), "{names:?}");
         assert!(names.contains(&format!("{table}_p{today}")), "{names:?}");
     }
+    let attached: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_inherits
+         JOIN pg_class parent ON parent.oid = inhparent
+         WHERE parent.relname IN ('outbox_messages', 'inbox_receipts')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attached, 18, "every partition is attached to its table");
     assert!(names.contains(&"_sqlx_migrations".to_owned()), "{names:?}");
     assert!(tables(&pool, "public").await.is_empty());
 }
