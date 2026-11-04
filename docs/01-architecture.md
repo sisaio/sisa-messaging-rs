@@ -431,12 +431,14 @@ CREATE TABLE sisa_messaging.inbox_receipts (
 ) PARTITION BY RANGE (message_time);
 
 -- For each table, the partitions for today and the next 7 intervals and a default partition,
--- made by `migrate` so the first write has a partition, then kept ahead by the maintenance worker:
+-- made by `migrate` so the first write has a partition, then kept ahead by the maintenance worker.
+-- Days are UTC days: the bounds carry `+00`, so the session's time zone doesn't move them.
+-- `migrate` creates the schema and `schema_version` first, and records version 1 there.
 CREATE TABLE sisa_messaging.outbox_messages_p20261102 PARTITION OF sisa_messaging.outbox_messages
-    FOR VALUES FROM ('2026-11-02') TO ('2026-11-03');
+    FOR VALUES FROM ('2026-11-02 00:00+00') TO ('2026-11-03 00:00+00');
 CREATE TABLE sisa_messaging.outbox_messages_default PARTITION OF sisa_messaging.outbox_messages DEFAULT;
 CREATE TABLE sisa_messaging.inbox_receipts_p20261102 PARTITION OF sisa_messaging.inbox_receipts
-    FOR VALUES FROM ('2026-11-02') TO ('2026-11-03');
+    FOR VALUES FROM ('2026-11-02 00:00+00') TO ('2026-11-03 00:00+00');
 CREATE TABLE sisa_messaging.inbox_receipts_default PARTITION OF sisa_messaging.inbox_receipts DEFAULT;
 
 CREATE TABLE sisa_messaging.schema_version (
