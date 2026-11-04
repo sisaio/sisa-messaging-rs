@@ -32,16 +32,25 @@ pub struct OutboxRecord {
     pub created_at: Timestamp,
     /// How many publishes of the row failed before this claim.
     pub attempts: u32,
+    /// When this claim's lease runs out, by the database's clock. The marks match it, so a
+    /// dispatcher whose lease ran out doesn't overwrite the claim of the one that holds the row.
+    pub leased_until: Timestamp,
 }
 
 impl OutboxRecord {
     /// A claimed row, as a store reads it.
     #[must_use]
-    pub fn new(envelope: Envelope, created_at: Timestamp, attempts: u32) -> Self {
+    pub fn new(
+        envelope: Envelope,
+        created_at: Timestamp,
+        attempts: u32,
+        leased_until: Timestamp,
+    ) -> Self {
         Self {
             envelope,
             created_at,
             attempts,
+            leased_until,
         }
     }
 }
@@ -91,7 +100,8 @@ pub trait OutboxStore: Send + Sync + 'static {
         lease: Duration,
     ) -> impl Future<Output = Result<Vec<OutboxRecord>, StoreError>> + Send;
 
-    /// Marks the rows `dispatched`, with the time: the broker has them.
+    /// Marks the rows `dispatched`, with the time: the broker has them. This and the other marks
+    /// change a row only while the claim that returned the record still holds it.
     ///
     /// # Errors
     ///

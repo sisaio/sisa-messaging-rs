@@ -30,7 +30,8 @@ use crate::RetryPolicy;
 #[non_exhaustive]
 pub struct DispatchSettings {
     /// How long the dispatcher waits after a round that found fewer rows than a batch: one
-    /// second by default.
+    /// second by default. This, the batch size and the lease must not be zero, or the bus
+    /// doesn't start.
     pub poll_interval: Duration,
     /// How many rows one claim takes at most: 100 by default.
     pub batch_size: usize,
@@ -44,6 +45,22 @@ pub struct DispatchSettings {
 }
 
 // Rounds a second apart, 100 rows each, leased for thirty seconds, retried for about five minutes.
+impl DispatchSettings {
+    // Why these settings can't run: a zero would claim nothing, or claim rows it can't publish,
+    // or poll the database without a pause.
+    pub(crate) fn invalid(&self) -> Option<&'static str> {
+        if self.batch_size == 0 {
+            Some("`batch_size` is 0")
+        } else if self.lease.is_zero() {
+            Some("`lease` is 0")
+        } else if self.poll_interval.is_zero() {
+            Some("`poll_interval` is 0")
+        } else {
+            None
+        }
+    }
+}
+
 impl Default for DispatchSettings {
     fn default() -> Self {
         Self {
@@ -108,6 +125,9 @@ where
         }
     };
 
+    // The lease runs out here before it does in the database, so a publish still waiting then is
+    // given up: another dispatcher may hold the row by now.
+    let deadline = claimed_at + settings.lease;
     let mut published = Vec::with_capacity(records.len());
     for record in &records {
         // Past the lease another dispatcher may hold the rest, and on a stop they wait for
@@ -115,9 +135,10 @@ where
         if stopping(stop) || claimed_at.elapsed() >= settings.lease {
             break;
         }
-        match transport.publish(&record.envelope).await {
-            Ok(()) => published.push(record.clone()),
-            Err(error) => put_back(store, settings, record, &error.to_string()).await,
+        match tokio::time::timeout_at(deadline, transport.publish(&record.envelope)).await {
+            Ok(Ok(())) => published.push(record.clone()),
+            Ok(Err(error)) => put_back(store, settings, record, &error.to_string()).await,
+            Err(_elapsed) => break,
         }
     }
 
@@ -126,7 +147,7 @@ where
     {
         tracing::warn!(%error, rows = published.len(), "could not mark outbox rows dispatched; they are published again after their lease");
     }
-    published.len() == settings.batch_size && settings.batch_size > 0
+    published.len() == settings.batch_size
 }
 
 /// Runs rounds until the bus stops.

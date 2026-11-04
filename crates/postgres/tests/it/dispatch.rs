@@ -13,7 +13,7 @@ use sisa_messaging_core::{
 use sisa_messaging_nats::{NatsSettings, NatsTransport};
 use sisa_messaging_postgres::PostgresOutbox;
 use sisa_messaging_runtime::{
-    Bus, DispatchSettings, Handler, HandlerContext, HandlerError, InMemoryTransport,
+    Bus, DispatchSettings, Handler, HandlerContext, HandlerError, InMemoryTransport, StartError,
 };
 use sisa_messaging_testing::{Nats, Postgres, eventually};
 use sqlx::PgPool;
@@ -126,6 +126,11 @@ async fn a_claim_takes_due_rows_in_id_order_and_holds_them_for_the_lease() {
         .chain(&second)
         .map(|record| record.envelope.id)
         .collect();
+    assert_eq!(
+        (first.len(), second.len()),
+        (3, 2),
+        "a claim takes at most its limit"
+    );
     assert_eq!(claimed, ids);
     assert!(third.is_empty(), "every row is leased");
     assert!(all_have_status(&pool, "pending").await);
@@ -179,6 +184,7 @@ async fn the_dispatcher_publishes_committed_rows_in_id_order_and_marks_them_disp
     })
     .await;
     let rows = statuses(&pool).await;
+    assert_eq!(rows.len(), 3, "each committed row is stored");
     let ids: Vec<MessageId> = rows.iter().map(|row| row.0).collect();
     assert_eq!(published_ids(&transport), ids);
     let undated: i64 =
@@ -415,4 +421,86 @@ async fn a_row_that_isnt_a_valid_envelope_is_marked_failed_and_the_others_still_
             .await
             .unwrap();
     assert!(error.starts_with("not a valid envelope"), "{error}");
+}
+
+#[tokio::test]
+async fn a_row_with_an_attribute_that_isnt_a_string_is_marked_failed() {
+    let postgres = Postgres::start().await;
+    let pool = migrated(&postgres).await;
+    sqlx::query(
+        "INSERT INTO outbox_messages (id, type, source, data_content_type, attributes, data)
+         VALUES (gen_random_uuid(), 'orders.order_placed.v1', '/orders', 'application/json',
+                 '{\"time\": 42}', '\\x7b7d')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let ids = commit_rows(&pool, 1).await;
+    let store = PostgresOutbox::new(pool.clone());
+
+    let claimed = store.claim(10, Duration::from_secs(60)).await.unwrap();
+
+    assert_eq!(claimed.len(), 1);
+    assert!(ids.contains(&claimed[0].envelope.id));
+    let error: String =
+        sqlx::query_scalar("SELECT last_error FROM outbox_messages WHERE status = 'failed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(error.contains("`time` is 42"), "{error}");
+}
+
+#[tokio::test]
+async fn a_mark_after_the_lease_ran_out_leaves_the_newer_claim_alone() {
+    let postgres = Postgres::start().await;
+    let pool = migrated(&postgres).await;
+    commit_rows(&pool, 1).await;
+    let store = PostgresOutbox::new(pool.clone());
+    let [late] = store
+        .claim(10, Duration::from_millis(1))
+        .await
+        .unwrap()
+        .try_into()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let [_current] = store
+        .claim(10, Duration::from_secs(60))
+        .await
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    store
+        .mark_retry(&late, "too late", Duration::ZERO)
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .claim(10, Duration::from_secs(60))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        statuses(&pool).await[0].2,
+        0,
+        "the late mark changed nothing"
+    );
+}
+
+#[tokio::test]
+async fn a_bus_with_a_zero_batch_size_doesnt_start() {
+    let postgres = Postgres::start().await;
+    let pool = migrated(&postgres).await;
+    let mut empty_batches = settings();
+    empty_batches.batch_size = 0;
+
+    let result = Bus::builder("/orders", InMemoryTransport::new())
+        .outbox(PostgresOutbox::new(pool))
+        .dispatch(empty_batches)
+        .start()
+        .await;
+
+    assert!(matches!(result, Err(StartError::DispatchSettings(_))));
 }
