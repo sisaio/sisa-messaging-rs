@@ -74,15 +74,19 @@ async fn rows(pool: &PgPool) -> Vec<(Envelope, String)> {
         .collect()
 }
 
+/// A bus whose dispatcher is stopped, so the rows these tests write stay pending; `outbox` still
+/// writes them.
 async fn bus(
     transport: &InMemoryTransport,
     pool: &PgPool,
 ) -> Bus<InMemoryTransport, PostgresOutbox> {
-    Bus::builder("/orders", transport.clone())
+    let bus = Bus::builder("/orders", transport.clone())
         .outbox(PostgresOutbox::new(pool.clone()))
         .start()
         .await
-        .unwrap()
+        .unwrap();
+    bus.shutdown().await;
+    bus
 }
 
 #[tokio::test]
@@ -107,7 +111,7 @@ async fn a_committed_transaction_leaves_a_pending_row() {
     assert_eq!(&envelope.data[..], br#"{"id":42}"#);
     assert!(
         transport.published().is_empty(),
-        "nothing goes out before the dispatch"
+        "nothing goes out without the dispatcher"
     );
 }
 
