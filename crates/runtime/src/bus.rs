@@ -6,13 +6,15 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
 use sisa_messaging_core::{
-    EndpointSpec, EnvelopeError, Message, OutboxStore, Publisher, Source, TransportError,
-    TransportPublisher, TransportSubscriber,
+    EndpointSpec, EnvelopeError, Message, OutboxStore, PartitionStore, Publisher, Source,
+    TransportError, TransportPublisher, TransportSubscriber,
 };
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 
+use crate::maintenance::{self, PartitionMode, PartitionSettings};
 use crate::publish::{PublishError, encode};
 use crate::{EndpointBuilder, OutboxPublisher};
 
@@ -122,6 +124,7 @@ impl<Transport> Bus<Transport> {
             source: source.into(),
             transport,
             endpoints: Vec::new(),
+            maintenance: Vec::new(),
             outbox: NoOutbox,
         }
     }
@@ -196,11 +199,15 @@ impl<Transport, Outbox> fmt::Debug for Bus<Transport, Outbox> {
     }
 }
 
+// Starts a partition maintenance worker, given the bus's stop signal.
+type Maintenance = Box<dyn FnOnce(watch::Receiver<()>) -> BoxFuture<'static, ()> + Send + Sync>;
+
 /// Sets up a [`Bus`]: its endpoints, then [`start`](BusBuilder::start).
 pub struct BusBuilder<Transport, Outbox = NoOutbox> {
     source: String,
     transport: Transport,
     endpoints: Vec<EndpointBuilder>,
+    maintenance: Vec<Maintenance>,
     outbox: Outbox,
 }
 
@@ -213,6 +220,7 @@ impl<Transport> BusBuilder<Transport> {
             source: self.source,
             transport: self.transport,
             endpoints: self.endpoints,
+            maintenance: self.maintenance,
             outbox: store,
         }
     }
@@ -231,6 +239,19 @@ impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
             .push(configure(EndpointBuilder::new(name.into())));
         self
     }
+
+    /// Keeps the partitions of `store`'s table, such as the outbox's or the inbox's, as
+    /// `settings` say: a worker creates them ahead and applies the retention once an hour, one
+    /// instance at a time. With [`PartitionMode::External`] it adds no worker.
+    #[must_use]
+    pub fn partitions(mut self, store: impl PartitionStore, settings: PartitionSettings) -> Self {
+        if settings.partitions == PartitionMode::Managed {
+            self.maintenance.push(Box::new(move |stop| {
+                maintenance::run(store, settings, stop).boxed()
+            }));
+        }
+        self
+    }
 }
 
 impl<Transport, Outbox> BusBuilder<Transport, Outbox>
@@ -238,8 +259,9 @@ where
     Transport: TransportPublisher + TransportSubscriber,
     Outbox: Send + Sync + 'static,
 {
-    /// Subscribes every endpoint, then starts one worker for each, on the current Tokio runtime.
-    /// No worker starts unless every endpoint subscribed.
+    /// Subscribes every endpoint, then starts one worker for each, and one for each table whose
+    /// [`partitions`](BusBuilder::partitions) it keeps, on the current Tokio runtime. No worker
+    /// starts unless every endpoint subscribed.
     ///
     /// # Errors
     ///
@@ -276,7 +298,7 @@ where
             .iter()
             .map(|(endpoint, _)| endpoint.name.clone())
             .collect();
-        let workers = subscribed
+        let mut workers: Vec<JoinHandle<()>> = subscribed
             .into_iter()
             .map(|(endpoint, deliveries)| {
                 let name = endpoint.name.clone();
@@ -294,6 +316,11 @@ where
                 })
             })
             .collect();
+        workers.extend(
+            self.maintenance
+                .into_iter()
+                .map(|maintain| tokio::spawn(maintain(stop.subscribe()))),
+        );
         Ok(Bus {
             inner: Arc::new(Inner {
                 source,
@@ -319,6 +346,7 @@ impl<Transport, Outbox> fmt::Debug for BusBuilder<Transport, Outbox> {
             .debug_struct("BusBuilder")
             .field("source", &self.source)
             .field("endpoints", &endpoints)
+            .field("partition_workers", &self.maintenance.len())
             .finish_non_exhaustive()
     }
 }
