@@ -170,10 +170,12 @@ pub trait OutboxStore: Send + Sync + 'static {
     /// Writes the rows on the caller's connection, inside the caller's transaction.
     async fn insert(&self, connection: &mut Self::Connection, envelopes: &[Envelope]) -> Result<()>;
 
-    // The dispatcher's side, on the store's own pool.
+    // The dispatcher's side, on the store's own pool. Each call commits before it returns, and
+    // due times come from the database's clock. An `OutboxRecord` is the envelope, the row's
+    // `created_at` and its failed attempts.
     async fn claim(&self, limit: usize, lease: Duration) -> Result<Vec<OutboxRecord>>;
     async fn mark_dispatched(&self, records: &[OutboxRecord]) -> Result<()>;
-    async fn mark_retry(&self, record: &OutboxRecord, error: &str, at: Timestamp) -> Result<()>;
+    async fn mark_retry(&self, record: &OutboxRecord, error: &str, delay: Duration) -> Result<()>;
     async fn mark_failed(&self, record: &OutboxRecord, error: &str) -> Result<()>;
 }
 
@@ -302,13 +304,19 @@ For each delivery, an endpoint:
 The dispatcher is a runtime worker the bus starts when it has an outbox; a store only claims and
 marks rows. Each round it claims a batch of due rows, publishes them in id order (UUID version 7,
 so creation order), waiting for the broker each time, and marks them
-`dispatched` with the time. A row that fails is put back with a later due time and its error; past
-the last attempt it is marked `failed` and left for a person to look at; setting it back to
-`pending` sends it again. Claiming moves the due
+`dispatched` with the time. A row that fails is put back with a later due time and its error, and
+its `attempts` counts one more failure; past the last attempt it is marked `failed` and left for a
+person to look at; setting it back to `pending` sends it again. Claiming moves the due
 time forward by a lease, so the rows of a dispatcher that dies come back once the lease runs out,
-and several instances claim different rows. The envelope keeps its id in the outbox, so a row
-published twice (a crash between the publish and the mark) reaches the broker with the same id:
-JetStream drops it inside its duplicate window, and an inbox drops it after.
+and several instances claim different rows. A dispatcher publishes no row of a batch whose lease
+ran out, since another instance may hold it by then. The envelope keeps its id in the outbox, so a
+row published twice (a crash between the publish and the mark) reaches the broker with the same
+id: JetStream drops it inside its duplicate window, and an inbox drops it after. A row that doesn't
+read back as an envelope is marked `failed` by the claim, so it can't hold up the others.
+
+`DispatchSettings` sets the poll interval (1 second), the batch size (100), the lease (30
+seconds) and the retry policy (10 attempts, 1 second apart at first, at most a minute apart). A
+round that published a full batch is followed by the next at once.
 
 ### Partitions and retention
 
@@ -478,7 +486,7 @@ rows:
 ```sql
 WITH claimed AS (
     UPDATE outbox_messages
-    SET available_at = now() + $2, attempts = attempts + 1
+    SET available_at = now() + $2
     WHERE (created_at, id) IN (
         SELECT created_at, id FROM outbox_messages
         WHERE status = 'pending' AND available_at <= now()

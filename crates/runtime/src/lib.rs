@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 mod bus;
+mod dispatch;
 mod endpoint;
 mod handler;
 mod in_memory;
@@ -20,6 +21,7 @@ mod publish;
 mod retry;
 
 pub use bus::{Bus, BusBuilder, NoOutbox, StartError};
+pub use dispatch::DispatchSettings;
 pub use endpoint::EndpointBuilder;
 #[doc(hidden)]
 pub use handler::HandlerFn;

@@ -26,7 +26,7 @@ pub use error::EnvelopeError;
 pub use message::{Message, MessageId, MessageType};
 pub use partition::{Expiry, PartitionInfo, PartitionInterval, PartitionLock, PartitionStore};
 pub use publisher::Publisher;
-pub use store::{InboxStore, OutboxStore, StoreError};
+pub use store::{InboxStore, OutboxRecord, OutboxStore, StoreError};
 pub use time::{Date, Timestamp};
 pub use transport::{
     Deliveries, Delivery, EndpointSpec, TransportError, TransportPublisher, TransportSubscriber,

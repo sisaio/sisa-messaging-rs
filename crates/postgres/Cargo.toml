@@ -29,6 +29,8 @@ sqlx = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }
 sisa-messaging-runtime = { workspace = true }
+# The end-to-end dispatch test, from the outbox to a NATS endpoint.
+sisa-messaging-nats = { workspace = true }
 # A PostgreSQL server per test, in Docker, and sqlx's migrator to run the migrations as sqlx-cli does.
 sisa-messaging-testing = { workspace = true }
 sqlx = { workspace = true, features = ["migrate"] }

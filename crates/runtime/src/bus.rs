@@ -14,6 +14,7 @@ use sisa_messaging_core::{
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 
+use crate::dispatch::{self, DispatchSettings};
 use crate::endpoint::Endpoint;
 use crate::inbox::{EndpointInbox, InboxPipeline};
 use crate::maintenance::{self, PartitionMode, PartitionSettings};
@@ -56,6 +57,47 @@ pub enum StartError {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NoOutbox;
+
+mod sealed {
+    use super::{Arc, BoxFuture, DispatchSettings, NoOutbox, OutboxStore, TransportPublisher};
+    use super::{FutureExt, dispatch, watch};
+
+    /// What a bus can carry as its outbox: [`NoOutbox`], or an [`OutboxStore`], whose
+    /// dispatcher the bus starts.
+    pub trait Outbox<Transport>: Send + Sync + 'static {
+        /// The dispatcher for this outbox, if it has one.
+        fn dispatcher(
+            store: Arc<Self>,
+            transport: Arc<Transport>,
+            settings: DispatchSettings,
+            stop: watch::Receiver<()>,
+        ) -> Option<BoxFuture<'static, ()>>;
+    }
+
+    // Nothing to dispatch.
+    impl<Transport> Outbox<Transport> for NoOutbox {
+        fn dispatcher(
+            _store: Arc<Self>,
+            _transport: Arc<Transport>,
+            _settings: DispatchSettings,
+            _stop: watch::Receiver<()>,
+        ) -> Option<BoxFuture<'static, ()>> {
+            None
+        }
+    }
+
+    // Publishes the store's rows through the transport.
+    impl<Transport: TransportPublisher, Store: OutboxStore> Outbox<Transport> for Store {
+        fn dispatcher(
+            store: Arc<Self>,
+            transport: Arc<Transport>,
+            settings: DispatchSettings,
+            stop: watch::Receiver<()>,
+        ) -> Option<BoxFuture<'static, ()>> {
+            Some(dispatch::run(store, transport, settings, stop).boxed())
+        }
+    }
+}
 
 struct Inner<Transport, Outbox> {
     source: Source,
@@ -132,6 +174,7 @@ impl<Transport> Bus<Transport> {
             endpoints: Vec::new(),
             maintenance: Vec::new(),
             outbox: Arc::new(NoOutbox),
+            dispatch: DispatchSettings::default(),
         }
     }
 }
@@ -216,11 +259,13 @@ pub struct BusBuilder<Transport, Outbox = NoOutbox> {
     endpoints: Vec<(String, Result<Endpoint, StartError>)>,
     maintenance: Vec<Maintenance>,
     outbox: Arc<Outbox>,
+    dispatch: DispatchSettings,
 }
 
 impl<Transport> BusBuilder<Transport> {
-    /// Keeps an outbox in `store`, which makes [`Bus::outbox`] available on the bus. The store is
-    /// part of the bus's type, such as `Bus<NatsTransport, PostgresOutbox>`.
+    /// Keeps an outbox in `store`, which makes [`Bus::outbox`] available on the bus, and starts
+    /// its dispatcher with the bus. The store is part of the bus's type, such as
+    /// `Bus<NatsTransport, PostgresOutbox>`.
     ///
     /// Endpoints with an inbox write their handlers' publishes to it, so add it before them.
     #[must_use]
@@ -241,7 +286,17 @@ impl<Transport> BusBuilder<Transport> {
             endpoints,
             maintenance: self.maintenance,
             outbox: Arc::new(store),
+            dispatch: self.dispatch,
         }
+    }
+}
+
+impl<Transport, Store: OutboxStore> BusBuilder<Transport, Store> {
+    /// Sets how the dispatcher publishes the outbox; [`DispatchSettings::default`] otherwise.
+    #[must_use]
+    pub fn dispatch(mut self, settings: DispatchSettings) -> Self {
+        self.dispatch = settings;
+        self
     }
 }
 
@@ -281,11 +336,12 @@ impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
 impl<Transport, Outbox> BusBuilder<Transport, Outbox>
 where
     Transport: TransportPublisher + TransportSubscriber,
-    Outbox: Send + Sync + 'static,
+    Outbox: sealed::Outbox<Transport>,
 {
-    /// Subscribes every endpoint, then starts one worker for each, and one for each table whose
-    /// [`partitions`](BusBuilder::partitions) it keeps, on the current Tokio runtime. No worker
-    /// starts unless every endpoint subscribed.
+    /// Subscribes every endpoint, then starts one worker for each, one for each table whose
+    /// [`partitions`](BusBuilder::partitions) it keeps, and the outbox's dispatcher when the bus
+    /// has an outbox, on the current Tokio runtime. No worker starts unless every endpoint
+    /// subscribed.
     ///
     /// # Errors
     ///
@@ -345,12 +401,26 @@ where
                 .into_iter()
                 .map(|maintain| tokio::spawn(maintain(stop.subscribe()))),
         );
+        let outbox = self.outbox;
+        let dispatcher = Outbox::dispatcher(
+            Arc::clone(&outbox),
+            Arc::clone(&transport),
+            self.dispatch,
+            stop.subscribe(),
+        );
+        workers.extend(dispatcher.map(|dispatch| {
+            tokio::spawn(async move {
+                if AssertUnwindSafe(dispatch).catch_unwind().await.is_err() {
+                    tracing::error!("the outbox dispatcher panicked; it stops dispatching");
+                }
+            })
+        }));
         Ok(Bus {
             inner: Arc::new(Inner {
                 source,
                 transport,
                 endpoints: endpoint_names,
-                outbox: self.outbox,
+                outbox,
                 stop,
                 workers: Mutex::new(workers),
             }),
