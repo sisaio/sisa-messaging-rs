@@ -31,19 +31,19 @@ a file in the crate's `tests/it/` folder, which builds as one test binary, so th
 side. A test that installs something process-wide, such as a meter provider, gets a binary of its
 own. Each NATS or PostgreSQL test starts its own server in Docker through
 `sisa-messaging-testing`, so the suite needs Docker and nothing else. `NATS_IMAGE` picks the NATS
-server, `nats:2.12-alpine` by default, and `POSTGRES_IMAGE` the database, `postgres:18-alpine` by
-default; CI also runs NATS 2.11 with PostgreSQL 15.
+server, `nats:2.15-alpine` by default, and `POSTGRES_IMAGE` the database, `postgres:18-alpine` by
+default. CI tests these newest releases only.
 
 ```sh
-NATS_IMAGE=nats:2.11-alpine POSTGRES_IMAGE=postgres:15-alpine cargo test --workspace --all-features
+NATS_IMAGE=nats:2.15-alpine POSTGRES_IMAGE=postgres:18-alpine cargo test --workspace --all-features
 ```
 
 Docker Hub limits anonymous pulls. When a pull fails with `429 Too Many Requests`, run
 `docker login`, or pull the image from Google's mirror under the name the tests use:
 
 ```sh
-docker pull mirror.gcr.io/library/nats:2.12-alpine
-docker tag mirror.gcr.io/library/nats:2.12-alpine nats:2.12-alpine
+docker pull mirror.gcr.io/library/nats:2.15-alpine
+docker tag mirror.gcr.io/library/nats:2.15-alpine nats:2.15-alpine
 ```
 
 Coverage comes from [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov); CI measures it on

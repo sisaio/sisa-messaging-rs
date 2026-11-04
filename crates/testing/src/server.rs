@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use testcontainers::GenericImage;
 
-/// The image `variable` names, such as `nats:2.11-alpine`, or `default` when it is unset.
+/// The image `variable` names, such as `nats:2.14-alpine`, or `default` when it is unset.
 pub(crate) fn image(variable: &str, default: &str) -> GenericImage {
     let image = std::env::var(variable).unwrap_or_else(|_| default.into());
     let (name, tag) = image.rsplit_once(':').unwrap_or((&image, "latest"));

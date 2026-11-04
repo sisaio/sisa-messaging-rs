@@ -1,7 +1,7 @@
 # Weekly version updates for Cargo and the SHA-pinned actions.
 # Patch and minor updates are grouped per ecosystem, and major updates stay separate.
 # Dependabot doesn't update the server images in ci.yml. Each is pinned to a minor version, such as
-# `nats:2.11-alpine` and `postgres:17-alpine`, which follow patch releases by themselves; move them
+# `nats:2.15-alpine` and `postgres:18-alpine`, which follow patch releases by themselves; move them
 # to a new minor version by hand.
 # Commit titles start with `build(deps)`, and PRs carry only the `dependencies` label, not
 # Dependabot's per-ecosystem ones.

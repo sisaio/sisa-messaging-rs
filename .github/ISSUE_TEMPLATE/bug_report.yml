@@ -54,7 +54,7 @@ body:
     attributes:
       label: Server
       description: The transport and database involved, their versions, and how they run (one server, a cluster).
-      placeholder: "NATS 2.11 with JetStream, PostgreSQL 17"
+      placeholder: "NATS 2.15 with JetStream, PostgreSQL 18"
   - type: input
     id: environment
     attributes:
