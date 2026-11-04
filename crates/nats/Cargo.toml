@@ -21,5 +21,16 @@ workspace = true
 # The shared contracts that this crate implements.
 sisa-messaging-core = { workspace = true }
 
+# The NATS client, for JetStream.
+async-nats = { workspace = true }
+# The settings, read from the application's config.
+serde = { workspace = true }
+
+[dev-dependencies]
+# A NATS server per test, in Docker.
+sisa-messaging-testing = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+
 [package.metadata.docs.rs]
 all-features = true
