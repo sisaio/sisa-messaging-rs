@@ -2,11 +2,11 @@
 
 use sisa_messaging_core::{
     Codec, CodecError, ContentType, Envelope, EnvelopeError, JsonCodec, Message, MessageType,
-    Source, TransportError,
+    Source, StoreError, TransportError,
 };
 
-/// Why a [`Bus`](crate::Bus) or a [`HandlerContext`](crate::HandlerContext) couldn't publish a
-/// message.
+/// Why a [`Bus`](crate::Bus), an [`OutboxPublisher`](crate::OutboxPublisher) or a
+/// [`HandlerContext`](crate::HandlerContext) couldn't publish a message.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PublishError {
@@ -19,6 +19,9 @@ pub enum PublishError {
     /// The broker didn't confirm it has the envelope.
     #[error(transparent)]
     Transport(#[from] TransportError),
+    /// The outbox didn't take the row; the caller's transaction may be unusable.
+    #[error(transparent)]
+    Store(#[from] StoreError),
 }
 
 // A new envelope for a message from this source, encoded with the bus's codec.

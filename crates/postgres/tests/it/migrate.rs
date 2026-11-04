@@ -8,7 +8,7 @@ fn migrations() -> PathBuf {
 }
 
 /// A pool whose `search_path` is the new schema `messaging`, as an application configures it.
-async fn messaging_pool(postgres: &Postgres) -> PgPool {
+pub(crate) async fn messaging_pool(postgres: &Postgres) -> PgPool {
     sqlx::query("CREATE SCHEMA messaging")
         .execute(&postgres.pool().await)
         .await
@@ -23,7 +23,7 @@ async fn messaging_pool(postgres: &Postgres) -> PgPool {
 }
 
 /// Runs the migrations as `sqlx migrate run --source migrations/postgresql` does.
-async fn migrated(postgres: &Postgres) -> PgPool {
+pub(crate) async fn migrated(postgres: &Postgres) -> PgPool {
     let pool = messaging_pool(postgres).await;
     Migrator::new(migrations().as_path())
         .await

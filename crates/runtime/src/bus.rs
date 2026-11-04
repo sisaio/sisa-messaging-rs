@@ -2,20 +2,19 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use futures_util::FutureExt;
 use sisa_messaging_core::{
-    EndpointSpec, EnvelopeError, Message, Publisher, Source, TransportError, TransportPublisher,
-    TransportSubscriber,
+    EndpointSpec, EnvelopeError, Message, OutboxStore, Publisher, Source, TransportError,
+    TransportPublisher, TransportSubscriber,
 };
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 
-use crate::EndpointBuilder;
 use crate::publish::{PublishError, encode};
+use crate::{EndpointBuilder, OutboxPublisher};
 
 /// Why a bus couldn't start.
 #[derive(Debug, thiserror::Error)]
@@ -54,7 +53,7 @@ struct Inner<Transport, Outbox> {
     source: Source,
     transport: Arc<Transport>,
     endpoints: Vec<String>,
-    outbox: PhantomData<fn() -> Outbox>,
+    outbox: Outbox,
     // Sends on shutdown; dropped with the last clone, which closes it. Either stops the workers.
     stop: watch::Sender<()>,
     // Held while `shutdown` waits, so a second call waits for the same workers.
@@ -123,8 +122,23 @@ impl<Transport> Bus<Transport> {
             source: source.into(),
             transport,
             endpoints: Vec::new(),
-            outbox: PhantomData,
+            outbox: NoOutbox,
         }
+    }
+}
+
+impl<Transport, Store: OutboxStore> Bus<Transport, Store> {
+    /// A publisher that writes to the outbox on `connection`, the application's own transaction,
+    /// such as `&mut tx` from sqlx's `pool.begin()`. The messages go out after the transaction
+    /// commits, and never if it rolls back.
+    ///
+    /// The publisher borrows the transaction only while it lives, so the application keeps using
+    /// it, and commits it, as usual.
+    pub fn outbox<'call>(
+        &'call self,
+        connection: &'call mut Store::Connection,
+    ) -> OutboxPublisher<'call, Store> {
+        OutboxPublisher::new(&self.inner.outbox, &self.inner.source, connection)
     }
 }
 
@@ -160,7 +174,7 @@ impl<Transport, Outbox> Clone for Bus<Transport, Outbox> {
 impl<Transport, Outbox> Publisher for Bus<Transport, Outbox>
 where
     Transport: TransportPublisher,
-    Outbox: 'static,
+    Outbox: Send + Sync + 'static,
 {
     type Error = PublishError;
 
@@ -187,7 +201,21 @@ pub struct BusBuilder<Transport, Outbox = NoOutbox> {
     source: String,
     transport: Transport,
     endpoints: Vec<EndpointBuilder>,
-    outbox: PhantomData<fn() -> Outbox>,
+    outbox: Outbox,
+}
+
+impl<Transport> BusBuilder<Transport> {
+    /// Keeps an outbox in `store`, which makes [`Bus::outbox`] available on the bus. The store is
+    /// part of the bus's type, such as `Bus<NatsTransport, PostgresOutbox>`.
+    #[must_use]
+    pub fn outbox<Store: OutboxStore>(self, store: Store) -> BusBuilder<Transport, Store> {
+        BusBuilder {
+            source: self.source,
+            transport: self.transport,
+            endpoints: self.endpoints,
+            outbox: store,
+        }
+    }
 }
 
 impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
@@ -208,7 +236,7 @@ impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
 impl<Transport, Outbox> BusBuilder<Transport, Outbox>
 where
     Transport: TransportPublisher + TransportSubscriber,
-    Outbox: 'static,
+    Outbox: Send + Sync + 'static,
 {
     /// Subscribes every endpoint, then starts one worker for each, on the current Tokio runtime.
     /// No worker starts unless every endpoint subscribed.
@@ -271,7 +299,7 @@ where
                 source,
                 transport,
                 endpoints: endpoint_names,
-                outbox: PhantomData,
+                outbox: self.outbox,
                 stop,
                 workers: Mutex::new(workers),
             }),

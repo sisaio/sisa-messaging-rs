@@ -216,7 +216,7 @@ Three types implement it, and the code that owns the transaction picks one:
 type AppBus = Bus<NatsTransport, PostgresOutbox>;
 
 let bus: AppBus = Bus::builder("/orders", NatsTransport::connect(nats_url, &nats).await?)
-    .outbox(PostgresOutbox::new(pool.clone(), &postgres).await?) // optional; changes the type
+    .outbox(PostgresOutbox::new(pool.clone())) // optional; changes the type
     .endpoint("billing", |endpoint| {
         endpoint.inbox(PostgresInbox::new(pool.clone(), &postgres)) // optional
             .handle::<OrderPlaced>(charge_order)
