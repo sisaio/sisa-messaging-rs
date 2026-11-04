@@ -11,3 +11,14 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+# A NATS and a PostgreSQL server per test, in Docker.
+testcontainers = { workspace = true }
+# The clients, to wait until a server answers and to hand a test a connection.
+async-nats = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
