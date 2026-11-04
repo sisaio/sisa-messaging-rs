@@ -2,10 +2,11 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use futures_util::StreamExt;
 use sisa_messaging_core::{
-    Delivery, EndpointSpec, MessageType, TransportPublisher, TransportSubscriber,
+    Deliveries, Delivery, EndpointSpec, MessageType, TransportPublisher, TransportSubscriber,
 };
-use sisa_messaging_nats::NatsTransport;
+use sisa_messaging_nats::{NatsDelivery, NatsTransport};
 use sisa_messaging_testing::Nats;
 
 use crate::common::{envelope, envelope_of, next, next_within, settings, stored_messages};
@@ -19,6 +20,17 @@ fn billing() -> EndpointSpec {
 
 // Long enough that a message that was going to come again would.
 const QUIET: Duration = Duration::from_secs(3);
+
+// Asserts that nothing comes within the quiet time, and that the consumer still delivers: a new
+// message is the next to come, so neither a stalled consumer nor a late redelivery passes.
+async fn assert_quiet(transport: &NatsTransport, deliveries: &mut Deliveries<NatsDelivery>) {
+    assert!(next_within(deliveries, QUIET).await.is_none());
+    let sentinel = envelope();
+    transport.publish(&sentinel).await.unwrap();
+    let delivery = next(deliveries).await;
+    assert_eq!(delivery.envelope().id, sentinel.id);
+    delivery.ack().await.unwrap();
+}
 
 #[tokio::test]
 async fn an_endpoint_gets_the_published_envelope() {
@@ -68,6 +80,13 @@ async fn two_instances_of_one_endpoint_share_its_messages() {
     for deliveries in [&mut first_deliveries, &mut second_deliveries] {
         assert!(next_within(deliveries, QUIET).await.is_none());
     }
+    let sentinel = envelope();
+    first.publish(&sentinel).await.unwrap();
+    let delivery = tokio::select! {
+        delivery = next(&mut first_deliveries) => delivery,
+        delivery = next(&mut second_deliveries) => delivery,
+    };
+    assert_eq!(delivery.envelope().id, sentinel.id);
 }
 
 #[tokio::test]
@@ -92,7 +111,7 @@ async fn each_endpoint_gets_every_message_of_its_types() {
     let billed = next(&mut billing_deliveries).await;
     assert_eq!(billed.envelope().id, placed.id);
     billed.ack().await.unwrap();
-    assert!(next_within(&mut billing_deliveries, QUIET).await.is_none());
+    assert_quiet(&transport, &mut billing_deliveries).await;
 
     let mut shipped = HashSet::new();
     for _ in 0..2 {
@@ -135,7 +154,7 @@ async fn a_rejected_or_acked_message_doesnt_come_again() {
     transport.publish(&envelope()).await.unwrap();
     next(&mut deliveries).await.ack().await.unwrap();
 
-    assert!(next_within(&mut deliveries, QUIET).await.is_none());
+    assert_quiet(&transport, &mut deliveries).await;
 }
 
 #[tokio::test]
@@ -296,6 +315,47 @@ async fn ce_headers_are_read_without_regard_to_case() {
     let delivery = next(&mut deliveries).await;
     assert_eq!(delivery.envelope(), &envelope);
     delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_message_that_isnt_an_envelope_stays_until_its_copy_is_stored() {
+    let nats = Nats::start().await;
+    let mut settings = settings(&nats);
+    settings.ack_wait = Duration::from_secs(1);
+    let transport = NatsTransport::connect(settings).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let jetstream = nats.jetstream().await;
+    let mut stream = jetstream.get_stream("SISA").await.unwrap();
+    let open = stream.info().await.unwrap().config.clone();
+    jetstream
+        .publish("sisa.orders.order_placed.v1", Bytes::from_static(b"plain"))
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    // A full stream that refuses new messages makes the error copy fail.
+    jetstream
+        .update_stream(async_nats::jetstream::stream::Config {
+            max_messages: 1,
+            discard: async_nats::jetstream::stream::DiscardPolicy::New,
+            ..open.clone()
+        })
+        .await
+        .unwrap();
+
+    let failure = tokio::time::timeout(Duration::from_secs(10), deliveries.next())
+        .await
+        .expect("an error within 10 seconds");
+    assert!(matches!(failure, Some(Err(_))));
+
+    // Pulling again redelivers the message after the ack wait, and now its copy is stored.
+    jetstream.update_stream(open).await.unwrap();
+    assert_quiet(&transport, &mut deliveries).await;
+    let copy = stream
+        .get_last_raw_message_by_subject("sisa._error.billing")
+        .await
+        .unwrap();
+    assert_eq!(copy.payload, Bytes::from_static(b"plain"));
 }
 
 #[tokio::test]
