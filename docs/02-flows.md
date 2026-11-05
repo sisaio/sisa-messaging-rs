@@ -42,7 +42,7 @@ A rollback removes the outbox row with the business writes, so nothing is publis
 that crashes after publishing and before marking leaves rows that come back when the lease runs
 out; they are published again with the same message id.
 
-## Receiving on an endpoint with an inbox
+## Receiving on an endpoint with an inbox and an outbox
 
 ```mermaid
 sequenceDiagram

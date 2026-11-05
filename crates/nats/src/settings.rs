@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 /// let mut settings = NatsSettings::default();
 /// settings.url = "nats://nats.internal:4222".into();
 /// settings.prefix = "staging".into();
+/// // A stream of its own: connecting sets the stream's subjects to `{prefix}.>`.
+/// settings.stream = "SISA_STAGING".into();
 /// let transport = NatsTransport::connect(settings).await?;
 /// # Ok(())
 /// # }
@@ -29,7 +31,8 @@ pub struct NatsSettings {
     pub url: String,
     /// The first subject token of every message, `sisa` by default: a message of type
     /// `orders.order_placed.v1` goes to `sisa.orders.order_placed.v1`. It keeps deployments
-    /// that share a server apart, such as `prod` and `staging`.
+    /// that share a server apart, such as `prod` and `staging`, each with its own
+    /// [`stream`](NatsSettings::stream).
     pub prefix: String,
     /// The JetStream stream that captures `{prefix}.>`, `SISA` by default. It is created when
     /// missing and updated to these settings when it exists.
