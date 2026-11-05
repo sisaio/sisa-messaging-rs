@@ -26,5 +26,6 @@ a packaging of the tagged source, and a Sigstore bundle with their SLSA build pr
 the release workflow. Check a downloaded crate with the GitHub CLI:
 
 ```sh
-gh attestation verify sisa-messaging-<version>.crate --repo sisaio/sisa-messaging-rs
+gh attestation verify sisa-messaging-<version>.crate --repo sisaio/sisa-messaging-rs \
+    --signer-workflow sisaio/sisa-messaging-rs/.github/workflows/release.yml
 ```

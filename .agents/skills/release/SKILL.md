@@ -88,7 +88,9 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.2.
 - Running the workflow again while the release PR is open drops your edits, and the version you
   set unless you pass it again. With a commit of yours on it, release-plz closes it and opens a
   new PR.
-- The release workflow runs from its copy on `main`, so a change to it can't be tried in a PR.
+- A push to `main` runs the workflow from its copy there, so a change to the tagging and
+  publishing jobs can't be tried in a PR. A manual run with `--ref <branch>` runs the `release pr`
+  job from that branch, and opens or updates a real release PR.
 - If merging the release PR starts no workflow run, GitHub dropped the push. Push a changelog
   fix to `main`: that tags and drafts the version, since its tag doesn't exist yet. Running the
   workflow by hand doesn't help: a manual run only opens release PRs.
@@ -104,7 +106,7 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.2.
 | `GitHub Actions is not permitted to create or approve pull requests` | The maintainer allows it in Settings → Actions → General → Workflow permissions |
 | `Cannot upload assets to an immutable release` | Something wrote to a published release; record on the draft before `publish release` runs |
 | `release-plz opened no release PR` | No crate changed since the last release. For a final right after its last rc, open a normal PR with the version and the cycle's changelog section |
-| `wait for CI` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
+| `wait for ci` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
 | crates.io `403`, or no token from `crates-io-auth-action` | With `CARGO_REGISTRY_TOKEN` set, the token has expired or lacks publish rights on the crate. Without it, the crate needs a trusted publisher for `release.yml` and the `release` environment ([.github/scripts/README.md](../../../.github/scripts/README.md#releases)) |
 | `crate ... already exists` | crates.io has that version; re-run the publish job, which skips it |
 
