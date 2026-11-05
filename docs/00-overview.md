@@ -4,7 +4,7 @@ sisa-messaging lets a Rust service publish and consume messages over a transport
 startup, with an optional transactional outbox and inbox in its own database. Add the
 `sisa-messaging` crate with the features of the parts you use; none is on by default.
 
-| Part | First milestone | Later |
+| Part | 0.1.0 | Later |
 | --- | --- | --- |
 | Transport | NATS JetStream (`nats`) | Kafka, Redpanda, WarpStream; RabbitMQ, LavinMQ; Apache Iggy |
 | Persistence, for the outbox and inbox | PostgreSQL on sqlx (`postgres`) | MySQL; SQL Server |

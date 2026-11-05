@@ -2,16 +2,13 @@
 
 [![CI](https://github.com/sisaio/sisa-messaging-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sisaio/sisa-messaging-rs/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sisaio/sisa-messaging-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/sisaio/sisa-messaging-rs)
+[![crates.io](https://img.shields.io/crates/v/sisa-messaging.svg)](https://crates.io/crates/sisa-messaging)
+[![docs.rs](https://img.shields.io/docsrs/sisa-messaging)](https://docs.rs/sisa-messaging)
 [![MSRV](https://img.shields.io/badge/MSRV-1.94-blue)](https://github.com/sisaio/sisa-messaging-rs/blob/main/Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sisaio/sisa-messaging-rs/blob/main/LICENSE)
 
 Messaging for Rust services: publish and consume over the transport you pick, with an optional
 transactional outbox and inbox in your own database.
-
-> [!NOTE]
-> Work in progress: the first release, 0.1.0, is being built. The
-> [architecture](https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/01-architecture.md)
-> describes what it will do.
 
 ## What you pick
 
