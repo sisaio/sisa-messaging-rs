@@ -28,33 +28,107 @@ so services in other languages read and write them too.
 
 ## Quick start
 
-The API below is the design for 0.1.0, not yet released:
-
 ```toml
 [dependencies]
 sisa-messaging = { version = "0.1", features = ["nats", "postgres"] }
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-```rust,ignore
-use sisa_messaging::{Bus, Message, NatsTransport, PostgresOutbox};
+A message, a handler that bills it in the delivery's transaction, and a bus that publishes
+through the outbox. The `billing` endpoint's inbox records each message, so a redelivery doesn't
+bill twice. This is the core of [`examples/orders`](https://github.com/sisaio/sisa-messaging-rs/blob/main/examples/orders/src/main.rs):
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct OrderPlaced { id: u64 }
+```rust,ignore
+use serde::{Deserialize, Serialize};
+use sisa_messaging::{
+    Bus, HandlerContext, HandlerError, Message, NatsSettings, NatsTransport, PartitionSettings,
+    PostgresInbox, PostgresOutbox, PostgresPartitions, Publisher,
+};
+use sqlx::{PgPool, PgTransaction};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OrderPlaced {
+    id: i64,
+    customer: String,
+    total_cents: i64,
+}
 
 impl Message for OrderPlaced {
     const TYPE: &'static str = "orders.order_placed.v1";
 }
 
-let bus = Bus::builder("/orders", NatsTransport::connect("nats://127.0.0.1:4222", &nats).await?)
+async fn bill_order(
+    order: OrderPlaced,
+    context: &mut HandlerContext<PgTransaction<'static>>,
+) -> Result<(), HandlerError> {
+    sqlx::query("INSERT INTO invoices (order_id, total_cents) VALUES ($1, $2)")
+        .bind(order.id)
+        .bind(order.total_cents)
+        .execute(context.transaction())
+        .await?;
+    Ok(())
+}
+
+let transport = NatsTransport::connect(NatsSettings::default()).await?;
+let bus = Bus::builder("/orders", transport)
     .outbox(PostgresOutbox::new(pool.clone()))
+    .partitions(PostgresPartitions::outbox(pool.clone()), PartitionSettings::default())
+    .partitions(PostgresPartitions::inbox(pool.clone()), PartitionSettings::default())
+    .endpoint("billing", |endpoint| {
+        endpoint
+            .inbox(PostgresInbox::new(pool.clone()))
+            .handle::<OrderPlaced>(bill_order)
+    })
     .start()
     .await?;
 
+// The order and its message commit together, or neither does.
 let mut tx = pool.begin().await?;
-sqlx::query("insert into orders (id) values ($1)").bind(42).execute(&mut *tx).await?;
-bus.outbox(&mut tx).publish(&OrderPlaced { id: 42 }).await?;
+let id: i64 = sqlx::query_scalar(
+    "INSERT INTO orders (customer, total_cents) VALUES ($1, $2) RETURNING id",
+)
+.bind("Ada")
+.bind(4_200)
+.fetch_one(&mut *tx)
+.await?;
+bus.outbox(&mut tx)
+    .publish(&OrderPlaced { id, customer: "Ada".into(), total_cents: 4_200 })
+    .await?;
 tx.commit().await?;
 ```
+
+### Run the example
+
+It needs [sqlx-cli](https://crates.io/crates/sqlx-cli) for the migrations
+(`cargo install sqlx-cli --no-default-features --features postgres,rustls`), and Docker for a
+local NATS and PostgreSQL:
+
+```sh
+docker run -d --name orders-nats -p 4222:4222 nats:2.15-alpine -js
+docker run -d --name orders-postgres -p 5432:5432 \
+    -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=orders postgres:18-alpine
+
+# The library's tables in a `messaging` schema, the example's own in `public`.
+docker exec orders-postgres psql -U postgres -d orders -c 'CREATE SCHEMA messaging'
+DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders?options=-c%20search_path%3Dmessaging' \
+    sqlx migrate run --source migrations/postgresql
+DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders' \
+    sqlx migrate run --source examples/orders/migrations
+
+cargo run -p orders
+```
+
+It places an order, and billing invoices it once the dispatcher has published the message:
+
+```text
+orders: placed order 1
+billing: invoiced order 1 for Ada (4200 cents), message 01a1a97f-3ef5-7079-80e3-bf7a852d2639
+```
+
+`NATS_URL` and `DATABASE_URL` point it elsewhere; the database URL's `search_path` must name the
+`messaging` schema and the application's.
 
 ## More
 

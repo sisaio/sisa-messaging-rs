@@ -29,6 +29,11 @@ sisa-messaging-runtime = { workspace = true }
 sisa-messaging-nats = { workspace = true, optional = true }
 sisa-messaging-postgres = { workspace = true, optional = true }
 
+[dev-dependencies]
+# The crate docs' example: a message, and the application's own pool and transaction.
+serde = { workspace = true }
+sqlx = { workspace = true }
+
 [package.metadata.docs.rs]
 all-features = true
 # Marks each item a feature turns on, through `doc_cfg` in the crate root.
