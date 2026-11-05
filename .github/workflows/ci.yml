@@ -1,5 +1,5 @@
 # Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
-# links, the tests, which run against two NATS and PostgreSQL pairs, and coverage on main. The
+# links, the tests, which run against the newest NATS and PostgreSQL, and coverage on main. The
 # tests start their servers in Docker. PRs and pushes to main that change no Rust inputs skip the
 # Rust jobs; `ci` sums them up for the ruleset.
 name: CI

@@ -64,5 +64,6 @@ that look in either place find them. Read the matching one before starting:
 
 | Skill | Use it to |
 | --- | --- |
+| [release](.agents/skills/release/SKILL.md) | Prepare the release PR or find why a release failed |
 | [review-changes](.agents/skills/review-changes/SKILL.md) | Review a diff, PR or docs page against the checks, rules and decisions |
 | [triage](.agents/skills/triage/SKILL.md) | Triage new issues: duplicates, reproduction, labels, board |
