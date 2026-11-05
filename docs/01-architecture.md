@@ -178,7 +178,7 @@ pub trait OutboxStore: Send + Sync + 'static {
 }
 
 pub trait InboxStore: Send + Sync + 'static {
-    type Transaction: Send;  // sqlx::PgTransaction<'static>; dropping it rolls it back
+    type Transaction: DerefMut + Send;  // sqlx::PgTransaction<'static>; dropping it rolls it back
 
     async fn begin(&self) -> Result<Self::Transaction>;
     /// Writes the receipt; false when the endpoint recorded this message before.
@@ -274,8 +274,9 @@ so the outbox comes first; an endpoint with an inbox added before it fails `star
 
 The inbox needs a transactional endpoint, since its row has to commit with the handler's work. It
 works without the outbox too: the handler's publishes are then sent after the commit, which leaves
-a gap. A process that stops after the commit and before the send loses them, and the inbox
-acks the redelivery without running the handler again. Use the outbox with the inbox when those
+a gap. A process that stops after the commit and before the send loses them, and so does a send
+that fails and makes the endpoint retry the delivery: either way the inbox acks the redelivery
+without running the handler again, so the publishes are never sent. Use the outbox with the inbox when those
 publishes matter.
 
 ### Receiving
@@ -500,7 +501,7 @@ A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplic
 | **Guaranteed** | With the outbox, a publish through `bus.outbox(&mut tx)` whose transaction commits is published after the commit, or, when every attempt fails, kept as a `failed` row until someone sends it again; one whose transaction rolls back is never published. |
 | **Guaranteed** | A delivery is acked only after its handler succeeded and, on a transactional endpoint, its transaction committed. |
 | **Guaranteed** | With the inbox, a handler's transaction commits at most once per endpoint and message id, while the inbox row is kept. |
-| **Not guaranteed** | A handler's publishes with the inbox and no outbox: they are sent after the commit, so a process that stops in between loses them, and the inbox skips the redelivery. |
+| **Not guaranteed** | A handler's publishes with the inbox and no outbox: they are sent after the commit, so a process that stops in between, or a send that fails, loses them, and the inbox skips the redelivery. |
 | **Not guaranteed** | Exactly-once delivery. Every mode is at least once: a handler without the inbox can see a message twice, and anything it does outside the transaction can happen twice even with it. |
 | **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Envelopes carry a `partitionkey` from the start; keeping order per key is on the [roadmap](../ROADMAP.md). |
 | **Not guaranteed** | A message the broker dropped before any endpoint handled it. A JetStream stream with `max_age`, `max_msgs` or `max_bytes`, or a Kafka topic's retention, removes unacked messages too: keep it longer than the longest consumer outage. `NatsSettings` exposes the stream's limits. |

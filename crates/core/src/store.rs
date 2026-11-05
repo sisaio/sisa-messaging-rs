@@ -2,6 +2,7 @@
 //! an inbox; the partition contract is in `partition.rs`.
 
 use std::error::Error;
+use std::ops::DerefMut;
 
 use crate::Envelope;
 
@@ -55,12 +56,15 @@ pub trait OutboxStore: Send + Sync + 'static {
 /// - The receipt and the handler's work share the transaction from [`begin`](InboxStore::begin),
 ///   so they commit or roll back together.
 /// - Dropping a transaction without [`commit`](InboxStore::commit) rolls it back.
+/// - [`commit`](InboxStore::commit) fails when the transaction can't commit, such as one a failed
+///   statement left aborted, rather than rolling it back without an error.
 /// - [`record`](InboxStore::record) finds a duplicate however long after the first delivery it
 ///   comes, while the first receipt is kept.
 pub trait InboxStore: Send + Sync + 'static {
     /// A transaction on the store's database, such as `sqlx::PgTransaction<'static>`, which the
-    /// handler gets for its own work.
-    type Transaction: Send;
+    /// handler gets for its own work. It dereferences to the connection the handler's queries run
+    /// on, such as `sqlx::PgConnection`.
+    type Transaction: DerefMut + Send;
 
     /// Begins a transaction on a connection of the store's own.
     ///
@@ -86,7 +90,8 @@ pub trait InboxStore: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// [`StoreError`] when the commit failed; nothing was written then.
+    /// [`StoreError`] when the commit failed. Its outcome is then unknown: the database may have
+    /// committed before the error, such as when the connection drops after the commit was sent.
     fn commit(
         &self,
         transaction: Self::Transaction,

@@ -335,3 +335,59 @@ async fn a_receipt_keeps_the_data_when_asked() {
 
     assert_eq!(data.as_deref(), Some(&envelope.data[..]));
 }
+
+/// A handler that swallows a failed statement on its first attempt, which aborts the transaction.
+#[derive(Clone, Default)]
+struct Careless {
+    attempts: Arc<Mutex<Vec<u32>>>,
+}
+
+impl Handler<OrderPlaced, PgTransaction<'static>> for Careless {
+    async fn handle(
+        &self,
+        order: OrderPlaced,
+        context: &mut HandlerContext<PgTransaction<'static>>,
+    ) -> Result<(), HandlerError> {
+        let attempt = context.attempt();
+        self.attempts.lock().unwrap().push(attempt);
+        if attempt == 1 {
+            let failed = sqlx::query("SELECT * FROM missing_table")
+                .execute(context.transaction())
+                .await;
+            assert!(failed.is_err());
+        }
+        sqlx::query("INSERT INTO charges (order_id) VALUES ($1)")
+            .bind(order.id)
+            .execute(context.transaction())
+            .await
+            .ok();
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn an_aborted_transaction_isnt_acked_as_handled() {
+    let postgres = Postgres::start().await;
+    let pool = database(&postgres).await;
+    let transport = InMemoryTransport::new();
+    let careless = Careless::default();
+    let _bus = Bus::builder("/billing", transport.clone())
+        .endpoint("billing", |endpoint| {
+            endpoint
+                .inbox(PostgresInbox::new(pool.clone()))
+                .retry(quick_retries())
+                .handle::<OrderPlaced>(careless.clone())
+        })
+        .start()
+        .await
+        .unwrap();
+
+    transport.publish(&order(1)).await.unwrap();
+    eventually("the retry's commit", async || {
+        count(&pool, "inbox_receipts").await == 1
+    })
+    .await;
+
+    assert_eq!(*careless.attempts.lock().unwrap(), [1, 2]);
+    assert_eq!(count(&pool, "charges").await, 1);
+}
