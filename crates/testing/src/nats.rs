@@ -100,6 +100,7 @@ impl Nats {
         self.wait_until_ready().await;
     }
 
+    /// The server's URL, such as `nats://127.0.0.1:32768`.
     pub fn url(&self) -> &str {
         &self.url
     }

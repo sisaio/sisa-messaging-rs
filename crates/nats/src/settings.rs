@@ -5,6 +5,21 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// The settings of the NATS transport.
+///
+/// Start from the defaults and change what differs, or read them from a configuration file with
+/// serde, where a missing field keeps its default:
+///
+/// ```no_run
+/// use sisa_messaging_nats::{NatsSettings, NatsTransport};
+///
+/// # async fn connect() -> Result<(), sisa_messaging_core::TransportError> {
+/// let mut settings = NatsSettings::default();
+/// settings.url = "nats://nats.internal:4222".into();
+/// settings.prefix = "staging".into();
+/// let transport = NatsTransport::connect(settings).await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]

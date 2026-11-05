@@ -1,14 +1,9 @@
 # Architecture
 
-A map of the design for contributors. What each type does for users will be in its Rust docs; this
-page explains how the parts fit, what they promise, and which rules hold them together.
-[Flows](02-flows.md) draws each step described here, and [Research](03-research.md) says where the
-ideas come from.
-
-> [!NOTE]
-> This page is the design for the first milestone, written before the code. Names in it are
-> proposals until the maintainer settles them; the [Decisions](#decisions) table says which
-> choices are settled.
+A map of the design for contributors, as 0.1.0 ships it. What each type does for users is in its
+Rust docs; this page explains how the parts fit, what they promise, and which rules hold them
+together. [Flows](02-flows.md) draws each step described here, and [Research](03-research.md) says
+where the ideas come from.
 
 ## Goals
 
@@ -60,9 +55,9 @@ flowchart TD
 | --- | --- | --- | --- |
 | `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only, no code of its own; features `nats` and `postgres` pick the parts, none by default |
 | `sisa-messaging-core` | Yes | `Message`, `Envelope`, `MessageId`, `MessageType`, `Codec`, `JsonCodec`, `TransportPublisher`, `TransportSubscriber`, `Delivery`, `OutboxStore`, `InboxStore`, `PartitionStore`, `Publisher` | Contracts only, and the JSON codec. No runtime, no SQL, no broker client, so adapter crates build fast |
-| `sisa-messaging-runtime` | Yes | `Bus`, `OutboxPublisher`, `HandlerContext`, `Handler`, `RetryPolicy`, `InMemoryTransport` | The engine, the same for every transport and database: the bus, the receive pipeline with the inbox step, the dispatcher, the partition maintenance scheduler, retries, and an in-memory transport for tests |
-| `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings` | Both transport halves on JetStream: a stream per bus, a durable pull consumer per endpoint |
-| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresSettings` | The three stores: the tables and their migration, the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL |
+| `sisa-messaging-runtime` | Yes | `Bus`, `BusBuilder`, `EndpointBuilder`, `OutboxPublisher`, `HandlerContext`, `Handler`, `RetryPolicy`, `DispatchSettings`, `PartitionSettings`, `InMemoryTransport` | The engine, the same for every transport and database: the bus, the receive pipeline with the inbox step, the dispatcher, the partition maintenance scheduler, retries, and an in-memory transport for tests |
+| `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings`, `NatsDelivery` | Both transport halves on JetStream: a stream per prefix, a durable pull consumer per endpoint |
+| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresPartitions` | The three stores: the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL; the tables come from the migrations in [`migrations/postgresql`](../migrations/postgresql) |
 | `sisa-messaging-testing` | No | `Nats`, `Postgres`, `eventually` | A NATS and a PostgreSQL container per test, and a wait-until helper |
 
 Later crates follow the same shape: `-kafka` (Kafka, Redpanda, WarpStream), `-amqp` (RabbitMQ,
@@ -122,12 +117,16 @@ runtime doesn't interpret.
 pub trait Codec: Send + Sync + 'static {
     fn content_type(&self) -> &'static str;
     fn encode<Msg: Message>(&self, message: &Msg) -> Result<Bytes, CodecError>;
-    fn decode<Msg: Message>(&self, body: &[u8]) -> Result<Msg, CodecError>;
+    fn decode<Msg: Message>(&self, data: &[u8]) -> Result<Msg, CodecError>;
+    /// Whether it reads data of this content type; by default, when the media types match.
+    fn can_decode(&self, content_type: &ContentType) -> bool { .. }
 }
 ```
 
-A bus has one codec for what it publishes. A receiver picks the codec by the envelope's content
-type, so a service can move to another codec while old messages drain.
+In 0.1.0 the bus publishes and receives with `JsonCodec` only: `Codec` has generic methods, so a
+bus can't hold one chosen at run time yet. A delivery whose content type `JsonCodec` can't decode
+goes to the error destination at once. Picking the codec by the envelope's content type, so a
+service can move to another codec while old messages drain, comes with the second codec.
 
 ### Transport
 
@@ -142,13 +141,14 @@ pub trait TransportPublisher: Send + Sync + 'static {
 }
 
 pub trait TransportSubscriber: Send + Sync + 'static {
+    type Delivery: Delivery;
     /// Creates the endpoint's durable subscription if needed, and streams its deliveries.
-    async fn subscribe(&self, endpoint: &EndpointSpec) -> Result<Deliveries, TransportError>;
+    async fn subscribe(&self, endpoint: &EndpointSpec) -> Result<Deliveries<Self::Delivery>, TransportError>;
     /// Publishes an envelope the endpoint gave up on to its error destination.
     async fn publish_error(&self, endpoint: &str, envelope: &Envelope) -> Result<(), TransportError>;
 }
 
-pub trait Delivery: Send {
+pub trait Delivery: Send + 'static {
     fn envelope(&self) -> &Envelope;
     fn attempt(&self) -> u32;                 // 1 on the first delivery
     async fn ack(self) -> Result<(), TransportError>;
@@ -205,7 +205,8 @@ One trait publishes, whatever the mode:
 
 ```rust,ignore
 pub trait Publisher {
-    async fn publish<Msg: Message>(&mut self, message: &Msg) -> Result<()>;
+    type Error: Error + Send + Sync + 'static;  // PublishError for all three below
+    async fn publish<Msg: Message>(&mut self, message: &Msg) -> Result<(), Self::Error>;
 }
 ```
 
@@ -215,13 +216,14 @@ Three types implement it, and the code that owns the transaction picks one:
 | --- | --- | --- |
 | `Bus` | Straight to the broker; returns when the broker has it | Outside a database transaction: before it begins or after it commits |
 | `OutboxPublisher`, from `bus.outbox(&mut tx)` | A row in `outbox_messages`, in the caller's transaction; the dispatcher sends it after the commit | Inside the caller's transaction, so the message goes out if and only if it commits |
-| `HandlerContext` | As the endpoint is set up: a row in the handler's transaction with the outbox, otherwise held and sent after the handler succeeds | Inside a handler |
+| `HandlerContext` | As the endpoint is set up: a row in the handler's transaction on an endpoint with an inbox and a bus with an outbox, otherwise held and sent after the handler succeeds | Inside a handler |
 
 ```rust,ignore
 type AppBus = Bus<NatsTransport, PostgresOutbox>;
 
-let bus: AppBus = Bus::builder("/orders", NatsTransport::connect(nats_url, &nats).await?)
+let bus: AppBus = Bus::builder("/orders", NatsTransport::connect(NatsSettings::default()).await?)
     .outbox(PostgresOutbox::new(pool.clone())) // optional; changes the type
+    .partitions(PostgresPartitions::outbox(pool.clone()), PartitionSettings::default())
     .endpoint("billing", |endpoint| {
         endpoint.inbox(PostgresInbox::new(pool.clone())) // optional; after the outbox
             .handle::<OrderPlaced>(charge_order)
@@ -239,7 +241,7 @@ bus.outbox(&mut tx).publish(&OrderPlaced { id }).await?;
 tx.commit().await?;
 
 // Domain code doesn't care which one it gets.
-async fn place_order(publisher: &mut impl Publisher, order: Order) -> Result<()> { .. }
+async fn place_order<P: Publisher>(publisher: &mut P, order: Order) -> Result<(), P::Error> { .. }
 ```
 
 The bus carries its outbox in its type. `outbox` exists only on a bus built with one, and
@@ -248,8 +250,8 @@ database is a compile error, never a silent direct send. `bus.outbox(&mut tx)` b
 transaction only for the call, so the application keeps using `tx` between publishes.
 
 A handler gets the message and a `HandlerContext`. The context publishes with the handled message
-as the causation and its correlation id carried over, and, on a transactional endpoint, hands out
-the transaction: the handler takes `&mut HandlerContext<PgTransaction<'static>>` and runs its
+as the causation, and its correlation id and trace context carried over unchanged. On an endpoint
+with an inbox, it also hands out the delivery's transaction: the handler takes `&mut HandlerContext<PgTransaction<'static>>` and runs its
 queries on `context.transaction()`.
 
 ```rust,ignore
@@ -272,11 +274,12 @@ so the outbox comes first; an endpoint with an inbox added before it fails `star
 | Mode | A publish from application code | A publish from a handler | A redelivered message |
 | --- | --- | --- | --- |
 | Plain | Goes to the broker; returns when the broker has it | Held until the handler returns `Ok`, then sent before the ack | Handled again: the handler must be idempotent |
-| Outbox | `bus.outbox(&mut tx).publish` writes a row; the dispatcher publishes it after the commit. `bus.publish` still goes straight to the broker | On a transactional endpoint, a row in the handler's transaction; otherwise as in plain mode | Handled again |
+| Outbox | `bus.outbox(&mut tx).publish` writes a row; the dispatcher publishes it after the commit. `bus.publish` still goes straight to the broker | On an endpoint with an inbox, a row in the handler's transaction; otherwise as in plain mode | Handled again |
 | Outbox and inbox | As above | A row in the handler's transaction | The inbox row exists, so the delivery is acked and the handler doesn't run |
 
-The inbox needs a transactional endpoint, since its row has to commit with the handler's work. It
-works without the outbox too: the handler's publishes are then sent after the commit, which leaves
+An endpoint with an inbox runs each delivery in a transaction of the inbox store's, since its row
+has to commit with the handler's work; there is no transactional endpoint without an inbox. The
+inbox works without the outbox too: the handler's publishes are then sent after the commit, which leaves
 a gap. A process that stops after the commit and before the send loses them, and so does a send
 that fails and makes the endpoint retry the delivery: either way the inbox acks the redelivery
 without running the handler again, so the publishes are never sent. Use the outbox with the inbox when those
@@ -286,15 +289,17 @@ publishes matter.
 
 For each delivery, an endpoint:
 
-1. Decodes the data with the codec its content type names. Data that doesn't decode goes to the
-   error destination at once, without retries, since no retry can fix it; it is rejected once that
-   publish succeeds, as in step 5.
-2. On a transactional endpoint, begins a transaction and, with the inbox, records the message. A
-   message recorded before is committed and acked here.
+1. Decodes the data with `JsonCodec`. Data that isn't JSON or doesn't decode, and a type the
+   endpoint has no handler for, go to the error destination at once, without retries, since no
+   retry can fix them; the delivery is rejected once that publish succeeds, as in step 5.
+2. With an inbox, begins a transaction and records the message. A message recorded before is
+   committed and acked here.
 3. Runs the handler.
 4. On success, writes the handler's publishes to the outbox (or holds them), commits, sends any
    held publishes, then acks.
-5. On an error, rolls back and asks the transport to retry after the retry policy's delay. Past
+5. On an error, rolls back and asks the transport to retry after the retry policy's delay: 5
+   attempts by default, 1 second after the first failure and twice as long after each next one,
+   at most a minute. A handler that panics fails like one that returns an error. Past
    the policy's last attempt, it publishes the envelope to the endpoint's error destination with
    the error in its headers, then rejects the delivery. If that publish fails, the delivery is
    retried after the policy's delay instead of rejected, so a message is never dropped without a
@@ -332,12 +337,12 @@ sent and handled. Both tables are range-partitioned by time, one partition per d
 - **Maintenance** is a runtime worker the bus starts for each table given to
   `BusBuilder::partitions`, such as `PostgresPartitions::outbox(pool)`; the store only runs the
   DDL. Once an hour, with one instance at a time through a session advisory lock on the table, it
-  creates the partitions for the current interval and the next 7, a `day`, `week` or `month` each,
-  and applies the retention. `partitions = "external"` turns it off for teams that use pg_partman
-  or their own jobs.
-- **Retention** is off by default. When set, such as `retention_days = 90`, a partition older than
-  that is detached, which keeps it as an ordinary table for archiving, or dropped with
-  `on_expiry = "drop"`. An outbox partition that still holds `pending` or `failed` rows is never
+  creates the partitions for the current interval and the next 7 (`PartitionSettings::ahead`), a
+  day, week or month each (`interval`), and applies the retention. `PartitionMode::External` in
+  `partitions` turns it off for teams that use pg_partman or their own jobs.
+- **Retention** is off by default. When set, such as `retention_days = Some(90)`, a partition older
+  than that is detached, which keeps it as an ordinary table for archiving, or dropped with
+  `on_expiry = Expiry::Drop`. An outbox partition that still holds `pending` or `failed` rows is never
   expired; the worker warns instead. Keep the inbox retention longer than the longest redelivery, or a very
   late redelivery is handled again.
 - **A default partition** catches a row whose time has no partition yet, such as a message from a
@@ -372,8 +377,14 @@ consumers that don't know CloudEvents still read a plain body.
 | `errorendpoint`, `errortype`, `errormessage`, `errorattempts` | Error destination only | Our extensions: where and why handling gave up |
 
 Our extension names follow the CloudEvents rules (lowercase letters and digits, at most 20
-characters), so other CloudEvents SDKs carry them. A receiver also accepts structured mode
-(`application/cloudevents+json`), so producers in other languages can use either mode.
+characters), so other CloudEvents SDKs carry them. Receivers read binary mode only: on NATS, a
+message whose `ce-` headers don't make an envelope, such as one in structured mode, goes to the
+endpoint's error subject as it came, with `errorendpoint`, `errortype` and `errormessage`, and
+isn't handled.
+
+In 0.1.0 the publishers set neither `subject`, `dataschema` nor `partitionkey`, and a message
+published outside a handler has no `correlationid`; envelopes from other producers keep the ones
+they carry, through the outbox and the inbox too.
 
 Each transport names the headers as its CloudEvents binding says:
 
@@ -384,7 +395,8 @@ Each transport names the headers as its CloudEvents binding says:
 | AMQP | `cloudEvents:` and the attribute, from the AMQP 1.0 binding, since AMQP 0-9-1 has none | `cloudEvents:id`; the content type in the `content_type` property |
 
 On NATS the publish also sets `Nats-Msg-Id` to the message id, so JetStream drops a duplicate
-publish inside the stream's duplicate window.
+publish inside the stream's duplicate window. A copy to the error subject goes without it, so the
+stream keeps it next to the original of the same id.
 
 ### NATS subjects and streams
 
@@ -392,7 +404,7 @@ publish inside the stream's duplicate window.
 | --- | --- | --- |
 | Subject | `{prefix}.{message type}` | `sisa.orders.order_placed.v1` |
 | Stream | One per prefix, capturing `{prefix}.>` | `SISA`, on `sisa.>` |
-| Durable consumer | The endpoint name, filtered on the subjects of the messages it handles | `billing` |
+| Durable consumer | The endpoint name, filtered on the subjects of the messages it handles. A new one starts with the messages published after it is created; an existing one keeps its subjects and gains the missing ones | `billing` |
 | Error subject | `{prefix}._error.{endpoint}` | `sisa._error.billing` |
 
 The prefix keeps deployments that share a server apart, such as `prod` and `staging`.
@@ -509,19 +521,18 @@ A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplic
 | --- | --- |
 | **Guaranteed** | A `publish` that returns `Ok` is in the broker. |
 | **Guaranteed** | With the outbox, a publish through `bus.outbox(&mut tx)` whose transaction commits is published after the commit, or, when every attempt fails, kept as a `failed` row until someone sends it again; one whose transaction rolls back is never published. |
-| **Guaranteed** | A delivery is acked only after its handler succeeded and, on a transactional endpoint, its transaction committed. |
+| **Guaranteed** | A delivery is acked only after its handler succeeded and, on an endpoint with an inbox, its transaction committed. |
 | **Guaranteed** | With the inbox, a handler's transaction commits at most once per endpoint and message id, while the inbox row is kept. |
 | **Not guaranteed** | A handler's publishes with the inbox and no outbox: they are sent after the commit, so a process that stops in between, or a send that fails, loses them, and the inbox skips the redelivery. |
 | **Not guaranteed** | Exactly-once delivery. Every mode is at least once: a handler without the inbox can see a message twice, and anything it does outside the transaction can happen twice even with it. |
 | **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Envelopes carry a `partitionkey` from the start; keeping order per key is on the [roadmap](../ROADMAP.md). |
-| **Not guaranteed** | A message the broker dropped before any endpoint handled it. A JetStream stream with `max_age`, `max_msgs` or `max_bytes`, or a Kafka topic's retention, removes unacked messages too: keep it longer than the longest consumer outage. `NatsSettings` exposes the stream's limits. |
+| **Not guaranteed** | A message the broker dropped before any endpoint handled it. A JetStream stream with `max_age`, `max_msgs` or `max_bytes`, or a Kafka topic's retention, removes unacked messages too: keep it longer than the longest consumer outage. The stream `NatsTransport` creates has no limits, and connecting updates the stream to `NatsSettings`, which also clears limits set on it by hand. |
 | **Not guaranteed** | A message redelivered after its receipt's partition expired is handled again. Keep the inbox retention longer than the longest redelivery. |
 | **Not guaranteed** | Deduplication of a message whose `time` was changed between deliveries: the receipt's partition comes from it. Publishers never change it; a hand-made republish must keep it. |
 
 ## Decisions
 
-Settled; reopen only with new evidence. Until the maintainer reviews this page, each row is a
-proposal.
+Settled; reopen only with new evidence.
 
 | Decision | Why |
 | --- | --- |

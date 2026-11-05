@@ -5,7 +5,7 @@ progress. Each milestone is a release.
 
 | Milestone | Goal |
 | --- | --- |
-| 0.1.0 | NATS JetStream, PostgreSQL and JSON: publish, consume on durable endpoints, an optional outbox and inbox, retries and an error destination. Simple, but enough to run a service on |
+| 0.1.0 | Done. NATS JetStream, PostgreSQL and JSON: publish, consume on durable endpoints, an optional outbox and inbox, retries and an error destination. Simple, but enough to run a service on |
 | 0.2.0 | Production readiness: OpenTelemetry metrics and trace propagation, dispatch woken by `LISTEN`/`NOTIFY` instead of polling alone, sending a command to one endpoint, graceful shutdown, benchmarks and a chaos test |
 | 0.3.0 | The Kafka family: Kafka, Redpanda and WarpStream, with retry topics for per-message delays |
 | 0.4.0 | AMQP and Iggy: RabbitMQ and LavinMQ over AMQP 0-9-1, and Apache Iggy |
