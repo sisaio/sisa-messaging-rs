@@ -138,7 +138,10 @@ where
         match tokio::time::timeout_at(deadline, transport.publish(&record.envelope)).await {
             Ok(Ok(())) => published.push(record.clone()),
             Ok(Err(error)) => put_back(store, settings, record, &error.to_string()).await,
-            Err(_elapsed) => break,
+            Err(_elapsed) => {
+                tracing::warn!(id = %record.envelope.id, "the lease ran out while publishing an outbox row; it is claimed again");
+                break;
+            }
         }
     }
 
