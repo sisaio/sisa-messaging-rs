@@ -205,21 +205,24 @@ async fn a_handlers_publishes_go_to_the_outbox_in_its_transaction() {
     })
     .await;
 
-    let types: Vec<String> = sqlx::query_scalar("SELECT type FROM outbox_messages")
+    let rows: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, type FROM outbox_messages")
         .fetch_all(&pool)
         .await
         .unwrap();
+    let [(row, message_type)] = rows.try_into().unwrap();
     assert_eq!(
-        types,
-        [InvoiceSent::TYPE],
+        message_type,
+        InvoiceSent::TYPE,
         "the failed attempt's row rolled back"
     );
+    // The dispatcher may have sent the row by now; nothing else sends an invoice.
     assert!(
         transport
             .published()
             .iter()
-            .all(|envelope| envelope.message_type.as_str() != InvoiceSent::TYPE),
-        "nothing goes out before the dispatch",
+            .filter(|envelope| envelope.message_type.as_str() == InvoiceSent::TYPE)
+            .all(|envelope| *envelope.id.as_uuid() == row),
+        "only the outbox sends the invoice",
     );
 }
 
