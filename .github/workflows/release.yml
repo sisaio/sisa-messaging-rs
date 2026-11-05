@@ -73,7 +73,8 @@ jobs:
           tag="v$version"
           # `isDraft` of the version's release, or nothing when it has none.
           draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || true)
-          if ! grep -qF "## [$version]" CHANGELOG.md; then
+          # The same heading the notes below are read from, at the start of a line.
+          if ! awk -v heading="## [$version]" 'index($0, heading) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
             echo "CHANGELOG.md has no section for $version; nothing to release"
             exit 0
           fi
@@ -95,7 +96,7 @@ jobs:
             ' CHANGELOG.md > notes.md
             # A version such as 0.2.0-rc.1 is a pre-release, which GitHub never marks as the latest.
             prerelease=()
-            if [[ $version == *-* ]]; then
+            if [[ ${version%%+*} == *-* ]]; then
               prerelease=(--prerelease)
             fi
             gh release create "$tag" --draft "${prerelease[@]}" --verify-tag --title "$tag" \
@@ -106,7 +107,7 @@ jobs:
   # The ci workflow's run for this exact commit must succeed. A failed or cancelled run, or none
   # within the timeout, stops the release before crates.io.
   ci:
-    name: wait for CI
+    name: wait for ci
     needs: tag
     if: needs.tag.outputs.tag
     runs-on: ubuntu-26.04
@@ -245,7 +246,7 @@ jobs:
   # on it like on any other PR. Without them, it falls back to the built-in token, whose PRs get
   # no CI.
   release-pr:
-    name: release PR
+    name: release pr
     runs-on: ubuntu-26.04
     if: github.repository_owner == 'sisaio' && github.event_name == 'workflow_dispatch'
     timeout-minutes: 30
