@@ -1,0 +1,314 @@
+# Releases. It:
+# - opens the release PR with release-plz (see release-plz.toml) when the maintainer runs this
+#   workflow by hand. The PR bumps the versions, checks the public API for breaking changes with
+#   cargo-semver-checks, and adds the changelog section. The run's `version` input sets the version
+#   by hand, such as `0.2.0-rc.1` for a first rc or `0.2.0` for the final. Run it again to bring the
+#   PR up to date with main; nothing else touches it;
+# - when a push to main changes the version or the changelog, as merging that PR does, and its
+#   version has no `v<version>` tag yet: tags the commit, creates the GitHub release from the
+#   changelog as a draft, waits for CI to pass on that commit and for the maintainer to approve
+#   the `release` environment, publishes the crates to crates.io, checks that crates.io serves the
+#   `.crate` files the tag packages to and attaches them with a signed provenance attestation to
+#   the draft, and then publishes the release. A version with no section in the changelog isn't
+#   released, so a change to Cargo.toml before the first release PR, such as a dependency bump,
+#   tags nothing.
+#
+# crates.io is the one step nobody can undo, so it comes last, after the maintainer has read the
+# draft. Releases are immutable once published, so the release stays a draft until every crate is
+# out. If crates.io rejects a crate, the tag stays: ship the fix as the
+# next version, or have an admin delete the tag and the draft.
+#
+# Publishing uses the `CARGO_REGISTRY_TOKEN` secret while it is set, and crates.io trusted
+# publishing from the `release` environment once it is deleted. A crate's very first publish
+# needs the token.
+name: Release
+
+on:
+  # Every release PR bumps the version in the root Cargo.toml, though it may add no changelog
+  # entry. Another change to either file, such as a dependency bump, finds its version tagged.
+  push:
+    branches: [main]
+    paths: [Cargo.toml, CHANGELOG.md]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version, such as 0.2.0-rc.1 or 0.2.0. Empty lets release-plz pick it.
+        type: string
+        required: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Tags the pushed commit and drafts its release, unless its version is tagged already. A push
+  # while an earlier release waits for approval finds the tag on another commit and does nothing.
+  # A rerun of a run that failed after tagging finds the tag on its own commit, with no published
+  # release, and carries on from there.
+  tag:
+    name: tag
+    runs-on: ubuntu-26.04
+    if: github.repository_owner == 'sisaio' && github.event_name == 'push'
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: release-tag
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Tag and draft the release
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          tag="v$version"
+          # `isDraft` of the version's release, or nothing when it has none.
+          draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || true)
+          if ! grep -qF "## [$version]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $version; nothing to release"
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            if [ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ] || [ "$draft" = false ]; then
+              echo "$tag exists; nothing to release"
+              exit 0
+            fi
+            echo "$tag is on this commit and not released yet; carrying on"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
+          fi
+          if [ -z "$draft" ]; then
+            # The changelog section for this version, without its heading.
+            awk -v heading="## [$version]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > notes.md
+            # A version such as 0.2.0-rc.1 is a pre-release, which GitHub never marks as the latest.
+            prerelease=()
+            if [[ $version == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$tag" --draft "${prerelease[@]}" --verify-tag --title "$tag" \
+              --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # The ci workflow's run for this exact commit must succeed. A failed or cancelled run, or none
+  # within the timeout, stops the release before crates.io.
+  ci:
+    name: wait for CI
+    needs: tag
+    if: needs.tag.outputs.tag
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the ci run on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A failed lookup is logged and retried; the job's timeout still ends the wait.
+          while true; do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+              --event push --json status,conclusion,url --jq 'first // empty') || run=
+            if [ -n "$run" ] && [ "$(jq -r .status <<< "$run")" = completed ]; then
+              echo "$(jq -r .url <<< "$run"): $(jq -r .conclusion <<< "$run")"
+              [ "$(jq -r .conclusion <<< "$run")" = success ]
+              exit
+            fi
+            sleep 30
+          done
+
+  # Waits for the maintainer to approve the `release` environment, after reading the draft. Each
+  # crate whose version crates.io already has is skipped, so a re-run finishes a half-done publish.
+  publish:
+    name: publish
+    needs: [tag, ci]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      HAS_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - name: Get a crates.io token
+        id: auth
+        if: env.HAS_REGISTRY_TOKEN != 'true'
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      # In dependency order. cargo waits for each crate to show in the index before the next.
+      - name: Publish the crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-postgres sisa-messaging; do
+            if curl -sfo /dev/null -A "sisa-messaging-rs release (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$crate/$version"; then
+              echo "$crate $version is on crates.io already"
+            else
+              cargo publish -p "$crate" --locked
+            fi
+          done
+
+  # Signs what users download, once it matches the tagged source: it packages each crate from the
+  # tag, as `cargo publish` did, and fails unless crates.io serves the same bytes, so a crate
+  # uploaded any other way gets no attestation. `.crate` files are reproducible. The attestation
+  # is a Sigstore bundle with SLSA build provenance, also listed under the repository's
+  # attestations. It goes on the draft, since a published release can't change.
+  attest:
+    name: attest
+    needs: [tag, publish]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      # The downloads go outside the checkout, which has a `crates/` folder of its own.
+      - name: Check the published crates against the tag
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+          OUT: ${{ runner.temp }}/release-crates
+        run: |
+          version="${TAG#v}"
+          mkdir -p "$OUT"
+          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-postgres sisa-messaging; do
+            cargo package -p "$crate" --locked --no-verify
+            curl -sSfL -A "sisa-messaging-rs release (github.com/$GITHUB_REPOSITORY)" \
+              -o "$OUT/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"
+            cmp "target/package/$crate-$version.crate" "$OUT/$crate-$version.crate"
+          done
+
+      - name: Attest the crates
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-crates/*.crate
+
+      - name: Attach them to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          OUT: ${{ runner.temp }}/release-crates
+        run: |
+          cp "$BUNDLE" "$OUT/sisa-messaging-${TAG#v}.sigstore.json"
+          gh release upload "$TAG" "$OUT"/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  publish-release:
+    name: publish release
+    needs: [tag, attest]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+
+  # With the release app's secrets set, the PR is opened with the app's token, so GitHub runs CI
+  # on it like on any other PR. Without them, it falls back to the built-in token, whose PRs get
+  # no CI.
+  release-pr:
+    name: release PR
+    runs-on: ubuntu-26.04
+    if: github.repository_owner == 'sisaio' && github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-pr
+      cancel-in-progress: false
+    env:
+      HAS_APP: ${{ secrets.RELEASE_APP_ID != '' }}
+    steps:
+      - name: Get the release app's token
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - name: Open or update the release PR
+        id: release-plz
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token || github.token }}
+
+      # `release-plz set-version` sets the version, the crates' requirements on each other and
+      # Cargo.lock, and renames the changelog section release-plz just wrote. The change goes into
+      # release-plz's own commit, so the PR stays one commit. release-plz is on PATH from the step
+      # above. With no crate changed since the last release, release-plz opens no PR: open one by
+      # hand with the version and its changelog section.
+      - name: Set the version by hand
+        if: inputs.version
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          VERSION: ${{ inputs.version }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          branch=$(jq -r '.head_branch // empty' <<< "${PR:-null}")
+          if [ -z "$branch" ]; then
+            echo "::error::release-plz opened no release PR: no crate changed since the last release"
+            exit 1
+          fi
+          git fetch --quiet origin "$branch"
+          git switch --quiet --force-create "$branch" FETCH_HEAD
+          picked=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          release-plz set-version "$VERSION"
+          git -c user.name="$(git log -1 --format=%an)" -c user.email="$(git log -1 --format=%ae)" \
+            commit --quiet --all --amend --message "chore: release v$VERSION"
+          git push --quiet --force-with-lease="refs/heads/$branch:$(git rev-parse FETCH_HEAD)" \
+            "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$branch"
+          number=$(jq -r .number <<< "$PR")
+          title=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+          body=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --title "${title//"$picked"/"$VERSION"}" \
+            --body-file <(printf '%s\n' "${body//"$picked"/"$VERSION"}")

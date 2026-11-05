@@ -49,7 +49,7 @@ Both scripts can run any number of times:
 
 ## Releases
 
-`release.yml`, which lands with the first release, needs three things no script can set up:
+`release.yml` needs three things no script can set up:
 
 - **The release app**, so release PRs run CI. Create a GitHub App in the `sisaio` organization
   with Contents and Pull requests set to read and write, and no webhook. Install it on this
