@@ -108,8 +108,8 @@ pub struct TraceContext {
 The fields are grouped in Rust and flat on the wire, where each CloudEvents binding wants one
 header per attribute. Correlation and trace are typed fields, not extensions, because the runtime
 sets and carries them: a handler's publishes get the handled message as their causation, its
-correlation id, and the handler's span as their trace parent. `extensions` holds what the
-runtime doesn't interpret.
+correlation id, and its trace context unchanged. `extensions` holds what the runtime doesn't
+interpret.
 
 ### Codec
 
@@ -407,7 +407,8 @@ stream keeps it next to the original of the same id.
 | Durable consumer | The endpoint name, filtered on the subjects of the messages it handles. A new one starts with the messages published after it is created; an existing one keeps its subjects and gains the missing ones | `billing` |
 | Error subject | `{prefix}._error.{endpoint}` | `sisa._error.billing` |
 
-The prefix keeps deployments that share a server apart, such as `prod` and `staging`.
+The prefix keeps deployments that share a server apart, such as `prod` and `staging`. Give each
+its own stream too: connecting sets the stream's subjects to its prefix's.
 
 ### PostgreSQL tables
 
