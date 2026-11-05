@@ -146,7 +146,14 @@ impl InboxStore for PostgresInbox {
         Ok(inserted.rows_affected() == 1)
     }
 
-    async fn commit(&self, transaction: PgTransaction<'static>) -> Result<(), StoreError> {
+    async fn commit(&self, mut transaction: PgTransaction<'static>) -> Result<(), StoreError> {
+        // PostgreSQL answers COMMIT on an aborted transaction with a rollback and no error, which
+        // happens when a handler swallows a failed statement. A statement first fails there
+        // instead, so the delivery isn't acked for work that was never written.
+        sqlx::query("SELECT 1")
+            .execute(&mut *transaction)
+            .await
+            .map_err(database("checking the inbox transaction before its commit"))?;
         transaction
             .commit()
             .await
