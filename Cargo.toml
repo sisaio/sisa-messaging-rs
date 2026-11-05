@@ -1,6 +1,7 @@
-# The library crates. Examples and benchmarks join the workspace when the first of them lands.
+# The library crates and the example applications. Benchmarks join the workspace when the first of
+# them lands.
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "examples/*"]
 resolver = "3"
 
 [workspace.package]

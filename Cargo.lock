@@ -1582,6 +1582,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e036b411754132fd6b74e94b74e9a13c5cf606fa93d1885c35860d3060820b1"
 
 [[package]]
+name = "orders"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "sisa-messaging",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2255,10 +2265,12 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 name = "sisa-messaging"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "sisa-messaging-core",
  "sisa-messaging-nats",
  "sisa-messaging-postgres",
  "sisa-messaging-runtime",
+ "sqlx",
 ]
 
 [[package]]

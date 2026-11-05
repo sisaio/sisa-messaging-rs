@@ -1,0 +1,18 @@
+[package]
+name = "orders"
+description = "An orders service that publishes through the outbox, and a billing endpoint that consumes with the inbox"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+sisa-messaging = { workspace = true, features = ["nats", "postgres"] }
+serde = { workspace = true }
+sqlx = { workspace = true }
+# A multi-threaded runtime for `#[tokio::main]`.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
