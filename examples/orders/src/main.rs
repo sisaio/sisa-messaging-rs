@@ -80,20 +80,19 @@ async fn place_order(
     Ok(id)
 }
 
-/// Waits until billing has invoiced the order, for at most ten seconds.
-async fn invoiced(pool: &PgPool, order: i64) -> Result<bool, sqlx::Error> {
-    for _ in 0..100 {
+/// Waits until billing has invoiced the order.
+async fn invoiced(pool: &PgPool, order: i64) -> Result<(), sqlx::Error> {
+    loop {
         let found: Option<i64> =
             sqlx::query_scalar("SELECT order_id FROM invoices WHERE order_id = $1")
                 .bind(order)
                 .fetch_optional(pool)
                 .await?;
         if found.is_some() {
-            return Ok(true);
+            return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Ok(false)
 }
 
 #[tokio::main]
@@ -126,10 +125,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?;
 
     let order = place_order(&bus, &pool, "Ada", 4_200).await?;
-    let billed = invoiced(&pool, order).await?;
+    let billed = tokio::time::timeout(Duration::from_secs(10), invoiced(&pool, order)).await;
     bus.shutdown().await;
-    if !billed {
-        return Err(format!("order {order} wasn't invoiced within ten seconds").into());
+    match billed {
+        Ok(result) => Ok(result?),
+        Err(_) => Err(format!("order {order} wasn't invoiced within ten seconds").into()),
     }
-    Ok(())
 }

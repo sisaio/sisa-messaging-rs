@@ -109,6 +109,7 @@ local NATS and PostgreSQL:
 docker run -d --name orders-nats -p 4222:4222 nats:2.15-alpine -js
 docker run -d --name orders-postgres -p 5432:5432 \
     -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=orders postgres:18-alpine
+until docker exec orders-postgres pg_isready -h localhost -U postgres -d orders; do sleep 1; done
 
 # The library's tables in a `messaging` schema, the example's own in `public`.
 docker exec orders-postgres psql -U postgres -d orders -c 'CREATE SCHEMA messaging'
