@@ -31,7 +31,7 @@ sisa-messaging-postgres = { path = "crates/postgres", version = "0.1.0" }
 sisa-messaging-runtime = { path = "crates/runtime", version = "0.1.0" }
 
 # The NATS client, for core NATS and JetStream.
-async-nats = { version = "0.51.0" }
+async-nats = { version = "0.52.0" }
 
 # PostgreSQL through sqlx, without the default macros and migrate features: queries are checked by
 # the tests, and the tables come from the SQL in migrations/postgresql, which applications run.
