@@ -3423,6 +3423,7 @@ dependencies = [
  "sisa-messaging-runtime",
  "sisa-messaging-testing",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

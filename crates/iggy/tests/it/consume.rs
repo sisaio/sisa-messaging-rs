@@ -308,6 +308,7 @@ async fn an_error_copy_goes_to_the_error_topic() {
     let copy = &copies[0];
     assert_eq!(copy.payload, envelope.data);
     assert_eq!(header(copy, "ce_id"), Some(envelope.id.to_string()));
+    assert_eq!(copy.header.id, envelope.id.as_uuid().as_u128());
     assert_eq!(header(copy, "ce_errormessage"), Some("x".repeat(255)));
     assert_eq!(stored(&iggy, "orders.order_placed.v1", 4).await.len(), 1);
 }
@@ -331,6 +332,8 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_topic() {
     assert_eq!(copies.len(), 1);
     let copy = &copies[0];
     assert_eq!(copy.payload, Bytes::from_static(b"plain"));
+    let original = &stored(&iggy, "orders.order_placed.v1", 1).await[0];
+    assert_eq!(copy.header.id, original.header.id);
     assert_eq!(header(copy, "ce_errorendpoint").as_deref(), Some("billing"));
     assert_eq!(
         header(copy, "ce_errortype").as_deref(),
@@ -400,6 +403,69 @@ async fn ce_headers_are_read_without_regard_to_case() {
     let delivery = next(&mut deliveries).await;
     assert_eq!(delivery.envelope(), &envelope);
     delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_ce_header_that_isnt_a_string_goes_to_the_error_topic() {
+    let iggy = Iggy::start().await;
+    let mut one_partition = settings(&iggy);
+    one_partition.partitions = 1;
+    let transport = IggyTransport::connect(one_partition).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let mut headers: BTreeMap<HeaderKey, HeaderValue> = envelope()
+        .to_attributes()
+        .into_iter()
+        .map(|(name, value)| {
+            (
+                HeaderKey::try_from(format!("ce_{name}").as_str()).unwrap(),
+                HeaderValue::try_from(value.as_str()).unwrap(),
+            )
+        })
+        .collect();
+    headers.insert(
+        HeaderKey::try_from("ce_subject").unwrap(),
+        HeaderValue::from(42_u64),
+    );
+    send_raw(&iggy, headers, b"{}").await;
+    let after = envelope();
+    transport.publish(&after).await.unwrap();
+
+    // The handler never gets it: the next delivery is the message after it.
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope().id, after.id);
+    delivery.ack().await.unwrap();
+    let copies = stored(&iggy, "_error.billing", 1).await;
+    assert_eq!(copies.len(), 1);
+    assert_eq!(
+        header(&copies[0], "ce_errortype").as_deref(),
+        Some("invalid_envelope")
+    );
+}
+
+#[tokio::test]
+async fn a_dropped_delivery_doesnt_cut_short_a_retry_of_its_partition() {
+    let iggy = Iggy::start().await;
+    let mut one_partition = settings(&iggy);
+    one_partition.partitions = 1;
+    let transport = IggyTransport::connect(one_partition).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let first = envelope();
+    transport.publish(&first).await.unwrap();
+    transport.publish(&envelope()).await.unwrap();
+    let earlier = next(&mut deliveries).await;
+    let later = next(&mut deliveries).await;
+
+    earlier.retry(Duration::from_secs(4)).await.unwrap();
+    drop(later);
+
+    let started = Instant::now();
+    let again = next(&mut deliveries).await;
+    assert_eq!(again.envelope().id, first.id);
+    assert!(
+        started.elapsed() >= Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]
