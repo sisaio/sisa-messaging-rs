@@ -4,7 +4,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sisaio/sisa-messaging-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/sisaio/sisa-messaging-rs)
 [![crates.io](https://img.shields.io/crates/v/sisa-messaging.svg)](https://crates.io/crates/sisa-messaging)
 [![docs.rs](https://img.shields.io/docsrs/sisa-messaging)](https://docs.rs/sisa-messaging)
-[![MSRV](https://img.shields.io/badge/MSRV-1.94-blue)](https://github.com/sisaio/sisa-messaging-rs/blob/main/Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.95-blue)](https://github.com/sisaio/sisa-messaging-rs/blob/main/Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sisaio/sisa-messaging-rs/blob/main/LICENSE)
 
 Messaging for Rust services: publish and consume over the transport you pick, with an optional
@@ -139,4 +139,4 @@ billing: invoiced order 1 for Ada (4200 cents), message 01a1a97f-3ef5-7079-80e3-
 - [Security](https://github.com/sisaio/sisa-messaging-rs/blob/main/SECURITY.md): reporting a
   vulnerability.
 
-Rust 1.94 or newer. MIT licensed.
+Rust 1.95 or newer. MIT licensed.
