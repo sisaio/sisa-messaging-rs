@@ -14,7 +14,7 @@ transactional outbox and inbox in your own database.
 
 | Part | 0.1.0 | Later |
 | --- | --- | --- |
-| Transport | NATS JetStream | Kafka, Redpanda, WarpStream, RabbitMQ, LavinMQ, Apache Iggy |
+| Transport | NATS JetStream; Apache Iggy (experimental) | Kafka, Redpanda, WarpStream, RabbitMQ, LavinMQ |
 | Persistence | PostgreSQL on sqlx | MySQL, SQL Server |
 | Codec | JSON | MessagePack, Avro |
 
@@ -22,6 +22,9 @@ The outbox and the inbox are optional: use plain messaging, add the outbox so a 
 published if and only if its database transaction commits, and add the inbox so a redelivered
 message isn't handled twice. Messages travel as CloudEvents 1.0 in each transport's binary mode,
 so services in other languages read and write them too.
+
+The Iggy transport, feature `iggy`, follows Iggy 0.10, which is young and changes between releases,
+so expect it to need updates with Iggy.
 
 ## Quick start
 

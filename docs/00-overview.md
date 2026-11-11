@@ -6,7 +6,7 @@ startup, with an optional transactional outbox and inbox in its own database. Ad
 
 | Part | 0.1.0 | Later |
 | --- | --- | --- |
-| Transport | NATS JetStream (`nats`) | Kafka, Redpanda, WarpStream; RabbitMQ, LavinMQ; Apache Iggy |
+| Transport | NATS JetStream (`nats`); Apache Iggy (`iggy`, experimental) | Kafka, Redpanda, WarpStream; RabbitMQ, LavinMQ |
 | Persistence, for the outbox and inbox | PostgreSQL on sqlx (`postgres`) | MySQL; SQL Server |
 | Codec | JSON | MessagePack; Avro |
 
