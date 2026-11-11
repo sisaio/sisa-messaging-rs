@@ -16,7 +16,7 @@ case "$subject" in
 esac
 
 echo "$subject" |
-  grep -Eq '^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\((core|runtime|nats|postgres|testing|facade|deps)\))?!?: [^ ]' ||
+  grep -Eq '^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\((core|runtime|nats|iggy|postgres|testing|facade|deps)\))?!?: [^ ]' ||
   fail 'start with type(scope): summary, for example "fix(postgres): release a claimed row on shutdown"'
 [ "${#subject}" -le 72 ] || fail 'keep the subject to 72 characters'
 case "$subject" in

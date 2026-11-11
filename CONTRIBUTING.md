@@ -201,7 +201,7 @@ What was wrong and why this fixes it, wrapped at 72 columns.
 
 - The subject is `type(scope): summary`, at most 72 characters, with no period at the end.
   Write the summary in the imperative: "add", "fix", "keep".
-- The scope is optional. Use it when the change sits in one crate: `core`, `runtime`, `nats`, `postgres`,
+- The scope is optional. Use it when the change sits in one crate: `core`, `runtime`, `nats`, `iggy`, `postgres`,
   `testing` or `facade`, or `deps` for a dependency bump.
 - Add `!` after the type or scope for a breaking change (`feat(core)!: ...`), and say how to
   migrate in the body.

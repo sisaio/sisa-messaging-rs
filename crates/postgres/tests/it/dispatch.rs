@@ -10,12 +10,13 @@ use sisa_messaging_core::{
     ContentType, Envelope, Message, MessageId, MessageType, OutboxStore, Publisher, Source,
     TransportPublisher,
 };
+use sisa_messaging_iggy::{IggySettings, IggyTransport};
 use sisa_messaging_nats::{NatsSettings, NatsTransport};
 use sisa_messaging_postgres::PostgresOutbox;
 use sisa_messaging_runtime::{
     Bus, DispatchSettings, Handler, HandlerContext, HandlerError, InMemoryTransport, StartError,
 };
-use sisa_messaging_testing::{Nats, Postgres, eventually};
+use sisa_messaging_testing::{Iggy, Nats, Postgres, eventually};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
 
@@ -329,6 +330,47 @@ async fn a_committed_message_reaches_a_nats_endpoint_with_its_outbox_id() {
     let bus = Bus::builder(
         "/orders",
         NatsTransport::connect(nats_settings).await.unwrap(),
+    )
+    .outbox(PostgresOutbox::new(pool.clone()))
+    .dispatch(settings())
+    .endpoint("billing", |endpoint| {
+        endpoint.handle::<OrderPlaced>(billing.clone())
+    })
+    .start()
+    .await
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    bus.outbox(&mut tx)
+        .publish(&OrderPlaced { id: 42 })
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    eventually("billing handles the order", async || {
+        !billing.received.lock().unwrap().is_empty()
+    })
+    .await;
+    eventually("the row is dispatched", async || {
+        all_have_status(&pool, "dispatched").await
+    })
+    .await;
+    let [(id, _, _)] = statuses(&pool).await.try_into().unwrap();
+    assert_eq!(*billing.received.lock().unwrap(), [id]);
+    bus.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_committed_message_reaches_an_iggy_endpoint_with_its_outbox_id() {
+    let postgres = Postgres::start().await;
+    let iggy = Iggy::start().await;
+    let pool = migrated(&postgres).await;
+    let mut iggy_settings = IggySettings::default();
+    iggy_settings.url = iggy.url().to_owned();
+    let billing = Billing::default();
+
+    let bus = Bus::builder(
+        "/orders",
+        IggyTransport::connect(iggy_settings).await.unwrap(),
     )
     .outbox(PostgresOutbox::new(pool.clone()))
     .dispatch(settings())
