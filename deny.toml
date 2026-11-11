@@ -20,6 +20,8 @@ confidence-threshold = 0.9
 allow = [
   "Apache-2.0",
   "BSD-3-Clause",
+  # webpki-roots, Mozilla's root certificates, which the iggy client's HTTP and QUIC clients bundle.
+  "CDLA-Permissive-2.0",
   "ISC",
   "MIT",
   "Unicode-3.0",

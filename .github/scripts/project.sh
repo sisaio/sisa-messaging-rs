@@ -21,6 +21,7 @@ labels=(
   "crate: core|1d76db|sisa-messaging-core: the contracts: envelope, codecs, transport and store traits."
   "crate: runtime|1d76db|sisa-messaging-runtime: the bus, receive pipeline, dispatcher and partition maintenance."
   "crate: nats|1d76db|sisa-messaging-nats: the NATS JetStream transport."
+  "crate: iggy|1d76db|sisa-messaging-iggy: the Apache Iggy transport."
   "crate: postgres|1d76db|sisa-messaging-postgres: the PostgreSQL outbox, inbox and partition stores."
   "crate: testing|1d76db|sisa-messaging-testing: the shared test helpers and containers."
   "ci|5319e7|Workflows, release, benchmarks and tooling."

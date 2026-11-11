@@ -165,7 +165,7 @@ jobs:
           TAG: ${{ needs.tag.outputs.tag }}
         run: |
           version="${TAG#v}"
-          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-postgres sisa-messaging; do
+          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-iggy sisa-messaging-postgres sisa-messaging; do
             if curl -sfo /dev/null -A "sisa-messaging-rs release (github.com/$GITHUB_REPOSITORY)" \
               "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is on crates.io already"
@@ -205,7 +205,7 @@ jobs:
         run: |
           version="${TAG#v}"
           mkdir -p "$OUT"
-          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-postgres sisa-messaging; do
+          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-iggy sisa-messaging-postgres sisa-messaging; do
             cargo package -p "$crate" --locked --no-verify
             curl -sSfL -A "sisa-messaging-rs release (github.com/$GITHUB_REPOSITORY)" \
               -o "$OUT/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"

@@ -17,6 +17,7 @@ body:
         - sisa-messaging-core
         - sisa-messaging-runtime
         - sisa-messaging-nats
+        - sisa-messaging-iggy
         - sisa-messaging-postgres
         - sisa-messaging-testing
         - A new crate

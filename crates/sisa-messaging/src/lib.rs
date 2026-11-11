@@ -6,6 +6,7 @@
 //! | Feature | Adds |
 //! | --- | --- |
 //! | `nats` | `NatsTransport`, the NATS JetStream transport |
+//! | `iggy` | `IggyTransport`, the Apache Iggy transport |
 //! | `postgres` | `PostgresOutbox`, `PostgresInbox` and `PostgresPartitions`, on sqlx |
 //!
 //! A bus with an outbox, whose publishes commit with the application's own transaction:
@@ -38,7 +39,8 @@
 //! # }
 //! ```
 //!
-//! Each part is also its own crate (`sisa-messaging-core`, `-runtime`, `-nats`, `-postgres`), whose
+//! Each part is also its own crate (`sisa-messaging-core`, `-runtime`, `-nats`, `-iggy`,
+//! `-postgres`), whose
 //! docs cover the details, for an application that wants only some of them.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -61,6 +63,9 @@ pub use sisa_messaging_runtime::{
 
 #[cfg(feature = "nats")]
 pub use sisa_messaging_nats::{NatsDelivery, NatsSettings, NatsTransport};
+
+#[cfg(feature = "iggy")]
+pub use sisa_messaging_iggy::{IggyDelivery, IggySettings, IggyTransport};
 
 #[cfg(feature = "postgres")]
 pub use sisa_messaging_postgres::{PostgresInbox, PostgresOutbox, PostgresPartitions};

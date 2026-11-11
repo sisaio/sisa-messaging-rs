@@ -66,7 +66,7 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           api=false
           if git diff --no-renames --name-only "$BASE...$HEAD" | grep -qE \
-            '^crates/(core|runtime|nats|postgres|sisa-messaging)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
+            '^crates/(core|runtime|nats|iggy|postgres|sisa-messaging)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
             api=true
           fi
           echo "api=$api" >> "$GITHUB_OUTPUT"
@@ -119,7 +119,7 @@ jobs:
       # Alone, so the workspace's other members don't turn its features on.
       - name: Build the facade with each feature
         run: |
-          for features in "" nats postgres; do
+          for features in "" nats iggy postgres; do
             cargo check -p sisa-messaging --features "$features" --locked
           done
 
@@ -271,6 +271,7 @@ jobs:
     env:
       NATS_IMAGE: nats:2.15-alpine
       POSTGRES_IMAGE: postgres:18-alpine
+      IGGY_IMAGE: apache/iggy:0.10.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -285,9 +286,9 @@ jobs:
 
       # Pulled once here, so no test waits on the download.
       - name: Pull the server images
-        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE"
+        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE"
 
-      - name: Run all tests including NATS and PostgreSQL
+      - name: Run all tests including NATS, PostgreSQL and Iggy
         run: cargo test --workspace --all-features --locked
 
   # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
@@ -314,6 +315,7 @@ jobs:
     env:
       NATS_IMAGE: nats:2.15-alpine
       POSTGRES_IMAGE: postgres:18-alpine
+      IGGY_IMAGE: apache/iggy:0.10.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -332,7 +334,7 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Pull the server images
-        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE"
+        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE"
 
       - name: Measure coverage
         run: cargo llvm-cov --workspace --all-features --locked --ignore-filename-regex 'crates/testing/' --lcov --output-path lcov.info
