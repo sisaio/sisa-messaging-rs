@@ -190,14 +190,17 @@ impl IggyTransport {
         format!("_error.{endpoint}")
     }
 
-    /// Sends a copy to the endpoint's error topic, which has one partition.
+    /// Sends a copy to the endpoint's error topic, which has one partition, with the Iggy message
+    /// id of the original.
     pub(crate) async fn send_error(
         &self,
         endpoint: &str,
+        id: u128,
         headers: BTreeMap<HeaderKey, HeaderValue>,
         data: Bytes,
     ) -> Result<(), TransportError> {
         let message = IggyMessage::builder()
+            .id(id)
             .payload(data)
             .user_headers(headers)
             .build()

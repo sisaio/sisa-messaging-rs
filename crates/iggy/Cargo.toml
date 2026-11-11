@@ -31,6 +31,8 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 # The consumer tasks, the channel they feed and the retry timers.
 tokio = { workspace = true }
+# A consumer that can't leave its group cleanly.
+tracing = { workspace = true }
 
 [dev-dependencies]
 # The bus, to check that the runtime's retries and error destination work over Iggy, and a

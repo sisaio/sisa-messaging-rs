@@ -6,10 +6,11 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures_util::StreamExt;
 use iggy::prelude::{
     Checkpoint, CommitPolicy, HeaderKind, IggyConsumer, IggyConsumerState, IggyError, IggyMessage,
-    PollOptions, PollingStrategy, ReceivedMessage,
+    PollOptions, PollingStrategy, ReadError, ReceivedMessage,
 };
 use sisa_messaging_core::{
     Deliveries, Delivery, EndpointSpec, Envelope, TransportError, TransportSubscriber,
@@ -106,8 +107,13 @@ impl TransportSubscriber for IggyTransport {
         for (name, value) in envelope.to_attributes() {
             headers.insert(header_key(&format!("{CE}{name}"))?, fitted(&value));
         }
-        self.send_error(endpoint, headers, envelope.data.clone())
-            .await
+        self.send_error(
+            endpoint,
+            envelope.id.as_uuid().as_u128(),
+            headers,
+            envelope.data.clone(),
+        )
+        .await
     }
 }
 
@@ -137,12 +143,7 @@ impl Shared {
         if let Some(open) = partitions.open.get_mut(&partition) {
             open.split_off(&offset);
         }
-        let due = Instant::now() + delay;
-        partitions
-            .held
-            .entry(partition)
-            .and_modify(|held| *held = (held.0.min(offset), due))
-            .or_insert((offset, due));
+        partitions.merge_hold(partition, offset, Instant::now() + delay);
         drop(partitions);
         self.wake.notify_one();
     }
@@ -208,6 +209,17 @@ struct Partitions {
     open: HashMap<u32, BTreeMap<u64, (u64, Option<Checkpoint>)>>,
 }
 
+impl Partitions {
+    /// Holds the partition from `offset` on until `due`. A hold already there keeps the lower
+    /// offset and the later deadline, so no retry comes before the delay it asked for.
+    fn merge_hold(&mut self, partition: u32, offset: u64, due: Instant) {
+        self.held
+            .entry(partition)
+            .and_modify(|held| *held = (held.0.min(offset), held.1.max(due)))
+            .or_insert((offset, due));
+    }
+}
+
 // Reads one consumer until the endpoint's deliveries are dropped or the consumer ends, then
 // leaves the group.
 async fn read(
@@ -230,7 +242,31 @@ async fn read(
         };
         let item = match received {
             None => break,
-            Some(Err(error)) => Err(broker("reading from Iggy", error)),
+            Some(Err(error)) => match (error.partition_id, error.skip) {
+                // A message that doesn't decode comes again until a seek moves past it.
+                (Some(partition), Some(skip)) => {
+                    match skip_unreadable(
+                        &mut consumer,
+                        &transport,
+                        &endpoint,
+                        partition,
+                        skip,
+                        &error,
+                    )
+                    .await
+                    {
+                        Ok(()) => continue,
+                        Err(failure) => {
+                            if sender.send(Err(failure)).await.is_err() {
+                                break;
+                            }
+                            tokio::time::sleep(SET_ASIDE_RETRY).await;
+                            continue;
+                        }
+                    }
+                }
+                _ => Err(broker("reading from Iggy", error.error)),
+            },
             Some(Ok(received)) => match take(&shared, &received) {
                 None => continue,
                 Some((generation, attempt)) => match read_envelope(&received.message) {
@@ -262,7 +298,40 @@ async fn read(
         }
     }
     // Manual commits store nothing on shutdown; leaving the group hands its partitions on.
-    let _ = consumer.shutdown().await;
+    if let Err(error) = consumer.shutdown().await {
+        tracing::warn!(endpoint, %error, "could not leave the Iggy consumer group; the server hands its partitions on once the session ends");
+    }
+}
+
+// Copies a message that doesn't decode to the error topic, as the reply carried it, then reads
+// on past it. It is never committed on its own; the next commit of its partition passes it.
+async fn skip_unreadable(
+    consumer: &mut IggyConsumer,
+    transport: &IggyTransport,
+    endpoint: &str,
+    partition: u32,
+    skip: PollingStrategy,
+    error: &ReadError,
+) -> Result<(), TransportError> {
+    let message = error.error.to_string();
+    let mut headers = BTreeMap::new();
+    headers.insert(header_key(&format!("{CE}errorendpoint"))?, fitted(endpoint));
+    headers.insert(
+        header_key(&format!("{CE}errortype"))?,
+        fitted("invalid_envelope"),
+    );
+    headers.insert(header_key(&format!("{CE}errormessage"))?, fitted(&message));
+    // Iggy takes no empty data, so a message without its record carries the error.
+    let data = error
+        .record
+        .clone()
+        .filter(|record| !record.is_empty())
+        .unwrap_or_else(|| Bytes::from(message.clone()));
+    transport.send_error(endpoint, 0, headers, data).await?;
+    consumer
+        .seek(partition, skip)
+        .await
+        .map_err(|failure| broker("reading an Iggy partition past a message", failure))
 }
 
 // The generation and attempt of a message, or `None` when its partition is held.
@@ -318,10 +387,10 @@ async fn release(
             Ok(()) => {}
             Err(IggyError::InvalidCommand) => shared.give_up(partition),
             Err(error) => {
+                // A hold made while the seek waited stays, with the lower offset.
                 shared
                     .partitions()
-                    .held
-                    .insert(partition, (offset, Instant::now() + SET_ASIDE_RETRY));
+                    .merge_hold(partition, offset, Instant::now() + SET_ASIDE_RETRY);
                 let _ = sender
                     .send(Err(broker("reading an Iggy partition again", error)))
                     .await;
@@ -337,15 +406,26 @@ fn read_envelope(message: &IggyMessage) -> Result<Envelope, String> {
         .user_headers_map()
         .map_err(|error| error.to_string())?
         .unwrap_or_default();
-    let attributes: BTreeMap<String, String> = headers
-        .iter()
-        .filter(|(_, value)| value.kind() == HeaderKind::String)
-        .filter_map(|(name, value)| {
-            let name = name.as_str().ok()?.to_ascii_lowercase();
-            let attribute = name.strip_prefix(CE)?.to_owned();
-            Some((attribute, value.as_str().ok()?.to_owned()))
-        })
-        .collect();
+    let mut attributes = BTreeMap::new();
+    for (name, value) in &headers {
+        let Some(attribute) = name.as_str().ok().and_then(|name| {
+            name.to_ascii_lowercase()
+                .strip_prefix(CE)
+                .map(str::to_owned)
+        }) else {
+            continue;
+        };
+        // A CloudEvents attribute of another type would otherwise go missing unnoticed.
+        let text = match value.kind() {
+            HeaderKind::String => value.as_str().map_err(|error| error.to_string())?,
+            kind => {
+                return Err(format!(
+                    "the header {CE}{attribute} is a {kind:?}, not a string"
+                ));
+            }
+        };
+        attributes.insert(attribute, text.to_owned());
+    }
     Envelope::from_attributes(attributes, message.payload.clone())
         .map_err(|error| error.to_string())
 }
@@ -376,7 +456,12 @@ async fn set_aside(
     let partition = received.partition_id;
     let offset = received.message.header.offset;
     if let Err(failure) = transport
-        .send_error(endpoint, headers, received.message.payload.clone())
+        .send_error(
+            endpoint,
+            received.message.header.id,
+            headers,
+            received.message.payload.clone(),
+        )
         .await
     {
         let attempt = shared
