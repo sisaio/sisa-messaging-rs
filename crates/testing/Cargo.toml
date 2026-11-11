@@ -1,6 +1,6 @@
 [package]
 name = "sisa-messaging-testing"
-description = "Test helpers shared by the Sisa Messaging crates: NATS and PostgreSQL servers in containers"
+description = "Test helpers shared by the Sisa Messaging crates: NATS, PostgreSQL and Iggy servers in containers"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -13,10 +13,11 @@ publish = false
 workspace = true
 
 [dependencies]
-# A NATS and a PostgreSQL server per test, in Docker.
+# A NATS, a PostgreSQL and an Iggy server per test, in Docker.
 testcontainers = { workspace = true }
 # The clients, to wait until a server answers and to hand a test a connection.
 async-nats = { workspace = true }
+iggy = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 

@@ -26,12 +26,17 @@ min_ident_chars = "warn"
 # The library crates, at the coordinated version.
 sisa-messaging = { path = "crates/sisa-messaging", version = "0.1.0" }
 sisa-messaging-core = { path = "crates/core", version = "0.1.0" }
+sisa-messaging-iggy = { path = "crates/iggy", version = "0.1.0" }
 sisa-messaging-nats = { path = "crates/nats", version = "0.1.0" }
 sisa-messaging-postgres = { path = "crates/postgres", version = "0.1.0" }
 sisa-messaging-runtime = { path = "crates/runtime", version = "0.1.0" }
 
 # The NATS client, for core NATS and JetStream.
 async-nats = { version = "0.52.0" }
+
+# The Apache Iggy client. It builds every protocol it speaks (TCP, QUIC, HTTP, WebSocket); the
+# transport uses TCP.
+iggy = { version = "0.12.0" }
 
 # PostgreSQL through sqlx, without the default macros and migrate features: queries are checked by
 # the tests, and the tables come from the SQL in migrations/postgresql, which applications run.
