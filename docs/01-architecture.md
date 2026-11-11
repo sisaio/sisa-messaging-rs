@@ -552,7 +552,7 @@ Settled; reopen only with new evidence.
 | The message's routing name is its CloudEvents `type` | One word from the Rust trait to the wire to the table |
 | The outbox orders by its UUID v7 id; no sequence column | Ids already sort by creation, one column fewer, and MySQL and SQL Server need no identity column on a partitioned table |
 | JSON lives in core | Every message is serde already; other codecs get crates of their own |
-| The minimum Rust is 1.94 | sqlx 0.9 needs it |
+| The minimum Rust is 1.95 | The iggy client needs it; sqlx 0.9 needs 1.94 |
 
 ## Rules that hold the design together
 

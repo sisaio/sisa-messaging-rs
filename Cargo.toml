@@ -8,8 +8,8 @@ resolver = "3"
 version = "0.1.0"
 authors = ["Sang Au <auvansang@outlook.com>"]
 edition = "2024"
-# sqlx 0.9 needs Rust 1.94, so the workspace does too.
-rust-version = "1.94"
+# The iggy client needs Rust 1.95 (sqlx 0.9 needs 1.94), so the workspace does too.
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/sisaio/sisa-messaging-rs"
 readme = "README.md"

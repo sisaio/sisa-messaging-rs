@@ -22,10 +22,10 @@ codecs, and a documented cross-language format together. The clients we build on
 | Part | Crate | Note |
 | --- | --- | --- |
 | NATS | `async-nats` 0.51 | JetStream publish acks, durable pull consumers, `Nats-Msg-Id` deduplication; MSRV 1.89 |
-| PostgreSQL | `sqlx` 0.9 | MSRV 1.94, which sets ours |
+| PostgreSQL | `sqlx` 0.9 | MSRV 1.94 |
 | Kafka, Redpanda, WarpStream | `rdkafka` or `rskafka` | `rdkafka` wraps librdkafka (C, complete); `rskafka` is pure Rust but has fewer features. To decide in that milestone |
 | RabbitMQ, LavinMQ | `lapin` | AMQP 0-9-1 with publisher confirms |
-| Iggy | `iggy` | Iggy has its own protocol; it isn't Kafka-compatible, so it is a transport of its own |
+| Iggy | `iggy` 0.12 | Iggy has its own protocol; it isn't Kafka-compatible, so it is a transport of its own. MSRV 1.95, which sets ours |
 | MySQL | `sqlx` | `FOR UPDATE SKIP LOCKED` needs MySQL 8.0 or newer |
 | SQL Server | `tiberius` | sqlx dropped SQL Server in 0.7, so this crate won't share sqlx code; `READPAST` and `UPDLOCK` replace `SKIP LOCKED` |
 | MessagePack | `rmp-serde` | Serde, like JSON |

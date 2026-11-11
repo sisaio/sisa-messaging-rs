@@ -2,7 +2,7 @@
 
 ## Build and check
 
-The toolchain is pinned in `rust-toolchain.toml`; the minimum supported Rust is 1.94. Before a
+The toolchain is pinned in `rust-toolchain.toml`; the minimum supported Rust is 1.95. Before a
 PR, run what CI runs. `--locked` makes a command fail instead of quietly rewriting `Cargo.lock`,
 as in CI; a dependency change updates the lock file on purpose and commits it.
 
@@ -12,7 +12,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 for f in "" nats postgres; do cargo check -p sisa-messaging --features "$f" --locked; done
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
-cargo +1.94 check --workspace --all-targets --all-features --locked
+cargo +1.95 check --workspace --all-targets --all-features --locked
 cargo test --workspace --all-features --locked
 cargo deny check
 cargo semver-checks --workspace --all-features --baseline-rev origin/main   # unless labeled `breaking`

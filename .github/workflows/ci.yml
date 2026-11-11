@@ -142,17 +142,17 @@ jobs:
 
       # The workspace `rust-version`.
       - name: Install the MSRV toolchain
-        run: rustup toolchain install 1.94 --profile minimal
+        run: rustup toolchain install 1.95 --profile minimal
 
       # Keyed on the MSRV compiler; the default from rust-toolchain.toml isn't installed here.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         env:
-          RUSTUP_TOOLCHAIN: "1.94"
+          RUSTUP_TOOLCHAIN: "1.95"
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build at the MSRV
-        run: cargo +1.94 check --workspace --all-targets --all-features --locked
+        run: cargo +1.95 check --workspace --all-targets --all-features --locked
 
   deny:
     name: deny

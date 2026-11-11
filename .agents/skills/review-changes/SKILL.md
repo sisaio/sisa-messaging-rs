@@ -86,7 +86,7 @@ same shape anywhere in a change.
 
 ## Gotchas
 
-- `cargo +1.94 check` can fail where stable passes. Read the exit code, not a piped tail.
+- `cargo +1.95 check` can fail where stable passes. Read the exit code, not a piped tail.
 - Not bugs, by design: a message handled twice without the inbox (at least once is the promise);
   an outbox row published twice after a dispatcher crash (same message id, so the broker or the
   inbox drops it); messages out of order across dispatchers.
