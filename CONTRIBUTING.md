@@ -10,7 +10,7 @@ as in CI; a dependency change updates the lock file on purpose and commits it.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-for f in "" nats postgres; do cargo check -p sisa-messaging --features "$f" --locked; done
+for f in "" nats iggy postgres; do cargo check -p sisa-messaging --features "$f" --locked; done
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.95 check --workspace --all-targets --all-features --locked
 cargo test --workspace --all-features --locked
