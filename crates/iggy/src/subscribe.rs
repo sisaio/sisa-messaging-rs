@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use iggy::prelude::{
-    Checkpoint, CommitPolicy, HeaderKind, IggyConsumer, IggyConsumerState, IggyMessage,
+    Checkpoint, CommitPolicy, HeaderKind, IggyConsumer, IggyConsumerState, IggyError, IggyMessage,
     PollOptions, PollingStrategy, ReceivedMessage,
 };
 use sisa_messaging_core::{
@@ -133,6 +133,10 @@ impl Shared {
         let mut partitions = self.partitions();
         *partitions.generation.entry(partition).or_default() += 1;
         partitions.attempts.insert((partition, offset), attempt);
+        // The messages from `offset` on come again, so they no longer wait for a commit.
+        if let Some(open) = partitions.open.get_mut(&partition) {
+            open.split_off(&offset);
+        }
         let due = Instant::now() + delay;
         partitions
             .held
@@ -141,6 +145,52 @@ impl Shared {
             .or_insert((offset, due));
         drop(partitions);
         self.wake.notify_one();
+    }
+
+    /// Marks a message of the given generation settled, and returns the checkpoint to commit:
+    /// the last of the settled messages that no unsettled one comes before, if any. A message
+    /// read again since, or of a partition given up, returns nothing, since a later read of it
+    /// commits instead.
+    fn settle(&self, generation: u64, checkpoint: Checkpoint) -> Option<Checkpoint> {
+        let mut partitions = self.partitions();
+        let open = partitions.open.get_mut(&checkpoint.partition_id())?;
+        match open.get_mut(&checkpoint.offset()) {
+            Some((read_in, settled)) if *read_in == generation => *settled = Some(checkpoint),
+            _ => return None,
+        }
+        let mut last = None;
+        while let Some(entry) = open.first_entry() {
+            match entry.get().1 {
+                Some(settled) => {
+                    last = Some(settled);
+                    entry.remove();
+                }
+                None => break,
+            }
+        }
+        last
+    }
+
+    /// Forgets a partition the group gave to another member, which reads it from the last
+    /// committed offset.
+    fn give_up(&self, partition: u32) {
+        let mut partitions = self.partitions();
+        *partitions.generation.entry(partition).or_default() += 1;
+        partitions.held.remove(&partition);
+        partitions.open.remove(&partition);
+        partitions.attempts.retain(|(of, _), _| *of != partition);
+    }
+
+    /// Commits the checkpoint `settle` returned, if any.
+    async fn commit(&self, checkpoint: Option<Checkpoint>) -> Result<(), TransportError> {
+        match checkpoint {
+            Some(checkpoint) => self
+                .state
+                .commit(checkpoint)
+                .await
+                .map_err(|error| broker("committing an Iggy offset", error)),
+            None => Ok(()),
+        }
     }
 }
 
@@ -152,6 +202,10 @@ struct Partitions {
     held: HashMap<u32, (u64, Instant)>,
     /// The deliveries so far of each message that came back, by partition and offset.
     attempts: HashMap<(u32, u64), u32>,
+    /// The messages of each partition read and not yet committed, by offset: the generation they
+    /// were read in, and their checkpoint once settled. A checkpoint commits only once every
+    /// earlier message is settled, so a commit never passes a message still to be retried.
+    open: HashMap<u32, BTreeMap<u64, (u64, Option<Checkpoint>)>>,
 }
 
 // Reads one consumer until the endpoint's deliveries are dropped or the consumer ends, then
@@ -191,7 +245,11 @@ async fn read(
                         settled: false,
                     }),
                     Err(error) => {
-                        match set_aside(&transport, &endpoint, &shared, &received, &error).await {
+                        match set_aside(
+                            &transport, &endpoint, &shared, &received, generation, &error,
+                        )
+                        .await
+                        {
                             Ok(()) => continue,
                             Err(error) => Err(error),
                         }
@@ -209,7 +267,7 @@ async fn read(
 
 // The generation and attempt of a message, or `None` when its partition is held.
 fn take(shared: &Shared, received: &ReceivedMessage) -> Option<(u64, u32)> {
-    let partitions = shared.partitions();
+    let mut partitions = shared.partitions();
     let partition = received.partition_id;
     if partitions.held.contains_key(&partition) {
         return None;
@@ -223,11 +281,16 @@ fn take(shared: &Shared, received: &ReceivedMessage) -> Option<(u64, u32)> {
         .attempts
         .get(&(partition, received.message.header.offset))
         .map_or(1, |attempts| attempts.saturating_add(1));
+    partitions
+        .open
+        .entry(partition)
+        .or_default()
+        .insert(received.message.header.offset, (generation, None));
     Some((generation, attempt))
 }
 
 // Ends the holds that are due, reading each partition again from its held offset. A seek that
-// fails is tried again later.
+// fails is tried again later, unless the partition went to another member of the group.
 async fn release(
     consumer: &mut IggyConsumer,
     shared: &Shared,
@@ -248,17 +311,21 @@ async fn release(
         due
     };
     for (partition, offset) in due {
-        if let Err(error) = consumer
+        match consumer
             .seek(partition, PollingStrategy::offset(offset))
             .await
         {
-            shared
-                .partitions()
-                .held
-                .insert(partition, (offset, Instant::now() + SET_ASIDE_RETRY));
-            let _ = sender
-                .send(Err(broker("reading an Iggy partition again", error)))
-                .await;
+            Ok(()) => {}
+            Err(IggyError::InvalidCommand) => shared.give_up(partition),
+            Err(error) => {
+                shared
+                    .partitions()
+                    .held
+                    .insert(partition, (offset, Instant::now() + SET_ASIDE_RETRY));
+                let _ = sender
+                    .send(Err(broker("reading an Iggy partition again", error)))
+                    .await;
+            }
         }
     }
 }
@@ -291,6 +358,7 @@ async fn set_aside(
     endpoint: &str,
     shared: &Shared,
     received: &ReceivedMessage,
+    generation: u64,
     error: &str,
 ) -> Result<(), TransportError> {
     let mut headers = received
@@ -311,15 +379,17 @@ async fn set_aside(
         .send_error(endpoint, headers, received.message.payload.clone())
         .await
     {
-        let attempt = take(shared, received).map_or(1, |(_, attempt)| attempt);
+        let attempt = shared
+            .partitions()
+            .attempts
+            .get(&(partition, offset))
+            .map_or(1, |attempts| attempts.saturating_add(1));
         shared.hold(partition, offset, attempt, SET_ASIDE_RETRY);
         return Err(failure);
     }
     shared
-        .state
-        .commit(received.checkpoint())
+        .commit(shared.settle(generation, received.checkpoint()))
         .await
-        .map_err(|failure| broker("committing an Iggy offset", failure))
 }
 
 /// A message received on an endpoint through its consumer group.
@@ -374,11 +444,8 @@ impl IggyDelivery {
             .partitions()
             .attempts
             .remove(&(self.partition, self.offset));
-        self.shared
-            .state
-            .commit(self.checkpoint)
-            .await
-            .map_err(|error| broker("committing an Iggy offset", error))
+        let checkpoint = self.shared.settle(self.generation, self.checkpoint);
+        self.shared.commit(checkpoint).await
     }
 }
 

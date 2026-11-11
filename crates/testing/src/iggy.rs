@@ -38,7 +38,11 @@ impl std::fmt::Debug for Iggy {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Iggy")
-            .field("url", &self.url)
+            // The address only: the URL holds the password.
+            .field(
+                "address",
+                &self.url.split_once('@').map_or("", |(_, address)| address),
+            )
             .finish_non_exhaustive()
     }
 }
