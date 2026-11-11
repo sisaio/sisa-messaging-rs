@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use iggy::prelude::{HeaderKey, HeaderValue, Identifier, IggyMessage, MessageClient, Partitioning};
+use iggy::prelude::{
+    HeaderKey, HeaderValue, Identifier, IggyMessage, MessageClient, Partitioning, TopicClient,
+};
 use sisa_messaging_core::{
     Deliveries, Delivery, EndpointSpec, MessageType, TransportPublisher, TransportSubscriber,
 };
@@ -335,6 +337,46 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_topic() {
         Some("invalid_envelope")
     );
     assert!(header(copy, "ce_errormessage").is_some());
+}
+
+#[tokio::test]
+async fn setting_aside_a_message_doesnt_commit_past_an_earlier_one_still_unsettled() {
+    let iggy = Iggy::start().await;
+    let mut one_partition = settings(&iggy);
+    one_partition.partitions = 1;
+    let transport = IggyTransport::connect(one_partition.clone()).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let first = envelope();
+    transport.publish(&first).await.unwrap();
+    send_raw(&iggy, BTreeMap::new(), b"plain").await;
+    let earlier = next(&mut deliveries).await;
+    assert_eq!(earlier.envelope().id, first.id);
+
+    // The message after it is set aside while it is still being handled.
+    let client = iggy.client().await;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let set_aside = client
+            .get_topic(
+                &Identifier::named("sisa").unwrap(),
+                &Identifier::named("_error.billing").unwrap(),
+            )
+            .await
+            .unwrap()
+            .is_some_and(|topic| topic.messages_count > 0);
+        if set_aside {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the message wasn't set aside");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    earlier.retry(Duration::from_secs(3600)).await.unwrap();
+    drop(deliveries);
+
+    let other = IggyTransport::connect(one_partition).await.unwrap();
+    let mut other_deliveries = other.subscribe(&billing()).await.unwrap();
+    let delivery = next(&mut other_deliveries).await;
+    assert_eq!(delivery.envelope().id, first.id);
 }
 
 #[tokio::test]
