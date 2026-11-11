@@ -118,7 +118,7 @@ impl TransportSubscriber for NatsTransport {
     ) -> Result<(), TransportError> {
         let mut headers = HeaderMap::new();
         for (name, value) in envelope.to_attributes() {
-            headers.insert(format!("{CE}{name}"), one_line(&value));
+            headers.insert(format!("{CE}{name}"), HeaderValue::from_lossy(&value));
         }
         self.publish_to(self.error_subject(endpoint), headers, envelope.data.clone())
             .await
@@ -149,7 +149,7 @@ impl NatsTransport {
         }
         headers.insert(format!("{CE}errorendpoint"), endpoint);
         headers.insert(format!("{CE}errortype"), "invalid_envelope");
-        headers.insert(format!("{CE}errormessage"), one_line(error));
+        headers.insert(format!("{CE}errormessage"), HeaderValue::from_lossy(error));
         self.publish_to(
             self.error_subject(endpoint),
             headers,
@@ -161,10 +161,6 @@ impl NatsTransport {
             .await
             .map_err(|failure| broker("settling a JetStream message", failure))
     }
-}
-
-fn one_line(value: &str) -> HeaderValue {
-    HeaderValue::from(value.replace(['\r', '\n'], " ").as_str())
 }
 
 /// A message received on an endpoint through its JetStream consumer.
