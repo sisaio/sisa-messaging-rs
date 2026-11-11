@@ -19,6 +19,8 @@ workspace = true
 default = []
 # The NATS JetStream transport.
 nats = ["dep:sisa-messaging-nats"]
+# The Apache Iggy transport.
+iggy = ["dep:sisa-messaging-iggy"]
 # The PostgreSQL outbox and inbox.
 postgres = ["dep:sisa-messaging-postgres"]
 
@@ -27,6 +29,7 @@ postgres = ["dep:sisa-messaging-postgres"]
 sisa-messaging-core = { workspace = true }
 sisa-messaging-runtime = { workspace = true }
 sisa-messaging-nats = { workspace = true, optional = true }
+sisa-messaging-iggy = { workspace = true, optional = true }
 sisa-messaging-postgres = { workspace = true, optional = true }
 
 [dev-dependencies]

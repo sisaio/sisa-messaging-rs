@@ -3392,6 +3392,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "sisa-messaging-core",
+ "sisa-messaging-iggy",
  "sisa-messaging-nats",
  "sisa-messaging-postgres",
  "sisa-messaging-runtime",
