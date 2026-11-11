@@ -239,6 +239,32 @@ async fn a_new_subscription_resumes_after_the_committed_offset() {
 }
 
 #[tokio::test]
+async fn an_ack_doesnt_commit_past_an_earlier_message_still_unsettled() {
+    let iggy = Iggy::start().await;
+    let mut one_partition = settings(&iggy);
+    one_partition.partitions = 1;
+    let transport = IggyTransport::connect(one_partition.clone()).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let first = envelope();
+    transport.publish(&first).await.unwrap();
+    transport.publish(&envelope()).await.unwrap();
+    let earlier = next(&mut deliveries).await;
+    let later = next(&mut deliveries).await;
+    assert_eq!(earlier.envelope().id, first.id);
+
+    // The later one is done first; the earlier one then waits for a retry this instance never
+    // gets to.
+    later.ack().await.unwrap();
+    earlier.retry(Duration::from_secs(3600)).await.unwrap();
+    drop(deliveries);
+
+    let other = IggyTransport::connect(one_partition).await.unwrap();
+    let mut other_deliveries = other.subscribe(&billing()).await.unwrap();
+    let delivery = next(&mut other_deliveries).await;
+    assert_eq!(delivery.envelope().id, first.id);
+}
+
+#[tokio::test]
 async fn consumption_resumes_after_the_server_restarts() {
     let iggy = Iggy::start_restartable().await;
     let transport = IggyTransport::connect(settings(&iggy)).await.unwrap();

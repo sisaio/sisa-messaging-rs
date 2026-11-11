@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::error::Error;
+use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::Bytes;
@@ -33,12 +34,21 @@ const MAX_HEADER: usize = 255;
 /// Iggy takes at most 255 bytes in a header value and no empty data, so such an envelope isn't
 /// published. Iggy doesn't drop a second publish of one id, so an outbox row published twice
 /// reaches the endpoints twice, and an inbox drops the second.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct IggyTransport {
     inner: Arc<Inner>,
 }
 
-#[derive(Debug)]
+// Shows the settings, never the connection.
+impl fmt::Debug for IggyTransport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IggyTransport")
+            .field("settings", &self.inner.settings)
+            .finish_non_exhaustive()
+    }
+}
+
 struct Inner {
     client: IggyClient,
     stream: Identifier,
