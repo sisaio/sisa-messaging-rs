@@ -12,6 +12,10 @@
 //! same partition wait, which keeps the partition's order. The attempt is counted in memory, so
 //! it starts from 1 again after a restart or when the partition moves to another instance.
 //!
+//! Iggy has no acknowledgement timeout either: a delivery that is held long keeps its partition
+//! waiting, and the message goes to another instance only once this one leaves the group, when it
+//! stops or its session times out.
+//!
 //! Iggy is younger than the other brokers and changes between releases: this crate follows the
 //! `iggy` 0.12 client and is tested against Iggy server 0.10.
 

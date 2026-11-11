@@ -7,8 +7,8 @@ where the ideas come from.
 
 ## Goals
 
-- **Pick the parts at startup.** A transport (NATS first, then the Kafka family, RabbitMQ and
-  LavinMQ, Iggy), a persistence (PostgreSQL first, then MySQL and SQL Server) and a codec (JSON
+- **Pick the parts at startup.** A transport (NATS and Iggy first, then the Kafka family, RabbitMQ
+  and LavinMQ), a persistence (PostgreSQL first, then MySQL and SQL Server) and a codec (JSON
   first, then MessagePack and Avro). Handlers and publishing code don't change when a part does.
 - **The outbox and the inbox are optional.** An application can use plain messaging, add an
   outbox so a message is published if and only if its database transaction commits, and add an
@@ -45,23 +45,26 @@ where the ideas come from.
 flowchart TD
     facade[sisa-messaging] --> runtime[sisa-messaging-runtime]
     facade --> nats[sisa-messaging-nats]
+    facade --> iggy[sisa-messaging-iggy]
     facade --> postgres[sisa-messaging-postgres]
     runtime --> core[sisa-messaging-core]
     nats --> core
+    iggy --> core
     postgres --> core
 ```
 
 | Crate | Published | Main types | What it holds |
 | --- | --- | --- | --- |
-| `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only, no code of its own; features `nats` and `postgres` pick the parts, none by default |
+| `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only, no code of its own; features `nats`, `iggy` and `postgres` pick the parts, none by default |
 | `sisa-messaging-core` | Yes | `Message`, `Envelope`, `MessageId`, `MessageType`, `Codec`, `JsonCodec`, `TransportPublisher`, `TransportSubscriber`, `Delivery`, `OutboxStore`, `InboxStore`, `PartitionStore`, `Publisher` | Contracts only, and the JSON codec. No runtime, no SQL, no broker client, so adapter crates build fast |
 | `sisa-messaging-runtime` | Yes | `Bus`, `BusBuilder`, `EndpointBuilder`, `OutboxPublisher`, `HandlerContext`, `Handler`, `RetryPolicy`, `DispatchSettings`, `PartitionSettings`, `InMemoryTransport` | The engine, the same for every transport and database: the bus, the receive pipeline with the inbox step, the dispatcher, the partition maintenance scheduler, retries, and an in-memory transport for tests |
 | `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings`, `NatsDelivery` | Both transport halves on JetStream: a stream per prefix, a durable pull consumer per endpoint |
+| `sisa-messaging-iggy` | Yes | `IggyTransport`, `IggySettings`, `IggyDelivery` | Both transport halves on Iggy: a topic per message type in one stream, a consumer group per endpoint and topic, and the per-message retry a log doesn't have |
 | `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresPartitions` | The three stores: the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL; the tables come from the migrations in [`migrations/postgresql`](../migrations/postgresql) |
-| `sisa-messaging-testing` | No | `Nats`, `Postgres`, `eventually` | A NATS and a PostgreSQL container per test, and a wait-until helper |
+| `sisa-messaging-testing` | No | `Nats`, `Postgres`, `Iggy`, `eventually` | A NATS, a PostgreSQL and an Iggy container per test, and a wait-until helper |
 
 Later crates follow the same shape: `-kafka` (Kafka, Redpanda, WarpStream), `-amqp` (RabbitMQ,
-LavinMQ), `-iggy`, `-mysql`, `-mssql`, `-msgpack`, `-avro`. A database crate implements the store
+LavinMQ), `-mysql`, `-mssql`, `-msgpack`, `-avro`. A database crate implements the store
 traits and nothing else, so MySQL and SQL Server add only their SQL: the claim (`FOR UPDATE SKIP
 LOCKED`, or `READPAST` with `UPDLOCK`), the partition DDL and the lock differ in every dialect,
 and SQL Server uses tiberius rather than sqlx, so there is no shared SQL crate. JSON stays in
@@ -131,7 +134,7 @@ service can move to another codec while old messages drain, comes with the secon
 ### Transport
 
 Two halves, so the dispatcher and a publish-only service need only the first. `NatsTransport`
-implements both.
+and `IggyTransport` implement both.
 
 ```rust,ignore
 pub trait TransportPublisher: Send + Sync + 'static {
@@ -318,7 +321,7 @@ and several instances claim different rows. A dispatcher publishes no row of a b
 ran out, and gives up waiting on a publish when the lease runs out, since another instance may hold
 the row by then. The envelope keeps its id in the outbox, so a
 row published twice (a crash between the publish and the mark) reaches the broker with the same
-id: JetStream drops it inside its duplicate window, and an inbox drops it after. A row that doesn't
+id: JetStream drops it inside its duplicate window, Iggy keeps both, and an inbox drops it after. A row that doesn't
 read back as an envelope is marked `failed` by the claim, so it can't hold up the others.
 
 `DispatchSettings` sets the poll interval (1 second), the batch size (100), the lease (30
@@ -377,26 +380,30 @@ consumers that don't know CloudEvents still read a plain body.
 | `errorendpoint`, `errortype`, `errormessage`, `errorattempts` | Error destination only | Our extensions: where and why handling gave up |
 
 Our extension names follow the CloudEvents rules (lowercase letters and digits, at most 20
-characters), so other CloudEvents SDKs carry them. Receivers read binary mode only: on NATS, a
-message whose `ce-` headers don't make an envelope, such as one in structured mode, goes to the
-endpoint's error subject as it came, with `errorendpoint`, `errortype` and `errormessage`, and
+characters), so other CloudEvents SDKs carry them. Receivers read binary mode only: on NATS and Iggy, a
+message whose `ce-` or `ce_` headers don't make an envelope, such as one in structured mode, goes to the
+endpoint's error destination as it came, with `errorendpoint`, `errortype` and `errormessage`, and
 isn't handled.
 
 In 0.1.0 the publishers set neither `subject`, `dataschema` nor `partitionkey`, and a message
 published outside a handler has no `correlationid`; envelopes from other producers keep the ones
 they carry, through the outbox and the inbox too.
 
-Each transport names the headers as its CloudEvents binding says:
+Each transport names the headers as its CloudEvents binding says. Iggy has no binding, so it
+follows Kafka's, the closest one, and keeps every attribute in a header:
 
 | Transport | Header names | Example |
 | --- | --- | --- |
 | NATS | `ce-` and the attribute | `ce-id`, `ce-type`, `ce-datacontenttype` |
 | Kafka family | `ce_` and the attribute | `ce_id`, `ce_type`; `content-type` for the content type |
+| Iggy | `ce_` and the attribute, as string user headers; the Iggy message id is the message id | `ce_id`, `ce_type`, `ce_datacontenttype` |
 | AMQP | `cloudEvents:` and the attribute, from the AMQP 1.0 binding, since AMQP 0-9-1 has none | `cloudEvents:id`; the content type in the `content_type` property |
 
 On NATS the publish also sets `Nats-Msg-Id` to the message id, so JetStream drops a duplicate
 publish inside the stream's duplicate window. A copy to the error subject goes without it, so the
-stream keeps it next to the original of the same id.
+stream keeps it next to the original of the same id. Iggy has no deduplication by id, so it keeps
+every publish. An Iggy header value holds at most 255 bytes: a publish with a longer attribute
+fails, and an error copy cuts it there.
 
 ### NATS subjects and streams
 
@@ -409,6 +416,26 @@ stream keeps it next to the original of the same id.
 
 The prefix keeps deployments that share a server apart, such as `prod` and `staging`. Give each
 its own stream too: connecting sets the stream's subjects to its prefix's.
+
+### Iggy streams and topics
+
+| Thing | Name | Example |
+| --- | --- | --- |
+| Stream | `IggySettings::stream`, created on connect | `sisa` |
+| Topic | The message type, created on the first publish or subscribe with `IggySettings::partitions` partitions (4 by default) | `orders.order_placed.v1` |
+| Consumer group | The endpoint name, on the topic of each message type it handles. A new group reads each partition from its first message, so a new endpoint also gets what is already in its topics | `billing` on `orders.order_placed.v1` |
+| Error topic | `_error.{endpoint}`, one partition | `_error.billing` |
+
+The stream keeps deployments that share a server apart, such as `prod` and `staging`. An
+endpoint's instances share its group's partitions, so a topic's partitions cap how many of them
+work on it at once. A message with a `partitionkey` goes to the partition its key picks.
+
+Iggy acknowledges a position in a partition, not one message, so `IggyDelivery` builds the rest:
+`ack` and `reject` commit the message's offset; `retry` holds its partition and reads it again from
+that offset once the delay has passed, so the messages behind it wait and the partition keeps its
+order; a delivery dropped unsettled is retried at once. The attempt is counted in memory, so it
+starts from 1 again after a restart or a rebalance. An endpoint that stops handling a type stops
+reading that topic, where NATS keeps the type in its consumer's filter.
 
 ### PostgreSQL tables
 
@@ -527,7 +554,7 @@ A receipt is `INSERT ... ON CONFLICT DO NOTHING`; no row inserted means a duplic
 | **Not guaranteed** | A handler's publishes with the inbox and no outbox: they are sent after the commit, so a process that stops in between, or a send that fails, loses them, and the inbox skips the redelivery. |
 | **Not guaranteed** | Exactly-once delivery. Every mode is at least once: a handler without the inbox can see a message twice, and anything it does outside the transaction can happen twice even with it. |
 | **Not guaranteed** | Order. Several dispatchers claim different rows, and retries put a failed message behind later ones. Envelopes carry a `partitionkey` from the start; keeping order per key is on the [roadmap](../ROADMAP.md). |
-| **Not guaranteed** | A message the broker dropped before any endpoint handled it. A JetStream stream with `max_age`, `max_msgs` or `max_bytes`, or a Kafka topic's retention, removes unacked messages too: keep it longer than the longest consumer outage. The stream `NatsTransport` creates has no limits, and connecting updates the stream to `NatsSettings`, which also clears limits set on it by hand. |
+| **Not guaranteed** | A message the broker dropped before any endpoint handled it. A JetStream stream with `max_age`, `max_msgs` or `max_bytes`, a Kafka topic's retention, or an Iggy topic's `message_expiry` or `max_topic_size`, removes unacked messages too: keep it longer than the longest consumer outage. The stream `NatsTransport` creates and the topics `IggyTransport` creates have no limits, and connecting updates the stream to `NatsSettings`, which also clears limits set on it by hand. |
 | **Not guaranteed** | A message redelivered after its receipt's partition expired is handled again. Keep the inbox retention longer than the longest redelivery. |
 | **Not guaranteed** | Deduplication of a message whose `time` was changed between deliveries: the receipt's partition comes from it. Publishers never change it; a hand-made republish must keep it. |
 
@@ -545,6 +572,7 @@ Settled; reopen only with new evidence.
 | An expired partition is detached by default, dropped only when asked | Detaching keeps the data as a table to archive or query; dropping it is the step nobody can undo |
 | The tables come from plain SQL migrations in `migrations/postgresql`, which the application runs with sqlx-cli or by hand; the SQL names no schema, and the connection's `search_path` picks it | Applications already run sqlx migrations in their deploy pipelines, and a schema per deployment needs no setting of ours. Run in a schema of their own, the migrations keep their own `_sqlx_migrations` table there |
 | NATS uses JetStream, not core NATS | Core NATS has no acknowledgement or redelivery, so it can't be at least once |
+| An Iggy retry holds its partition and reads it again from the message's offset; retry topics come with the Kafka family | A log commits positions, not messages, so a later message can't be committed past a failed one without losing it on a crash. Holding the partition keeps the order and needs no extra topics |
 | Transports, persistences and codecs are open traits | Users asked to bring their own; sealing them would rule that out. Their docs say which changes a minor release may make |
 | The engine lives in `sisa-messaging-runtime`; database crates implement only store traits; the facade has no code | The dispatcher, the inbox step and partition maintenance would otherwise be copied into every database crate, where only the SQL differs |
 | One `Publisher` trait; the outbox publisher borrows the caller's transaction, and exists only on a bus built with an outbox | One signature for domain code, while the guarantee stays visible where the transaction lives and a missing outbox fails to compile instead of silently sending direct |
