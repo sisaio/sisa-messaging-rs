@@ -1,6 +1,6 @@
 //! Turning a message into an envelope, and why a publish fails.
 
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Codec, CodecError, ContentType, Envelope, EnvelopeError, Message, MessageType, Source,
     StoreError, TransportError,
 };

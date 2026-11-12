@@ -43,11 +43,11 @@ where the ideas come from.
 
 ```mermaid
 flowchart TD
-    facade[sisa-messaging] --> runtime[sisa-messaging-runtime]
-    facade --> nats[sisa-messaging-nats]
-    facade --> iggy[sisa-messaging-iggy]
-    facade --> postgres[sisa-messaging-postgres]
-    runtime --> core[sisa-messaging-core]
+    facade[sisa-eventing] --> runtime[sisa-eventing-runtime]
+    facade --> nats[sisa-eventing-nats]
+    facade --> iggy[sisa-eventing-iggy]
+    facade --> postgres[sisa-eventing-postgres]
+    runtime --> core[sisa-eventing-core]
     nats --> core
     iggy --> core
     postgres --> core
@@ -55,13 +55,13 @@ flowchart TD
 
 | Crate | Published | Main types | What it holds |
 | --- | --- | --- | --- |
-| `sisa-messaging` | Yes | Everything below that an application uses | Re-exports only, no code of its own; features `nats`, `iggy` and `postgres` pick the parts, none by default |
-| `sisa-messaging-core` | Yes | `Message`, `Envelope`, `MessageId`, `MessageType`, `Codec`, `JsonCodec`, `TransportPublisher`, `TransportSubscriber`, `Delivery`, `OutboxStore`, `InboxStore`, `PartitionStore`, `Publisher` | Contracts only, and the JSON codec. No runtime, no SQL, no broker client, so adapter crates build fast |
-| `sisa-messaging-runtime` | Yes | `Bus`, `BusBuilder`, `EndpointBuilder`, `OutboxPublisher`, `HandlerContext`, `Handler`, `RetryPolicy`, `DispatchSettings`, `PartitionSettings`, `InMemoryTransport` | The engine, the same for every transport and database: the bus, the receive pipeline with the inbox step, the dispatcher, the partition maintenance scheduler, retries, and an in-memory transport for tests |
-| `sisa-messaging-nats` | Yes | `NatsTransport`, `NatsSettings`, `NatsDelivery` | Both transport halves on JetStream: a stream per prefix, a durable pull consumer per endpoint |
-| `sisa-messaging-iggy` | Yes | `IggyTransport`, `IggySettings`, `IggyDelivery` | Both transport halves on Iggy: a topic per message type in one stream, a consumer group per endpoint and topic, and the per-message retry a log doesn't have |
-| `sisa-messaging-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresPartitions` | The three stores: the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL; the tables come from the migrations in [`migrations/postgresql`](../migrations/postgresql) |
-| `sisa-messaging-testing` | No | `Nats`, `Postgres`, `Iggy`, `eventually` | A NATS, a PostgreSQL and an Iggy container per test, and a wait-until helper |
+| `sisa-eventing` | Yes | Everything below that an application uses | Re-exports only, no code of its own; features `nats`, `iggy` and `postgres` pick the parts, none by default |
+| `sisa-eventing-core` | Yes | `Message`, `Envelope`, `MessageId`, `MessageType`, `Codec`, `JsonCodec`, `TransportPublisher`, `TransportSubscriber`, `Delivery`, `OutboxStore`, `InboxStore`, `PartitionStore`, `Publisher` | Contracts only, and the JSON codec. No runtime, no SQL, no broker client, so adapter crates build fast |
+| `sisa-eventing-runtime` | Yes | `Bus`, `BusBuilder`, `EndpointBuilder`, `OutboxPublisher`, `HandlerContext`, `Handler`, `RetryPolicy`, `DispatchSettings`, `PartitionSettings`, `InMemoryTransport` | The engine, the same for every transport and database: the bus, the receive pipeline with the inbox step, the dispatcher, the partition maintenance scheduler, retries, and an in-memory transport for tests |
+| `sisa-eventing-nats` | Yes | `NatsTransport`, `NatsSettings`, `NatsDelivery` | Both transport halves on JetStream: a stream per prefix, a durable pull consumer per endpoint |
+| `sisa-eventing-iggy` | Yes | `IggyTransport`, `IggySettings`, `IggyDelivery` | Both transport halves on Iggy: a topic per message type in one stream, a consumer group per endpoint and topic, and the per-message retry a log doesn't have |
+| `sisa-eventing-postgres` | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresPartitions` | The three stores: the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL; the tables come from the migrations in [`migrations/postgresql`](../migrations/postgresql) |
+| `sisa-eventing-testing` | No | `Nats`, `Postgres`, `Iggy`, `eventually` | A NATS, a PostgreSQL and an Iggy container per test, and a wait-until helper |
 
 Later crates follow the same shape: `-kafka` (Kafka, Redpanda, WarpStream), `-amqp` (RabbitMQ,
 LavinMQ), `-mysql`, `-mssql`, `-msgpack`, `-avro`. A database crate implements the store
@@ -453,7 +453,7 @@ application runs itself: with `sqlx migrate run --source migrations/postgresql` 
 pipeline, or by hand with psql, into a schema created beforehand. Pick one way per schema: a psql
 run leaves no row in `_sqlx_migrations`, so a later `sqlx migrate run` would run the migration again
 and fail. The SQL names no schema, so the connection's `search_path` picks it, for the migrations
-and for the queries alike, such as `options=-c search_path=messaging` in the URL. A schema of its
+and for the queries alike, such as `options=-c search_path=eventing` in the URL. A schema of its
 own also keeps sqlx's `_sqlx_migrations` table for these migrations apart from the application's.
 Columns that hold a CloudEvents attribute take its name. A primary key on a partitioned table must
 hold the partition key, so each one starts with it.
@@ -583,7 +583,7 @@ Settled; reopen only with new evidence.
 | NATS uses JetStream, not core NATS | Core NATS has no acknowledgement or redelivery, so it can't be at least once |
 | An Iggy retry holds its partition and reads it again from the message's offset; retry topics come with the Kafka family | A log commits positions, not messages, so a later message can't be committed past a failed one without losing it on a crash. Holding the partition keeps the order and needs no extra topics |
 | Transports, persistences and codecs are open traits | Users asked to bring their own; sealing them would rule that out. Their docs say which changes a minor release may make |
-| The engine lives in `sisa-messaging-runtime`; database crates implement only store traits; the facade has no code | The dispatcher, the inbox step and partition maintenance would otherwise be copied into every database crate, where only the SQL differs |
+| The engine lives in `sisa-eventing-runtime`; database crates implement only store traits; the facade has no code | The dispatcher, the inbox step and partition maintenance would otherwise be copied into every database crate, where only the SQL differs |
 | One `Publisher` trait; the outbox publisher borrows the caller's transaction, and exists only on a bus built with an outbox | One signature for domain code, while the guarantee stays visible where the transaction lives and a missing outbox fails to compile instead of silently sending direct |
 | The transport is two traits, publish and subscribe | The dispatcher and publish-only services need only the publish half |
 | The message's routing name is its CloudEvents `type` | One word from the Rust trait to the wire to the table |

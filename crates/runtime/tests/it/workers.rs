@@ -3,9 +3,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sisa_messaging_core::Publisher;
-use sisa_messaging_runtime::{Bus, Handler, HandlerContext, HandlerError, InMemoryTransport};
-use sisa_messaging_testing::eventually;
+use sisa_eventing_core::Publisher;
+use sisa_eventing_runtime::{Bus, Handler, HandlerContext, HandlerError, InMemoryTransport};
+use sisa_eventing_testing::eventually;
 use tokio::sync::Notify;
 
 use crate::support::{Billing, OrderPlaced, billing_bus};

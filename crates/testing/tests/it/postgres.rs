@@ -1,4 +1,4 @@
-use sisa_messaging_testing::Postgres;
+use sisa_eventing_testing::Postgres;
 
 #[tokio::test]
 async fn postgres_starts_with_an_empty_database() {

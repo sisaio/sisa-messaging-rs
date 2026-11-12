@@ -1,8 +1,8 @@
 //! Messages and helpers the tests share.
 
 use serde::{Deserialize, Serialize};
-use sisa_messaging_core::{Message, Publisher};
-use sisa_messaging_runtime::{
+use sisa_eventing_core::{Message, Publisher};
+use sisa_eventing_runtime::{
     Bus, EndpointBuilder, HandlerContext, HandlerError, InMemoryTransport,
 };
 use std::sync::{Arc, Mutex};
@@ -65,7 +65,7 @@ impl Billing {
     }
 }
 
-impl sisa_messaging_runtime::Handler<OrderPlaced> for Billing {
+impl sisa_eventing_runtime::Handler<OrderPlaced> for Billing {
     async fn handle(
         &self,
         order: OrderPlaced,
@@ -102,7 +102,7 @@ pub async fn billing_bus(
 /// The envelopes of type `Msg` the transport has published.
 pub fn published_of<Msg: Message>(
     transport: &InMemoryTransport,
-) -> Vec<sisa_messaging_core::Envelope> {
+) -> Vec<sisa_eventing_core::Envelope> {
     transport
         .published()
         .into_iter()

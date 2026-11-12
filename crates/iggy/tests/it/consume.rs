@@ -5,11 +5,11 @@ use bytes::Bytes;
 use iggy::prelude::{
     HeaderKey, HeaderValue, Identifier, IggyMessage, MessageClient, Partitioning, TopicClient,
 };
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Deliveries, Delivery, EndpointSpec, MessageType, TransportPublisher, TransportSubscriber,
 };
-use sisa_messaging_iggy::{IggyDelivery, IggyTransport};
-use sisa_messaging_testing::Iggy;
+use sisa_eventing_iggy::{IggyDelivery, IggyTransport};
+use sisa_eventing_testing::Iggy;
 
 use crate::common::{envelope, envelope_of, header, next, next_within, settings, stored};
 

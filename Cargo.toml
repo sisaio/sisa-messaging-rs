@@ -11,7 +11,7 @@ edition = "2024"
 # The iggy client needs Rust 1.95 (sqlx 0.9 needs 1.94), so the workspace does too.
 rust-version = "1.95"
 license = "MIT"
-repository = "https://github.com/sisaio/sisa-messaging-rs"
+repository = "https://github.com/sisaio/sisa-eventing-rs"
 readme = "README.md"
 
 # Lints every package takes, through its `[lints] workspace = true`, for all its targets: library,
@@ -24,12 +24,12 @@ min_ident_chars = "warn"
 
 [workspace.dependencies]
 # The library crates, at the coordinated version.
-sisa-messaging = { path = "crates/sisa-messaging", version = "0.1.0" }
-sisa-messaging-core = { path = "crates/core", version = "0.1.0" }
-sisa-messaging-iggy = { path = "crates/iggy", version = "0.1.0" }
-sisa-messaging-nats = { path = "crates/nats", version = "0.1.0" }
-sisa-messaging-postgres = { path = "crates/postgres", version = "0.1.0" }
-sisa-messaging-runtime = { path = "crates/runtime", version = "0.1.0" }
+sisa-eventing = { path = "crates/sisa-eventing", version = "0.1.0" }
+sisa-eventing-core = { path = "crates/core", version = "0.1.0" }
+sisa-eventing-iggy = { path = "crates/iggy", version = "0.1.0" }
+sisa-eventing-nats = { path = "crates/nats", version = "0.1.0" }
+sisa-eventing-postgres = { path = "crates/postgres", version = "0.1.0" }
+sisa-eventing-runtime = { path = "crates/runtime", version = "0.1.0" }
 
 # The NATS client, for core NATS and JetStream.
 async-nats = { version = "0.52.0" }
@@ -59,7 +59,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.154" }
 
 # Tests: the shared helpers, and a NATS and a PostgreSQL server per test in Docker.
-sisa-messaging-testing = { path = "crates/testing" }
+sisa-eventing-testing = { path = "crates/testing" }
 testcontainers = { version = "0.28.0", default-features = false }
 # Tests: the CloudEvents reference SDK, to check the envelope's attributes against it.
 cloudevents-sdk = { version = "0.9.0", default-features = false }

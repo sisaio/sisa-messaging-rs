@@ -75,7 +75,7 @@ pub trait Codec: Send + Sync + 'static {
 ///
 /// ```
 /// use serde::{Deserialize, Serialize};
-/// use sisa_messaging_core::{Codec, JsonCodec, Message};
+/// use sisa_eventing_core::{Codec, JsonCodec, Message};
 ///
 /// #[derive(Debug, PartialEq, Serialize, Deserialize)]
 /// struct OrderPlaced {
@@ -89,7 +89,7 @@ pub trait Codec: Send + Sync + 'static {
 /// let data = JsonCodec.encode(&OrderPlaced { id: 42 })?;
 /// assert_eq!(&data[..], br#"{"id":42}"#);
 /// assert_eq!(JsonCodec.decode::<OrderPlaced>(&data)?, OrderPlaced { id: 42 });
-/// # Ok::<(), sisa_messaging_core::CodecError>(())
+/// # Ok::<(), sisa_eventing_core::CodecError>(())
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JsonCodec;

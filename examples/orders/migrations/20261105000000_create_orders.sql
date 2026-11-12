@@ -1,4 +1,4 @@
--- The example's own tables, in the application's schema. The messaging tables come from the
+-- The example's own tables, in the application's schema. The eventing tables come from the
 -- library's migrations/postgresql, in a schema of their own.
 
 CREATE TABLE orders (

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Syncs the labels, milestones and the project board (description, README, Status, fields and
-# views) of sisa-messaging-rs with this file and project-readme.md. Safe to run again: labels and
+# views) of sisa-eventing-rs with this file and project-readme.md. Safe to run again: labels and
 # milestone descriptions and due dates are updated in place, and fields and views that exist are
 # skipped. Other labels and views made by hand are left alone.
 #
@@ -10,20 +10,20 @@
 set -euo pipefail
 
 OWNER=sisaio
-REPO=sisaio/sisa-messaging-rs
-TITLE=sisa-messaging
+REPO=sisaio/sisa-eventing-rs
+TITLE=sisa-eventing
 
 # --- Labels ---------------------------------------------------------------------------------------
 # name|color|description
 labels=(
   "documentation|0075ca|Docs only: doc comments, docs/, README."
-  "crate: sisa-messaging|1d76db|sisa-messaging: the facade crate, its features and re-exports."
-  "crate: core|1d76db|sisa-messaging-core: the contracts: envelope, codecs, transport and store traits."
-  "crate: runtime|1d76db|sisa-messaging-runtime: the bus, receive pipeline, dispatcher and partition maintenance."
-  "crate: nats|1d76db|sisa-messaging-nats: the NATS JetStream transport."
-  "crate: iggy|1d76db|sisa-messaging-iggy: the Apache Iggy transport."
-  "crate: postgres|1d76db|sisa-messaging-postgres: the PostgreSQL outbox, inbox and partition stores."
-  "crate: testing|1d76db|sisa-messaging-testing: the shared test helpers and containers."
+  "crate: sisa-eventing|1d76db|sisa-eventing: the facade crate, its features and re-exports."
+  "crate: core|1d76db|sisa-eventing-core: the contracts: envelope, codecs, transport and store traits."
+  "crate: runtime|1d76db|sisa-eventing-runtime: the bus, receive pipeline, dispatcher and partition maintenance."
+  "crate: nats|1d76db|sisa-eventing-nats: the NATS JetStream transport."
+  "crate: iggy|1d76db|sisa-eventing-iggy: the Apache Iggy transport."
+  "crate: postgres|1d76db|sisa-eventing-postgres: the PostgreSQL outbox, inbox and partition stores."
+  "crate: testing|1d76db|sisa-eventing-testing: the shared test helpers and containers."
   "ci|5319e7|Workflows, release, benchmarks and tooling."
   "needs info|fbca04|Waiting on the reporter for details or a reproduction."
   "breaking|b60205|Changes the public API or a data format."
@@ -88,7 +88,7 @@ gh project link "$number" --owner "$OWNER" --repo "${REPO#*/}" >/dev/null 2>&1 |
 
 # The short description and the README come from project-readme.md, next to this script.
 gh project edit "$number" --owner "$OWNER" \
-  --description "Issues and PRs for sisa-messaging-rs, from triage to release." \
+  --description "Issues and PRs for sisa-eventing-rs, from triage to release." \
   --readme "$(cat "$(dirname "$0")/project-readme.md")" >/dev/null
 echo "project description and README updated"
 
@@ -240,7 +240,7 @@ Done. These steps are left by hand, because GitHub has no API for them.
    Start date and Target date.
 
 3. Open $url/workflows and turn on:
-  - Auto-add to project: repository sisa-messaging-rs, filter "is:issue,pr is:open"
+  - Auto-add to project: repository sisa-eventing-rs, filter "is:issue,pr is:open"
   - Item added to project: issues only, set Status to Backlog
   - Item reopened: issues only, set Status to Backlog
   - Pull request linked to issue: set Status to In Review

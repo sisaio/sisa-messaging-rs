@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use sisa_messaging_core::{Message, Publisher};
-use sisa_messaging_iggy::IggyTransport;
-use sisa_messaging_runtime::{Bus, Handler, HandlerContext, HandlerError, RetryPolicy};
-use sisa_messaging_testing::{Iggy, eventually};
+use sisa_eventing_core::{Message, Publisher};
+use sisa_eventing_iggy::IggyTransport;
+use sisa_eventing_runtime::{Bus, Handler, HandlerContext, HandlerError, RetryPolicy};
+use sisa_eventing_testing::{Iggy, eventually};
 
 use crate::common::{header, settings, stored};
 

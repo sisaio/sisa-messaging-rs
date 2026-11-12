@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging-iggy"
-description = "The Apache Iggy transport of Sisa Messaging"
+name = "sisa-eventing-iggy"
+description = "The Apache Iggy transport of Sisa Eventing"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-# The tests use sisa-messaging-testing, which isn't published, so a downloaded crate couldn't
+# The tests use sisa-eventing-testing, which isn't published, so a downloaded crate couldn't
 # build them.
 exclude = ["tests/"]
 keywords = ["messaging", "iggy", "streaming", "async"]
@@ -19,7 +19,7 @@ workspace = true
 
 [dependencies]
 # The shared contracts that this crate implements.
-sisa-messaging-core = { workspace = true }
+sisa-eventing-core = { workspace = true }
 
 # The Iggy client.
 iggy = { workspace = true }
@@ -38,9 +38,9 @@ tracing = { workspace = true }
 # The bus, to check that the runtime's retries and error destination work over Iggy, and a
 # message for it.
 serde = { workspace = true }
-sisa-messaging-runtime = { workspace = true }
+sisa-eventing-runtime = { workspace = true }
 # An Iggy server per test, in Docker.
-sisa-messaging-testing = { workspace = true }
+sisa-eventing-testing = { workspace = true }
 tokio = { workspace = true }
 
 [package.metadata.docs.rs]

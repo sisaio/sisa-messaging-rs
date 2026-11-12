@@ -7,7 +7,7 @@
 #   gh auth login
 set -euo pipefail
 
-REPO=sisaio/sisa-messaging-rs
+REPO=sisaio/sisa-eventing-rs
 dir=$(dirname "$0")/rulesets
 
 existing=$(gh api "repos/$REPO/rulesets?includes_parents=false&per_page=100" --jq '.[] | "\(.name)|\(.id)"')

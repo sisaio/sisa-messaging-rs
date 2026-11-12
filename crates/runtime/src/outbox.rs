@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use sisa_messaging_core::{JsonCodec, Message, OutboxStore, Publisher, Source};
+use sisa_eventing_core::{JsonCodec, Message, OutboxStore, Publisher, Source};
 
 use crate::publish::{PublishError, encode};
 
@@ -35,7 +35,7 @@ impl<'call, Store: OutboxStore, Codec> OutboxPublisher<'call, Store, Codec> {
 }
 
 // Writes the message as a row in the caller's transaction.
-impl<Store: OutboxStore, Codec: sisa_messaging_core::Codec> Publisher
+impl<Store: OutboxStore, Codec: sisa_eventing_core::Codec> Publisher
     for OutboxPublisher<'_, Store, Codec>
 {
     type Error = PublishError;

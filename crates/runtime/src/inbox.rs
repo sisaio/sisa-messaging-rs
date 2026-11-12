@@ -4,7 +4,7 @@ use std::future;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use sisa_messaging_core::{Envelope, InboxStore, OutboxStore, StoreError};
+use sisa_eventing_core::{Envelope, InboxStore, OutboxStore, StoreError};
 
 use crate::endpoint::{BoxFuture, Failure, Handlers, Pipeline, Plain, call, find};
 use crate::{HandlerContext, NoOutbox};

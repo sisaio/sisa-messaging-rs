@@ -11,7 +11,7 @@ publish = false
 workspace = true
 
 [dependencies]
-sisa-messaging = { workspace = true, features = ["nats", "postgres"] }
+sisa-eventing = { workspace = true, features = ["nats", "postgres"] }
 serde = { workspace = true }
 sqlx = { workspace = true }
 # A multi-threaded runtime for `#[tokio::main]`.

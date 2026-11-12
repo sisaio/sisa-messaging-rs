@@ -1,21 +1,21 @@
 use std::path::{Path, PathBuf};
 
-use sisa_messaging_testing::Postgres;
+use sisa_eventing_testing::Postgres;
 use sqlx::{PgPool, migrate::Migrator};
 
 fn migrations() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations/postgresql")
 }
 
-/// A pool whose `search_path` is the new schema `messaging`, as an application configures it.
-pub(crate) async fn messaging_pool(postgres: &Postgres) -> PgPool {
-    sqlx::query("CREATE SCHEMA messaging")
+/// A pool whose `search_path` is the new schema `eventing`, as an application configures it.
+pub(crate) async fn eventing_pool(postgres: &Postgres) -> PgPool {
+    sqlx::query("CREATE SCHEMA eventing")
         .execute(&postgres.pool().await)
         .await
         .unwrap();
 
     PgPool::connect(&format!(
-        "{}?options=-c%20search_path%3Dmessaging",
+        "{}?options=-c%20search_path%3Deventing",
         postgres.url()
     ))
     .await
@@ -24,7 +24,7 @@ pub(crate) async fn messaging_pool(postgres: &Postgres) -> PgPool {
 
 /// Runs the migrations as `sqlx migrate run --source migrations/postgresql` does.
 pub(crate) async fn migrated(postgres: &Postgres) -> PgPool {
-    let pool = messaging_pool(postgres).await;
+    let pool = eventing_pool(postgres).await;
     Migrator::new(migrations().as_path())
         .await
         .unwrap()
@@ -58,7 +58,7 @@ async fn the_migrations_create_both_tables_in_the_search_path_schema() {
     let postgres = Postgres::start().await;
     let pool = migrated(&postgres).await;
 
-    let names = tables(&pool, "messaging").await;
+    let names = tables(&pool, "eventing").await;
     let today = today(&pool).await;
     for table in ["outbox_messages", "inbox_receipts"] {
         let partitions: Vec<_> = names
@@ -85,7 +85,7 @@ async fn the_migrations_create_both_tables_in_the_search_path_schema() {
 #[tokio::test]
 async fn the_script_run_by_hand_creates_the_same_tables() {
     let postgres = Postgres::start().await;
-    let pool = messaging_pool(&postgres).await;
+    let pool = eventing_pool(&postgres).await;
     let script = migrations().join("20261104000000_create_outbox_and_inbox.sql");
 
     sqlx::raw_sql(sqlx::AssertSqlSafe(
@@ -95,7 +95,7 @@ async fn the_script_run_by_hand_creates_the_same_tables() {
     .await
     .unwrap();
 
-    assert_eq!(tables(&pool, "messaging").await.len(), 20);
+    assert_eq!(tables(&pool, "eventing").await.len(), 20);
 }
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn every_constraint_and_index_is_named() {
            AND contype <> 'n' -- PostgreSQL 18 records NOT NULL as a constraint too
          UNION
          SELECT indexname::text FROM pg_indexes
-         WHERE schemaname = 'messaging' AND tablename IN ('outbox_messages', 'inbox_receipts')
+         WHERE schemaname = 'eventing' AND tablename IN ('outbox_messages', 'inbox_receipts')
          ORDER BY 1",
     )
     .fetch_all(&pool)

@@ -1,6 +1,6 @@
 ---
 name: triage
-description: Triages GitHub issues in sisa-messaging-rs. Checks for security reports and duplicates, reproduces bugs, weighs feature requests against the roadmap, and sets labels and proposes the board status. Use when asked to look at, triage, label or answer an issue, or to go through new issues.
+description: Triages GitHub issues in sisa-eventing-rs. Checks for security reports and duplicates, reproduces bugs, weighs feature requests against the roadmap, and sets labels and proposes the board status. Use when asked to look at, triage, label or answer an issue, or to go through new issues.
 compatibility: Needs GitHub access through the gh CLI or a GitHub tool.
 ---
 
@@ -39,6 +39,6 @@ milestone need the maintainer's word; propose them instead.
 - Agents have no project access: propose the status, milestone and Priority in a comment, and
   leave the card for the maintainer and the board's workflows.
 - `gh issue` can't set a type; use the API:
-  `gh api -X PATCH repos/sisaio/sisa-messaging-rs/issues/<n> -f type=Bug`.
+  `gh api -X PATCH repos/sisaio/sisa-eventing-rs/issues/<n> -f type=Bug`.
 - An issue form only applies a label that exists in the repo; a missing one is skipped without
   an error.

@@ -6,17 +6,17 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     ContentType, Envelope, Message, MessageId, MessageType, OutboxStore, Publisher, Source,
     TransportPublisher,
 };
-use sisa_messaging_iggy::{IggySettings, IggyTransport};
-use sisa_messaging_nats::{NatsSettings, NatsTransport};
-use sisa_messaging_postgres::PostgresOutbox;
-use sisa_messaging_runtime::{
+use sisa_eventing_iggy::{IggySettings, IggyTransport};
+use sisa_eventing_nats::{NatsSettings, NatsTransport};
+use sisa_eventing_postgres::PostgresOutbox;
+use sisa_eventing_runtime::{
     Bus, DispatchSettings, Handler, HandlerContext, HandlerError, InMemoryTransport, StartError,
 };
-use sisa_messaging_testing::{Iggy, Nats, Postgres, eventually};
+use sisa_eventing_testing::{Iggy, Nats, Postgres, eventually};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
 

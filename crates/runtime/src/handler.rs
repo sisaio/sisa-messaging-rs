@@ -6,7 +6,7 @@ use std::fmt;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use sisa_messaging_core::{Correlation, Envelope, JsonCodec, Message, Publisher, Source};
+use sisa_eventing_core::{Correlation, Envelope, JsonCodec, Message, Publisher, Source};
 
 use crate::publish::{PublishError, encode};
 
@@ -148,7 +148,7 @@ impl<Transaction: DerefMut, Codec> HandlerContext<Transaction, Codec> {
 }
 
 // Holds each publish, tied to the handled message, until the handler returns `Ok`.
-impl<Transaction: Send, Codec: sisa_messaging_core::Codec> Publisher
+impl<Transaction: Send, Codec: sisa_eventing_core::Codec> Publisher
     for HandlerContext<Transaction, Codec>
 {
     type Error = PublishError;
@@ -189,8 +189,8 @@ impl<Transaction, Codec> fmt::Debug for HandlerContext<Transaction, Codec> {
 ///
 /// ```
 /// use serde::{Deserialize, Serialize};
-/// use sisa_messaging_core::Message;
-/// use sisa_messaging_runtime::{HandlerContext, HandlerError};
+/// use sisa_eventing_core::Message;
+/// use sisa_eventing_runtime::{HandlerContext, HandlerError};
 ///
 /// #[derive(Serialize, Deserialize)]
 /// struct OrderPlaced {
@@ -265,7 +265,7 @@ where
 mod tests {
     use bytes::Bytes;
     use serde::{Deserialize, Serialize};
-    use sisa_messaging_core::{ContentType, MessageId, MessageType, TraceContext};
+    use sisa_eventing_core::{ContentType, MessageId, MessageType, TraceContext};
 
     use super::*;
 

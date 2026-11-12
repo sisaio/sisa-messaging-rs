@@ -1,7 +1,7 @@
 # release-plz opens and updates the release PR: the maintainer opens it by running the release
 # workflow, and running it again brings the PR up to date with main. Tagging, the GitHub release and publishing
 # are release.yml's own jobs, not release-plz's. The library crates share one version and one
-# changelog at the root, carried by `sisa-messaging-core`.
+# changelog at the root, carried by `sisa-eventing-core`.
 [workspace]
 changelog_update = false
 pr_labels = ["release"]
@@ -19,9 +19,9 @@ commit_parsers = [
 ]
 
 [[package]]
-name = "sisa-messaging-core"
+name = "sisa-eventing-core"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
 # The tag release.yml makes, which the changelog's compare links point at.
 git_tag_name = "v{{ version }}"
-changelog_include = ["sisa-messaging", "sisa-messaging-runtime", "sisa-messaging-nats", "sisa-messaging-iggy", "sisa-messaging-postgres"]
+changelog_include = ["sisa-eventing", "sisa-eventing-runtime", "sisa-eventing-nats", "sisa-eventing-iggy", "sisa-eventing-postgres"]

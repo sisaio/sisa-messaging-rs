@@ -11,7 +11,7 @@ use iggy::prelude::{
     Client, HeaderKey, HeaderValue, Identifier, IggyClient, IggyError, IggyMessage, MessageClient,
     Partitioning, StreamClient, StreamCreateOptions, TopicClient, TopicCreateOptions,
 };
-use sisa_messaging_core::{Envelope, TransportError, TransportPublisher};
+use sisa_eventing_core::{Envelope, TransportError, TransportPublisher};
 
 use crate::IggySettings;
 

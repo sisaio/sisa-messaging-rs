@@ -262,7 +262,7 @@ fn optional_id(
 ///
 /// ```
 /// use bytes::Bytes;
-/// use sisa_messaging_core::{ContentType, Envelope, MessageType, Source};
+/// use sisa_eventing_core::{ContentType, Envelope, MessageType, Source};
 ///
 /// let envelope = Envelope::new(
 ///     MessageType::new("orders.order_placed.v1")?,
@@ -273,7 +273,7 @@ fn optional_id(
 /// let attributes = envelope.to_attributes();
 /// assert_eq!(attributes["type"], "orders.order_placed.v1");
 /// assert_eq!(Envelope::from_attributes(attributes, envelope.data.clone())?, envelope);
-/// # Ok::<(), sisa_messaging_core::EnvelopeError>(())
+/// # Ok::<(), sisa_eventing_core::EnvelopeError>(())
 /// ```
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]

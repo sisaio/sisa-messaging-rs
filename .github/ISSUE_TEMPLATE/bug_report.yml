@@ -6,19 +6,19 @@ body:
     attributes:
       value: |
         Thanks for reporting. For a security problem, don't open an issue: report it privately as
-        [SECURITY.md](https://github.com/sisaio/sisa-messaging-rs/blob/main/SECURITY.md) explains.
+        [SECURITY.md](https://github.com/sisaio/sisa-eventing-rs/blob/main/SECURITY.md) explains.
   - type: dropdown
     id: crate
     attributes:
       label: Crate
       options:
-        - sisa-messaging
-        - sisa-messaging-core
-        - sisa-messaging-runtime
-        - sisa-messaging-nats
-        - sisa-messaging-iggy
-        - sisa-messaging-postgres
-        - sisa-messaging-testing
+        - sisa-eventing
+        - sisa-eventing-core
+        - sisa-eventing-runtime
+        - sisa-eventing-nats
+        - sisa-eventing-iggy
+        - sisa-eventing-postgres
+        - sisa-eventing-testing
         - Not sure
     validations:
       required: true
@@ -48,7 +48,7 @@ body:
     id: logs
     attributes:
       label: Errors and logs
-      description: The error, and logs with `RUST_LOG=sisa_messaging=debug` if you can. Debug logs show subjects and message ids, and this issue is public, so replace any you don't want seen.
+      description: The error, and logs with `RUST_LOG=sisa_eventing=debug` if you can. Debug logs show subjects and message ids, and this issue is public, so replace any you don't want seen.
       render: text
   - type: input
     id: server

@@ -3,14 +3,14 @@
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Codec, CodecError, ContentType, Envelope, JsonCodec, Message, MessageType, Publisher, Source,
     TransportPublisher,
 };
-use sisa_messaging_runtime::{
+use sisa_eventing_runtime::{
     Bus, Handler, HandlerContext, HandlerError, InMemoryTransport, StartError,
 };
-use sisa_messaging_testing::eventually;
+use sisa_eventing_testing::eventually;
 
 use crate::support::{Billing, InvoiceSent, OrderPlaced, published_of};
 

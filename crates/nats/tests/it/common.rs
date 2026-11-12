@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use sisa_messaging_core::{ContentType, Deliveries, Envelope, MessageType, Source, TransportError};
-use sisa_messaging_nats::{NatsDelivery, NatsSettings};
-use sisa_messaging_testing::Nats;
+use sisa_eventing_core::{ContentType, Deliveries, Envelope, MessageType, Source, TransportError};
+use sisa_eventing_nats::{NatsDelivery, NatsSettings};
+use sisa_eventing_testing::Nats;
 
 pub fn settings(nats: &Nats) -> NatsSettings {
     let mut settings = NatsSettings::default();

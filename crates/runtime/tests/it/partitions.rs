@@ -3,12 +3,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Date, Expiry, PartitionInfo, PartitionInterval, PartitionLock, PartitionStore, StoreError,
     Timestamp,
 };
-use sisa_messaging_runtime::{Bus, InMemoryTransport, PartitionMode, PartitionSettings};
-use sisa_messaging_testing::eventually;
+use sisa_eventing_runtime::{Bus, InMemoryTransport, PartitionMode, PartitionSettings};
+use sisa_eventing_testing::eventually;
 
 const AN_HOUR: Duration = Duration::from_secs(3600);
 

@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging-testing"
-description = "Test helpers shared by the Sisa Messaging crates: NATS, PostgreSQL and Iggy servers in containers"
+name = "sisa-eventing-testing"
+description = "Test helpers shared by the Sisa Eventing crates: NATS, PostgreSQL and Iggy servers in containers"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

@@ -165,8 +165,8 @@ jobs:
           TAG: ${{ needs.tag.outputs.tag }}
         run: |
           version="${TAG#v}"
-          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-iggy sisa-messaging-postgres sisa-messaging; do
-            if curl -sfo /dev/null -A "sisa-messaging-rs release (github.com/$GITHUB_REPOSITORY)" \
+          for crate in sisa-eventing-core sisa-eventing-runtime sisa-eventing-nats sisa-eventing-iggy sisa-eventing-postgres sisa-eventing; do
+            if curl -sfo /dev/null -A "sisa-eventing-rs release (github.com/$GITHUB_REPOSITORY)" \
               "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is on crates.io already"
             else
@@ -205,9 +205,9 @@ jobs:
         run: |
           version="${TAG#v}"
           mkdir -p "$OUT"
-          for crate in sisa-messaging-core sisa-messaging-runtime sisa-messaging-nats sisa-messaging-iggy sisa-messaging-postgres sisa-messaging; do
+          for crate in sisa-eventing-core sisa-eventing-runtime sisa-eventing-nats sisa-eventing-iggy sisa-eventing-postgres sisa-eventing; do
             cargo package -p "$crate" --locked --no-verify
-            curl -sSfL -A "sisa-messaging-rs release (github.com/$GITHUB_REPOSITORY)" \
+            curl -sSfL -A "sisa-eventing-rs release (github.com/$GITHUB_REPOSITORY)" \
               -o "$OUT/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"
             cmp "target/package/$crate-$version.crate" "$OUT/$crate-$version.crate"
           done
@@ -225,7 +225,7 @@ jobs:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
           OUT: ${{ runner.temp }}/release-crates
         run: |
-          cp "$BUNDLE" "$OUT/sisa-messaging-${TAG#v}.sigstore.json"
+          cp "$BUNDLE" "$OUT/sisa-eventing-${TAG#v}.sigstore.json"
           gh release upload "$TAG" "$OUT"/* --clobber --repo "$GITHUB_REPOSITORY"
 
   publish-release:

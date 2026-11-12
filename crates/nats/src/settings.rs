@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 /// serde, where a missing field keeps its default:
 ///
 /// ```no_run
-/// use sisa_messaging_nats::{NatsSettings, NatsTransport};
+/// use sisa_eventing_nats::{NatsSettings, NatsTransport};
 ///
-/// # async fn connect() -> Result<(), sisa_messaging_core::TransportError> {
+/// # async fn connect() -> Result<(), sisa_eventing_core::TransportError> {
 /// let mut settings = NatsSettings::default();
 /// settings.url = "nats://nats.internal:4222".into();
 /// settings.prefix = "staging".into();

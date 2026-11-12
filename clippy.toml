@@ -1,7 +1,7 @@
 # Timestamps come from one place, so tests can control them. Only the clock module in core reads
 # the wall clock. Any other reader needs a justified `#[expect]`.
 disallowed-methods = [
-    { path = "std::time::SystemTime::now", reason = "read the wall clock only through sisa_messaging_core::clock" },
+    { path = "std::time::SystemTime::now", reason = "read the wall clock only through sisa_eventing_core::clock" },
 ]
 
 # Names are whole words: no single letter is allowed, not even clippy's default i, j, n, x, y, z

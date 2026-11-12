@@ -139,12 +139,12 @@ fn parse(text: &str) -> Option<Timestamp> {
 /// It reads and writes `YYYY-MM-DD`.
 ///
 /// ```
-/// use sisa_messaging_core::{Date, Timestamp};
+/// use sisa_eventing_core::{Date, Timestamp};
 ///
 /// let time: Timestamp = "2026-11-02T23:30:00-05:00".parse()?;
 /// assert_eq!(time.date().to_string(), "2026-11-03");
 /// assert_eq!(time.date().add_days(-3), "2026-10-31".parse()?);
-/// # Ok::<(), sisa_messaging_core::EnvelopeError>(())
+/// # Ok::<(), sisa_eventing_core::EnvelopeError>(())
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Date {
@@ -270,11 +270,11 @@ impl FromStr for Date {
 /// needs, so whatever it writes reads back as the same time.
 ///
 /// ```
-/// use sisa_messaging_core::Timestamp;
+/// use sisa_eventing_core::Timestamp;
 ///
 /// let time: Timestamp = "2026-11-02T10:30:00.5+07:00".parse()?;
 /// assert_eq!(time.to_string(), "2026-11-02T03:30:00.5Z");
-/// # Ok::<(), sisa_messaging_core::EnvelopeError>(())
+/// # Ok::<(), sisa_eventing_core::EnvelopeError>(())
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp {

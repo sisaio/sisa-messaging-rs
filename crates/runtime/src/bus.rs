@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     EndpointSpec, EnvelopeError, JsonCodec, Message, OutboxStore, PartitionStore, Publisher,
     Source, TransportError, TransportPublisher, TransportSubscriber,
 };
@@ -126,8 +126,8 @@ struct Inner<Transport, Outbox, Codec> {
 ///
 /// ```
 /// use serde::{Deserialize, Serialize};
-/// use sisa_messaging_core::{Message, Publisher};
-/// use sisa_messaging_runtime::{Bus, HandlerContext, HandlerError, InMemoryTransport};
+/// use sisa_eventing_core::{Message, Publisher};
+/// use sisa_eventing_runtime::{Bus, HandlerContext, HandlerError, InMemoryTransport};
 ///
 /// #[derive(Serialize, Deserialize)]
 /// struct OrderPlaced {
@@ -162,7 +162,7 @@ struct Inner<Transport, Outbox, Codec> {
 /// bus without one doesn't compile there:
 ///
 /// ```compile_fail
-/// # use sisa_messaging_runtime::{Bus, InMemoryTransport};
+/// # use sisa_eventing_runtime::{Bus, InMemoryTransport};
 /// fn place_order(bus: &Bus<InMemoryTransport>, transaction: &mut ()) {
 ///     bus.outbox(transaction);
 /// }
@@ -241,7 +241,7 @@ impl<Transport, Outbox, Codec> Publisher for Bus<Transport, Outbox, Codec>
 where
     Transport: TransportPublisher,
     Outbox: Send + Sync + 'static,
-    Codec: sisa_messaging_core::Codec,
+    Codec: sisa_eventing_core::Codec,
 {
     type Error = PublishError;
 
@@ -253,7 +253,7 @@ where
 }
 
 // Shows the source and the endpoints.
-impl<Transport, Outbox, Codec: sisa_messaging_core::Codec> fmt::Debug
+impl<Transport, Outbox, Codec: sisa_eventing_core::Codec> fmt::Debug
     for Bus<Transport, Outbox, Codec>
 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -295,8 +295,8 @@ impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
     ///
     /// ```
     /// use bytes::Bytes;
-    /// use sisa_messaging_core::{Codec, CodecError, JsonCodec, Message};
-    /// use sisa_messaging_runtime::{Bus, InMemoryTransport};
+    /// use sisa_eventing_core::{Codec, CodecError, JsonCodec, Message};
+    /// use sisa_eventing_runtime::{Bus, InMemoryTransport};
     /// # fn seal(data: &[u8]) -> Vec<u8> { data.to_vec() }
     /// # fn open(data: &[u8]) -> Vec<u8> { data.to_vec() }
     ///
@@ -320,7 +320,7 @@ impl<Transport, Outbox> BusBuilder<Transport, Outbox> {
     /// let builder = Bus::builder("/orders", InMemoryTransport::new()).codec(Sealed);
     /// ```
     #[must_use]
-    pub fn codec<Codec: sisa_messaging_core::Codec>(
+    pub fn codec<Codec: sisa_eventing_core::Codec>(
         self,
         codec: Codec,
     ) -> BusBuilder<Transport, Outbox, Codec> {
@@ -386,7 +386,7 @@ impl<Transport, Store: OutboxStore, Codec> BusBuilder<Transport, Store, Codec> {
     }
 }
 
-impl<Transport, Outbox, Codec: sisa_messaging_core::Codec> BusBuilder<Transport, Outbox, Codec> {
+impl<Transport, Outbox, Codec: sisa_eventing_core::Codec> BusBuilder<Transport, Outbox, Codec> {
     /// Adds an endpoint: a durable subscription named `name`, such as `billing`, that every
     /// instance of the service shares. `configure` adds its handlers, and its
     /// [inbox](EndpointBuilder::inbox) if it has one.
@@ -425,7 +425,7 @@ impl<Transport, Outbox, Codec> BusBuilder<Transport, Outbox, Codec>
 where
     Transport: TransportPublisher + TransportSubscriber,
     Outbox: sealed::Outbox<Transport>,
-    Codec: sisa_messaging_core::Codec,
+    Codec: sisa_eventing_core::Codec,
 {
     /// Subscribes every endpoint, then starts one worker for each, one for each table whose
     /// [`partitions`](BusBuilder::partitions) it keeps, and the outbox's dispatcher when the bus

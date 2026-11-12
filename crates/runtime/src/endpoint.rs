@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_util::{FutureExt, StreamExt};
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     CodecError, Deliveries, Delivery, Envelope, EnvelopeError, InboxStore, JsonCodec, Message,
     MessageType, Source, StoreError, TransportPublisher, TransportSubscriber,
 };
@@ -74,7 +74,7 @@ impl<Msg: Message, Inner> Typed<Msg, Inner> {
     ) -> Result<(), Failure>
     where
         Inner: Handler<Msg, Transaction, Codec>,
-        Codec: sisa_messaging_core::Codec,
+        Codec: sisa_eventing_core::Codec,
     {
         let envelope = context.envelope();
         if !context.codec.can_decode(&envelope.content_type) {
@@ -99,7 +99,7 @@ impl<Msg, Transaction, Codec, Inner> ErasedHandler<Transaction, Codec> for Typed
 where
     Msg: Message,
     Transaction: Send + 'static,
-    Codec: sisa_messaging_core::Codec,
+    Codec: sisa_eventing_core::Codec,
     Inner: Handler<Msg, Transaction, Codec>,
 {
     fn handle(
@@ -256,7 +256,7 @@ impl<Codec: Send + Sync + 'static> EndpointBuilder<NoInbox, Codec> {
     }
 }
 
-impl<Inbox: EndpointInbox, Codec: sisa_messaging_core::Codec> EndpointBuilder<Inbox, Codec> {
+impl<Inbox: EndpointInbox, Codec: sisa_eventing_core::Codec> EndpointBuilder<Inbox, Codec> {
     /// Handles messages of type `Msg` with `handler`. The endpoint subscribes to every message
     /// type it has a handler for.
     #[must_use]

@@ -66,7 +66,7 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           api=false
           if git diff --no-renames --name-only "$BASE...$HEAD" | grep -qE \
-            '^crates/(core|runtime|nats|iggy|postgres|sisa-messaging)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
+            '^crates/(core|runtime|nats|iggy|postgres|sisa-eventing)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
             api=true
           fi
           echo "api=$api" >> "$GITHUB_OUTPUT"
@@ -120,7 +120,7 @@ jobs:
       - name: Build the facade with each feature
         run: |
           for features in "" nats iggy postgres; do
-            cargo check -p sisa-messaging --features "$features" --locked
+            cargo check -p sisa-eventing --features "$features" --locked
           done
 
       # docs.rs builds every published crate with every feature; a broken link fails here instead.

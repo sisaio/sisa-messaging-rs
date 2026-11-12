@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use iggy::prelude::{Identifier, StreamClient, TopicClient};
-use sisa_messaging_core::{Correlation, MessageId, TraceContext, TransportPublisher};
-use sisa_messaging_iggy::IggyTransport;
-use sisa_messaging_testing::Iggy;
+use sisa_eventing_core::{Correlation, MessageId, TraceContext, TransportPublisher};
+use sisa_eventing_iggy::IggyTransport;
+use sisa_eventing_testing::Iggy;
 
 use crate::common::{envelope, header, settings, stored};
 

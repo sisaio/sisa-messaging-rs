@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging-runtime"
-description = "The engine of Sisa Messaging: the bus, the receive pipeline, the outbox dispatcher and partition maintenance, for every transport and database"
+name = "sisa-eventing-runtime"
+description = "The engine of Sisa Eventing: the bus, the receive pipeline, the outbox dispatcher and partition maintenance, for every transport and database"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -15,7 +15,7 @@ categories = ["asynchronous", "network-programming"]
 workspace = true
 
 [dependencies]
-sisa-messaging-core = { workspace = true }
+sisa-eventing-core = { workspace = true }
 futures-util = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -24,6 +24,6 @@ tracing = { workspace = true }
 [dev-dependencies]
 bytes = { workspace = true }
 serde = { workspace = true }
-sisa-messaging-testing = { workspace = true }
+sisa-eventing-testing = { workspace = true }
 # Paused time, so the retry tests don't wait.
 tokio = { workspace = true, features = ["test-util"] }

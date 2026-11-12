@@ -2416,7 +2416,7 @@ name = "orders"
 version = "0.0.0"
 dependencies = [
  "serde",
- "sisa-messaging",
+ "sisa-eventing",
  "sqlx",
  "tokio",
 ]
@@ -3428,20 +3428,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
-name = "sisa-messaging"
+name = "sisa-eventing"
 version = "0.1.0"
 dependencies = [
  "serde",
- "sisa-messaging-core",
- "sisa-messaging-iggy",
- "sisa-messaging-nats",
- "sisa-messaging-postgres",
- "sisa-messaging-runtime",
+ "sisa-eventing-core",
+ "sisa-eventing-iggy",
+ "sisa-eventing-nats",
+ "sisa-eventing-postgres",
+ "sisa-eventing-runtime",
  "sqlx",
 ]
 
 [[package]]
-name = "sisa-messaging-core"
+name = "sisa-eventing-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
@@ -3454,64 +3454,64 @@ dependencies = [
 ]
 
 [[package]]
-name = "sisa-messaging-iggy"
+name = "sisa-eventing-iggy"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
  "iggy",
  "serde",
- "sisa-messaging-core",
- "sisa-messaging-runtime",
- "sisa-messaging-testing",
+ "sisa-eventing-core",
+ "sisa-eventing-runtime",
+ "sisa-eventing-testing",
  "tokio",
  "tracing",
 ]
 
 [[package]]
-name = "sisa-messaging-nats"
+name = "sisa-eventing-nats"
 version = "0.1.0"
 dependencies = [
  "async-nats",
  "bytes",
  "futures-util",
  "serde",
- "sisa-messaging-core",
- "sisa-messaging-testing",
+ "sisa-eventing-core",
+ "sisa-eventing-testing",
  "tokio",
 ]
 
 [[package]]
-name = "sisa-messaging-postgres"
+name = "sisa-eventing-postgres"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "serde",
- "sisa-messaging-core",
- "sisa-messaging-iggy",
- "sisa-messaging-nats",
- "sisa-messaging-runtime",
- "sisa-messaging-testing",
+ "sisa-eventing-core",
+ "sisa-eventing-iggy",
+ "sisa-eventing-nats",
+ "sisa-eventing-runtime",
+ "sisa-eventing-testing",
  "sqlx",
  "tokio",
 ]
 
 [[package]]
-name = "sisa-messaging-runtime"
+name = "sisa-eventing-runtime"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
  "serde",
- "sisa-messaging-core",
- "sisa-messaging-testing",
+ "sisa-eventing-core",
+ "sisa-eventing-testing",
  "thiserror",
  "tokio",
  "tracing",
 ]
 
 [[package]]
-name = "sisa-messaging-testing"
+name = "sisa-eventing-testing"
 version = "0.1.0"
 dependencies = [
  "async-nats",
