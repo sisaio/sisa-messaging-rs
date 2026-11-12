@@ -34,9 +34,13 @@ async fn assert_quiet(transport: &IggyTransport, deliveries: &mut Deliveries<Igg
     delivery.ack().await.unwrap();
 }
 
+// The id `send_raw` gives its message, so a test can tell the message apart from its copies.
+const RAW_ID: u128 = 0x5157_0000_0000_0000_0000_0000_0000_0001;
+
 // Sends a message as another client would: any payload, any headers.
 async fn send_raw(iggy: &Iggy, headers: BTreeMap<HeaderKey, HeaderValue>, payload: &'static [u8]) {
     let message = IggyMessage::builder()
+        .id(RAW_ID)
         .payload(Bytes::from_static(payload))
         .user_headers(headers)
         .build()
@@ -333,7 +337,8 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_topic() {
     let copy = &copies[0];
     assert_eq!(copy.payload, Bytes::from_static(b"plain"));
     let original = &stored(&iggy, "orders.order_placed.v1", 1).await[0];
-    assert_eq!(copy.header.id, original.header.id);
+    assert_eq!(original.header.id, RAW_ID);
+    assert_eq!(copy.header.id, RAW_ID);
     assert_eq!(header(copy, "ce_errorendpoint").as_deref(), Some("billing"));
     assert_eq!(
         header(copy, "ce_errortype").as_deref(),
