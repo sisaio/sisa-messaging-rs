@@ -25,12 +25,12 @@ impl PartitionInterval {
     /// The first day of the interval that holds `date`.
     ///
     /// ```
-    /// use sisa_messaging_core::{Date, PartitionInterval};
+    /// use sisa_eventing_core::{Date, PartitionInterval};
     ///
     /// let thursday: Date = "2026-11-05".parse()?;
     /// assert_eq!(PartitionInterval::Week.start(thursday).to_string(), "2026-11-02");
     /// assert_eq!(PartitionInterval::Month.end(thursday).to_string(), "2026-12-01");
-    /// # Ok::<(), sisa_messaging_core::EnvelopeError>(())
+    /// # Ok::<(), sisa_eventing_core::EnvelopeError>(())
     /// ```
     #[must_use]
     pub fn start(self, date: Date) -> Date {

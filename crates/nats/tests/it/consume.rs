@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Deliveries, Delivery, EndpointSpec, MessageType, TransportPublisher, TransportSubscriber,
 };
-use sisa_messaging_nats::{NatsDelivery, NatsTransport};
-use sisa_messaging_testing::Nats;
+use sisa_eventing_nats::{NatsDelivery, NatsTransport};
+use sisa_eventing_testing::Nats;
 
 use crate::common::{envelope, envelope_of, next, next_within, settings, stored_messages};
 
@@ -249,7 +249,7 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_subject() {
     delivery.ack().await.unwrap();
 
     let stream = jetstream.get_stream("SISA").await.unwrap();
-    sisa_messaging_testing::eventually("the copy is in the error subject", async || {
+    sisa_eventing_testing::eventually("the copy is in the error subject", async || {
         stored_messages(&nats).await == 3
     })
     .await;
@@ -360,7 +360,7 @@ async fn a_header_with_a_bad_percent_encoding_goes_to_the_error_subject() {
     let delivery = next(&mut deliveries).await;
     assert_eq!(delivery.envelope().id, next_envelope.id);
     delivery.ack().await.unwrap();
-    sisa_messaging_testing::eventually("the copy is in the error subject", async || {
+    sisa_eventing_testing::eventually("the copy is in the error subject", async || {
         stored_messages(&nats).await == 3
     })
     .await;

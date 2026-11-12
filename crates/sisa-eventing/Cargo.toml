@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging"
-description = "Messaging for Rust services with an optional transactional outbox and inbox: pick a transport, a database and a codec"
+name = "sisa-eventing"
+description = "Eventing for Rust services with an optional transactional outbox and inbox: pick a transport, a database and a codec"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -18,19 +18,19 @@ workspace = true
 # No default: an application names the transport and the persistence it uses.
 default = []
 # The NATS JetStream transport.
-nats = ["dep:sisa-messaging-nats"]
+nats = ["dep:sisa-eventing-nats"]
 # The Apache Iggy transport.
-iggy = ["dep:sisa-messaging-iggy"]
+iggy = ["dep:sisa-eventing-iggy"]
 # The PostgreSQL outbox and inbox.
-postgres = ["dep:sisa-messaging-postgres"]
+postgres = ["dep:sisa-eventing-postgres"]
 
 [dependencies]
 # One crate per part; this one only re-exports them.
-sisa-messaging-core = { workspace = true }
-sisa-messaging-runtime = { workspace = true }
-sisa-messaging-nats = { workspace = true, optional = true }
-sisa-messaging-iggy = { workspace = true, optional = true }
-sisa-messaging-postgres = { workspace = true, optional = true }
+sisa-eventing-core = { workspace = true }
+sisa-eventing-runtime = { workspace = true }
+sisa-eventing-nats = { workspace = true, optional = true }
+sisa-eventing-iggy = { workspace = true, optional = true }
+sisa-eventing-postgres = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The crate docs' example: a message, and the application's own pool and transaction.

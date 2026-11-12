@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews a diff or pull request in sisa-messaging-rs, code and docs alike, against CI's checks, the design rules, the settled decisions and the docs conventions, and reports findings by severity. Use when asked to review, evaluate or check a change, a branch, a PR or a docs page, even if the word "review" isn't used.
+description: Reviews a diff or pull request in sisa-eventing-rs, code and docs alike, against CI's checks, the design rules, the settled decisions and the docs conventions, and reports findings by severity. Use when asked to review, evaluate or check a change, a branch, a PR or a docs page, even if the word "review" isn't used.
 ---
 
 # Review changes

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Date, Expiry, PartitionInfo, PartitionInterval, PartitionLock, PartitionStore, StoreError,
 };
 use sqlx::{AssertSqlSafe, PgPool};
@@ -69,8 +69,8 @@ impl Table {
 /// database are maintained apart.
 ///
 /// ```no_run
-/// use sisa_messaging_postgres::PostgresPartitions;
-/// use sisa_messaging_runtime::{Bus, InMemoryTransport, PartitionSettings};
+/// use sisa_eventing_postgres::PostgresPartitions;
+/// use sisa_eventing_runtime::{Bus, InMemoryTransport, PartitionSettings};
 ///
 /// # async fn example(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
 /// let mut outbox = PartitionSettings::default();

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use sisa_messaging_core::{Correlation, MessageId, TraceContext, TransportPublisher};
-use sisa_messaging_nats::NatsTransport;
-use sisa_messaging_testing::Nats;
+use sisa_eventing_core::{Correlation, MessageId, TraceContext, TransportPublisher};
+use sisa_eventing_nats::NatsTransport;
+use sisa_eventing_testing::Nats;
 
 use crate::common::{envelope, settings, stored_messages};
 

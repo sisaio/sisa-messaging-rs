@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 /// serde, where a missing field keeps its default:
 ///
 /// ```no_run
-/// use sisa_messaging_iggy::{IggySettings, IggyTransport};
+/// use sisa_eventing_iggy::{IggySettings, IggyTransport};
 ///
-/// # async fn connect() -> Result<(), sisa_messaging_core::TransportError> {
+/// # async fn connect() -> Result<(), sisa_eventing_core::TransportError> {
 /// let mut settings = IggySettings::default();
 /// settings.url = "iggy://billing:secret@iggy.internal:8090".into();
 /// settings.stream = "staging".into();

@@ -1,9 +1,9 @@
 //! The partitions of both tables, kept by the bus's maintenance worker.
 
-use sisa_messaging_core::{Date, Expiry, PartitionInterval, PartitionStore, Timestamp};
-use sisa_messaging_postgres::PostgresPartitions;
-use sisa_messaging_runtime::{Bus, InMemoryTransport, PartitionSettings};
-use sisa_messaging_testing::{Postgres, eventually};
+use sisa_eventing_core::{Date, Expiry, PartitionInterval, PartitionStore, Timestamp};
+use sisa_eventing_postgres::PostgresPartitions;
+use sisa_eventing_runtime::{Bus, InMemoryTransport, PartitionSettings};
+use sisa_eventing_testing::{Postgres, eventually};
 use sqlx::PgPool;
 
 use crate::migrate::migrated;

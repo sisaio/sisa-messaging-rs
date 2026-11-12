@@ -11,15 +11,15 @@ use std::error::Error;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use sisa_messaging::{
+use sisa_eventing::{
     Bus, HandlerContext, HandlerError, Message, NatsSettings, NatsTransport, PartitionSettings,
     PostgresInbox, PostgresOutbox, PostgresPartitions, Publisher,
 };
 use sqlx::{PgPool, PgTransaction};
 
-// The messaging tables are in the `messaging` schema and the example's own in `public`, so the
+// The eventing tables are in the `eventing` schema and the example's own in `public`, so the
 // connection looks in both.
-const DATABASE_URL: &str = "postgres://postgres:postgres@localhost:5432/orders?options=-c%20search_path%3Dmessaging%2Cpublic";
+const DATABASE_URL: &str = "postgres://postgres:postgres@localhost:5432/orders?options=-c%20search_path%3Deventing%2Cpublic";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OrderPlaced {

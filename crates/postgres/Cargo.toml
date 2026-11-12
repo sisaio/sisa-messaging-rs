@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging-postgres"
-description = "The PostgreSQL outbox and inbox of Sisa Messaging, on sqlx"
+name = "sisa-eventing-postgres"
+description = "The PostgreSQL outbox and inbox of Sisa Eventing, on sqlx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-# The tests use sisa-messaging-testing, which isn't published, so a downloaded crate couldn't
+# The tests use sisa-eventing-testing, which isn't published, so a downloaded crate couldn't
 # build them.
 exclude = ["tests/"]
 keywords = ["messaging", "outbox", "inbox", "postgres"]
@@ -19,7 +19,7 @@ workspace = true
 
 [dependencies]
 # The shared contracts that this crate implements.
-sisa-messaging-core = { workspace = true }
+sisa-eventing-core = { workspace = true }
 # The PostgreSQL client: the caller's connection type, and the store's own pool.
 sqlx = { workspace = true }
 
@@ -28,12 +28,12 @@ sqlx = { workspace = true }
 # to publish.
 bytes = { workspace = true }
 serde = { workspace = true }
-sisa-messaging-runtime = { workspace = true }
+sisa-eventing-runtime = { workspace = true }
 # The end-to-end dispatch tests, from the outbox to a NATS and an Iggy endpoint.
-sisa-messaging-iggy = { workspace = true }
-sisa-messaging-nats = { workspace = true }
+sisa-eventing-iggy = { workspace = true }
+sisa-eventing-nats = { workspace = true }
 # A PostgreSQL server per test, in Docker, and sqlx's migrator to run the migrations as sqlx-cli does.
-sisa-messaging-testing = { workspace = true }
+sisa-eventing-testing = { workspace = true }
 sqlx = { workspace = true, features = ["migrate"] }
 tokio = { workspace = true }
 

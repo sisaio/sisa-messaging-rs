@@ -1,4 +1,4 @@
-Work on [sisa-messaging-rs](https://github.com/sisaio/sisa-messaging-rs): messaging for Rust services over pluggable transports, with an optional transactional outbox and inbox in the application's database.
+Work on [sisa-eventing-rs](https://github.com/sisaio/sisa-eventing-rs): eventing for Rust services over pluggable transports, with an optional transactional outbox and inbox in the application's database.
 
 ## How work moves
 
@@ -35,4 +35,4 @@ Only the maintainer moves an issue to Ready and sets its milestone and Priority.
 - **My work**: your open issues.
 - **Pull requests**: open PRs and their reviewers.
 
-The labels and the board flow are described in [CONTRIBUTING.md](https://github.com/sisaio/sisa-messaging-rs/blob/main/CONTRIBUTING.md#issues-and-labels). This board is set up by [.github/scripts/project.sh](https://github.com/sisaio/sisa-messaging-rs/blob/main/.github/scripts/project.sh), so change it there.
+The labels and the board flow are described in [CONTRIBUTING.md](https://github.com/sisaio/sisa-eventing-rs/blob/main/CONTRIBUTING.md#issues-and-labels). This board is set up by [.github/scripts/project.sh](https://github.com/sisaio/sisa-eventing-rs/blob/main/.github/scripts/project.sh), so change it there.

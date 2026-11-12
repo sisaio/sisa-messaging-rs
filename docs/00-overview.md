@@ -1,8 +1,8 @@
 # Overview
 
-sisa-messaging lets a Rust service publish and consume messages over a transport it picks at
+sisa-eventing lets a Rust service publish and consume messages over a transport it picks at
 startup, with an optional transactional outbox and inbox in its own database. Add the
-`sisa-messaging` crate with the features of the parts you use; none is on by default.
+`sisa-eventing` crate with the features of the parts you use; none is on by default.
 
 | Part | 0.1.0 | Later |
 | --- | --- | --- |

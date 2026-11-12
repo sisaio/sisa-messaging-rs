@@ -9,7 +9,7 @@ version = 2
 yanked = "deny"
 ignore = [
   # astral-tokio-tar is unmaintained (2026-11-03) and has no safe upgrade. Only testcontainers
-  # 0.28, the newest, uses it, for the test containers of the unpublished sisa-messaging-testing.
+  # 0.28, the newest, uses it, for the test containers of the unpublished sisa-eventing-testing.
   # Drop this once testcontainers moves off it.
   { id = "RUSTSEC-2026-0440", reason = "test-only, through testcontainers; no upgrade exists" },
 ]

@@ -1,4 +1,4 @@
-//! The Apache Iggy transport of Sisa Messaging: publishes envelopes to Iggy topics and consumes
+//! The Apache Iggy transport of Sisa Eventing: publishes envelopes to Iggy topics and consumes
 //! them through consumer groups, committing each partition's offset as deliveries are settled.
 //!
 //! [`IggyTransport`] connects with [`IggySettings`], creates the stream when it is missing, and

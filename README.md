@@ -1,13 +1,13 @@
-# sisa-messaging-rs
+# sisa-eventing-rs
 
-[![CI](https://github.com/sisaio/sisa-messaging-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sisaio/sisa-messaging-rs/actions/workflows/ci.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sisaio/sisa-messaging-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/sisaio/sisa-messaging-rs)
-[![crates.io](https://img.shields.io/crates/v/sisa-messaging.svg)](https://crates.io/crates/sisa-messaging)
-[![docs.rs](https://img.shields.io/docsrs/sisa-messaging)](https://docs.rs/sisa-messaging)
-[![MSRV](https://img.shields.io/badge/MSRV-1.95-blue)](https://github.com/sisaio/sisa-messaging-rs/blob/main/Cargo.toml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sisaio/sisa-messaging-rs/blob/main/LICENSE)
+[![CI](https://github.com/sisaio/sisa-eventing-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sisaio/sisa-eventing-rs/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sisaio/sisa-eventing-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/sisaio/sisa-eventing-rs)
+[![crates.io](https://img.shields.io/crates/v/sisa-eventing.svg)](https://crates.io/crates/sisa-eventing)
+[![docs.rs](https://img.shields.io/docsrs/sisa-eventing)](https://docs.rs/sisa-eventing)
+[![MSRV](https://img.shields.io/badge/MSRV-1.95-blue)](https://github.com/sisaio/sisa-eventing-rs/blob/main/Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sisaio/sisa-eventing-rs/blob/main/LICENSE)
 
-Messaging for Rust services: publish and consume over the transport you pick, with an optional
+Eventing for Rust services: publish and consume over the transport you pick, with an optional
 transactional outbox and inbox in your own database.
 
 ## What you pick
@@ -30,7 +30,7 @@ so expect it to need updates with Iggy.
 
 ```toml
 [dependencies]
-sisa-messaging = { version = "0.1", features = ["nats", "postgres"] }
+sisa-eventing = { version = "0.1", features = ["nats", "postgres"] }
 serde = { version = "1", features = ["derive"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -38,11 +38,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 A message, a handler that bills it in the delivery's transaction, and a bus that publishes
 through the outbox. The `billing` endpoint's inbox records each message, so a redelivery doesn't
-bill twice. This is the core of [`examples/orders`](https://github.com/sisaio/sisa-messaging-rs/blob/main/examples/orders/src/main.rs):
+bill twice. This is the core of [`examples/orders`](https://github.com/sisaio/sisa-eventing-rs/blob/main/examples/orders/src/main.rs):
 
 ```rust,ignore
 use serde::{Deserialize, Serialize};
-use sisa_messaging::{
+use sisa_eventing::{
     Bus, HandlerContext, HandlerError, Message, NatsSettings, NatsTransport, PartitionSettings,
     PostgresInbox, PostgresOutbox, PostgresPartitions, Publisher,
 };
@@ -111,9 +111,9 @@ docker run -d --name orders-postgres -p 5432:5432 \
     -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=orders postgres:18-alpine
 until docker exec orders-postgres pg_isready -h localhost -U postgres -d orders; do sleep 1; done
 
-# The library's tables in a `messaging` schema, the example's own in `public`.
-docker exec orders-postgres psql -U postgres -d orders -c 'CREATE SCHEMA messaging'
-DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders?options=-c%20search_path%3Dmessaging' \
+# The library's tables in a `eventing` schema, the example's own in `public`.
+docker exec orders-postgres psql -U postgres -d orders -c 'CREATE SCHEMA eventing'
+DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders?options=-c%20search_path%3Deventing' \
     sqlx migrate run --source migrations/postgresql
 DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders' \
     sqlx migrate run --source examples/orders/migrations
@@ -129,17 +129,17 @@ billing: invoiced order 1 for Ada (4200 cents), message 01a1a97f-3ef5-7079-80e3-
 ```
 
 `NATS_URL` and `DATABASE_URL` point it elsewhere; the database URL's `search_path` must name the
-`messaging` schema and the application's.
+`eventing` schema and the application's.
 
 ## More
 
-- [Docs](https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/00-overview.md): an overview,
+- [Docs](https://github.com/sisaio/sisa-eventing-rs/blob/main/docs/00-overview.md): an overview,
   then architecture, flows and research, in reading order.
-- [Roadmap](https://github.com/sisaio/sisa-messaging-rs/blob/main/ROADMAP.md) and
-  [changelog](https://github.com/sisaio/sisa-messaging-rs/blob/main/CHANGELOG.md).
-- [Contributing](https://github.com/sisaio/sisa-messaging-rs/blob/main/CONTRIBUTING.md): building,
+- [Roadmap](https://github.com/sisaio/sisa-eventing-rs/blob/main/ROADMAP.md) and
+  [changelog](https://github.com/sisaio/sisa-eventing-rs/blob/main/CHANGELOG.md).
+- [Contributing](https://github.com/sisaio/sisa-eventing-rs/blob/main/CONTRIBUTING.md): building,
   testing and conventions.
-- [Security](https://github.com/sisaio/sisa-messaging-rs/blob/main/SECURITY.md): reporting a
+- [Security](https://github.com/sisaio/sisa-eventing-rs/blob/main/SECURITY.md): reporting a
   vulnerability.
 
 Rust 1.95 or newer. MIT licensed.

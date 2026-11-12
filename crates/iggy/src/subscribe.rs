@@ -12,7 +12,7 @@ use iggy::prelude::{
     Checkpoint, CommitPolicy, HeaderKind, IggyConsumer, IggyConsumerState, IggyError, IggyMessage,
     PollOptions, PollingStrategy, ReadError, ReceivedMessage,
 };
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Deliveries, Delivery, EndpointSpec, Envelope, TransportError, TransportSubscriber,
 };
 use tokio::sync::{Notify, mpsc};

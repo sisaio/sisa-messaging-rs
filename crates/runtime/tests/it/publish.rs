@@ -1,7 +1,7 @@
 //! Publishing from the bus, and starting it.
 
-use sisa_messaging_core::{Message, Publisher, TransportError};
-use sisa_messaging_runtime::{Bus, InMemoryTransport, PublishError, StartError};
+use sisa_eventing_core::{Message, Publisher, TransportError};
+use sisa_eventing_runtime::{Bus, InMemoryTransport, PublishError, StartError};
 
 use crate::support::{Billing, OrderPlaced};
 

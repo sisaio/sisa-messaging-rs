@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sisa_messaging_core::{OutboxRecord, OutboxStore, TransportPublisher};
+use sisa_eventing_core::{OutboxRecord, OutboxStore, TransportPublisher};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
@@ -21,7 +21,7 @@ use crate::RetryPolicy;
 /// ```
 /// use std::time::Duration;
 ///
-/// use sisa_messaging_runtime::DispatchSettings;
+/// use sisa_eventing_runtime::DispatchSettings;
 ///
 /// let mut settings = DispatchSettings::default();
 /// settings.poll_interval = Duration::from_millis(200);

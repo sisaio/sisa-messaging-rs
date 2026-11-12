@@ -1,4 +1,4 @@
-//! Test helpers for the Sisa Messaging crates. Not published.
+//! Test helpers for the Sisa Eventing crates. Not published.
 //!
 //! - [`Nats`]: a fresh NATS server with JetStream in Docker for one test, removed when the test
 //!   ends.

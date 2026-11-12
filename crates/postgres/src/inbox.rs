@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use sisa_messaging_core::{Envelope, InboxStore, MessageId, StoreError};
+use sisa_eventing_core::{Envelope, InboxStore, MessageId, StoreError};
 use sqlx::types::Json;
 use sqlx::{PgPool, PgTransaction};
 
@@ -35,13 +35,13 @@ fn database(context: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
 /// receipt for the message, runs the handler, and commits before it acks. A redelivered message
 /// finds its receipt and is acked without running the handler again. The handler does its own
 /// writes in the same transaction, through `HandlerContext::transaction` from
-/// `sisa-messaging-runtime`:
+/// `sisa-eventing-runtime`:
 ///
 /// ```no_run
 /// # use serde::{Deserialize, Serialize};
-/// # use sisa_messaging_core::Message;
-/// # use sisa_messaging_postgres::{PostgresInbox, PostgresOutbox};
-/// # use sisa_messaging_runtime::{Bus, HandlerContext, HandlerError, InMemoryTransport};
+/// # use sisa_eventing_core::Message;
+/// # use sisa_eventing_postgres::{PostgresInbox, PostgresOutbox};
+/// # use sisa_eventing_runtime::{Bus, HandlerContext, HandlerError, InMemoryTransport};
 /// # use sqlx::PgTransaction;
 /// # #[derive(Serialize, Deserialize)]
 /// # struct OrderPlaced { id: i64 }

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use futures_util::stream;
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Deliveries, Delivery, EndpointSpec, Envelope, MessageId, MessageType, TransportError,
     TransportPublisher, TransportSubscriber,
 };
@@ -287,7 +287,7 @@ impl fmt::Debug for InMemoryTransport {
 mod tests {
     use bytes::Bytes;
     use futures_util::StreamExt;
-    use sisa_messaging_core::{ContentType, Source};
+    use sisa_eventing_core::{ContentType, Source};
 
     use super::*;
 

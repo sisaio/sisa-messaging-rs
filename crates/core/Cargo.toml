@@ -1,6 +1,6 @@
 [package]
-name = "sisa-messaging-core"
-description = "The contracts of Sisa Messaging: messages, CloudEvents envelopes, codecs, and the transport and store traits"
+name = "sisa-eventing-core"
+description = "The contracts of Sisa Eventing: messages, CloudEvents envelopes, codecs, and the transport and store traits"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

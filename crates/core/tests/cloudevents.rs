@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 use cloudevents::{AttributesReader, Event, EventBuilder, EventBuilderV10};
 use serde_json::{Map, Value};
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     ContentType, Correlation, Envelope, MessageId, MessageType, Source, TraceContext,
 };
 

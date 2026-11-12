@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_nats::{HeaderMap, HeaderValue, jetstream};
 use bytes::Bytes;
-use sisa_messaging_core::{Envelope, MessageType, TransportError, TransportPublisher};
+use sisa_eventing_core::{Envelope, MessageType, TransportError, TransportPublisher};
 
 use crate::{NatsSettings, binding};
 

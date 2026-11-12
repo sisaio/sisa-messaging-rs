@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-use sisa_messaging_core::{Envelope, OutboxRecord, OutboxStore, StoreError, Timestamp};
+use sisa_eventing_core::{Envelope, OutboxRecord, OutboxStore, StoreError, Timestamp};
 use sqlx::types::{Json, JsonValue, Uuid};
 use sqlx::{PgConnection, PgPool};
 
@@ -99,13 +99,13 @@ fn database(context: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
 /// The outbox in the `outbox_messages` table, found through the connection's `search_path`.
 ///
 /// Rows are written on the application's own connection, inside its transaction, with
-/// `Bus::outbox` from `sisa-messaging-runtime`:
+/// `Bus::outbox` from `sisa-eventing-runtime`:
 ///
 /// ```no_run
 /// # use serde::{Deserialize, Serialize};
-/// # use sisa_messaging_core::{Message, Publisher};
-/// # use sisa_messaging_postgres::PostgresOutbox;
-/// # use sisa_messaging_runtime::{Bus, InMemoryTransport};
+/// # use sisa_eventing_core::{Message, Publisher};
+/// # use sisa_eventing_postgres::PostgresOutbox;
+/// # use sisa_eventing_runtime::{Bus, InMemoryTransport};
 /// # #[derive(Serialize, Deserialize)]
 /// # struct OrderPlaced { id: i64 }
 /// # impl Message for OrderPlaced { const TYPE: &'static str = "orders.order_placed.v1"; }

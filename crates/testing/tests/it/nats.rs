@@ -1,4 +1,4 @@
-use sisa_messaging_testing::Nats;
+use sisa_eventing_testing::Nats;
 
 #[tokio::test]
 async fn nats_starts_with_jetstream_on() {

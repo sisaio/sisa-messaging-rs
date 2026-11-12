@@ -8,7 +8,7 @@ use async_nats::HeaderMap;
 use async_nats::jetstream::context::ConsumerInfoErrorKind;
 use async_nats::jetstream::{self, AckKind, consumer};
 use futures_util::StreamExt;
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Deliveries, Delivery, EndpointSpec, Envelope, TransportError, TransportSubscriber,
 };
 

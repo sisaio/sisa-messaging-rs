@@ -6,7 +6,7 @@ script or its JSON in a PR, then run the script after the merge to sync GitHub w
 
 | Script | Syncs | Needs |
 | --- | --- | --- |
-| `project.sh` | Labels, milestones, and the `sisa-messaging` board: its description and README (from `project-readme.md`), Status options, the Priority, Start date and Target date fields, and the views | `gh auth refresh -s project` |
+| `project.sh` | Labels, milestones, and the `sisa-eventing` board: its description and README (from `project-readme.md`), Status options, the Priority, Start date and Target date fields, and the views | `gh auth refresh -s project` |
 | `rulesets.sh` | The rulesets in `rulesets/`: `main.json` for the default branch, `release-tags.json` for `v*` tags | Repository admin |
 
 Run them from the repository root on an up-to-date `main`:
@@ -63,7 +63,7 @@ Both scripts can run any number of times:
 - **A way to publish to crates.io.** While the `CARGO_REGISTRY_TOKEN` secret is set, the publish
   job uses it. To switch to trusted publishing:
   1. On crates.io, open each published crate's Settings → Trusted Publishing → Add, and enter
-     owner `sisaio`, repository `sisa-messaging-rs`, workflow `release.yml` and environment
+     owner `sisaio`, repository `sisa-eventing-rs`, workflow `release.yml` and environment
      `release`.
   2. Delete every `CARGO_REGISTRY_TOKEN` secret the workflow can see: in the organization, the
      repository and the environment. While one is left, the job keeps using it.

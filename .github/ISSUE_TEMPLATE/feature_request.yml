@@ -5,21 +5,21 @@ body:
   - type: markdown
     attributes:
       value: |
-        Check the [roadmap](https://github.com/sisaio/sisa-messaging-rs/blob/main/ROADMAP.md) and the
-        decisions in the [architecture page](https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/01-architecture.md#decisions)
+        Check the [roadmap](https://github.com/sisaio/sisa-eventing-rs/blob/main/ROADMAP.md) and the
+        decisions in the [architecture page](https://github.com/sisaio/sisa-eventing-rs/blob/main/docs/01-architecture.md#decisions)
         first; some ideas are planned and some were settled on purpose.
   - type: dropdown
     id: crate
     attributes:
       label: Crate
       options:
-        - sisa-messaging
-        - sisa-messaging-core
-        - sisa-messaging-runtime
-        - sisa-messaging-nats
-        - sisa-messaging-iggy
-        - sisa-messaging-postgres
-        - sisa-messaging-testing
+        - sisa-eventing
+        - sisa-eventing-core
+        - sisa-eventing-runtime
+        - sisa-eventing-nats
+        - sisa-eventing-iggy
+        - sisa-eventing-postgres
+        - sisa-eventing-testing
         - A new crate
         - Not sure
     validations:

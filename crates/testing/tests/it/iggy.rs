@@ -1,5 +1,5 @@
 use iggy::prelude::{StreamClient, StreamCreateOptions};
-use sisa_messaging_testing::Iggy;
+use sisa_eventing_testing::Iggy;
 
 #[tokio::test]
 async fn iggy_starts_and_takes_a_stream() {

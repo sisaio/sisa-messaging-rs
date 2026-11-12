@@ -3,14 +3,14 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     ContentType, Correlation, Envelope, Message, MessageId, MessageType, Publisher, Source,
     TraceContext, TransportPublisher,
 };
-use sisa_messaging_runtime::{
+use sisa_eventing_runtime::{
     Bus, Handler, HandlerContext, HandlerError, InMemoryTransport, RetryPolicy,
 };
-use sisa_messaging_testing::eventually;
+use sisa_eventing_testing::eventually;
 
 use crate::support::{Billing, InvoiceSent, OrderPlaced, billing_bus, published_of};
 

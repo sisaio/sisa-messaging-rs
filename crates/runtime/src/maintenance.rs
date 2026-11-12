@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use sisa_messaging_core::{Date, Expiry, PartitionInterval, PartitionStore, StoreError, Timestamp};
+use sisa_eventing_core::{Date, Expiry, PartitionInterval, PartitionStore, StoreError, Timestamp};
 use tokio::sync::watch;
 
 // How often the worker runs.
@@ -29,7 +29,7 @@ pub enum PartitionMode {
 /// default partition that holds rows.
 ///
 /// ```
-/// use sisa_messaging_runtime::PartitionSettings;
+/// use sisa_eventing_runtime::PartitionSettings;
 ///
 /// let mut outbox = PartitionSettings::default();
 /// outbox.retention_days = Some(90);

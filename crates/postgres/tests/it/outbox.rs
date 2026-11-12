@@ -4,17 +4,17 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     Codec, CodecError, ContentType, Correlation, Envelope, JsonCodec, Message, MessageId,
     MessageType, OutboxStore, Publisher, Source, StoreError, TraceContext,
 };
-use sisa_messaging_postgres::PostgresOutbox;
-use sisa_messaging_runtime::{Bus, InMemoryTransport, PublishError};
-use sisa_messaging_testing::Postgres;
+use sisa_eventing_postgres::PostgresOutbox;
+use sisa_eventing_runtime::{Bus, InMemoryTransport, PublishError};
+use sisa_eventing_testing::Postgres;
 use sqlx::PgPool;
 use sqlx::types::{Json, Uuid};
 
-use crate::migrate::{messaging_pool, migrated};
+use crate::migrate::{eventing_pool, migrated};
 
 #[derive(Serialize, Deserialize)]
 struct OrderPlaced {
@@ -214,7 +214,7 @@ async fn a_row_holds_every_attribute_of_the_envelope() {
 #[tokio::test]
 async fn a_missing_table_fails_the_publish() {
     let postgres = Postgres::start().await;
-    let pool = messaging_pool(&postgres).await;
+    let pool = eventing_pool(&postgres).await;
     let bus = bus(&InMemoryTransport::new(), &pool).await;
 
     let mut tx = pool.begin().await.unwrap();

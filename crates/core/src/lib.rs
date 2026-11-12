@@ -1,8 +1,8 @@
-//! The contracts of Sisa Messaging: messages and their CloudEvents envelope, codecs, and the traits
+//! The contracts of Sisa Eventing: messages and their CloudEvents envelope, codecs, and the traits
 //! that transports and database stores implement. No runtime lives here; that is
-//! `sisa-messaging-runtime`.
+//! `sisa-eventing-runtime`.
 //!
-//! Applications depend on `sisa-messaging`, which re-exports this crate's types, or on this crate
+//! Applications depend on `sisa-eventing`, which re-exports this crate's types, or on this crate
 //! and the transport and persistence crates they use.
 
 #![forbid(unsafe_code)]

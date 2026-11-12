@@ -1,4 +1,4 @@
-//! The NATS transport of Sisa Messaging: publishes envelopes to JetStream subjects and consumes
+//! The NATS transport of Sisa Eventing: publishes envelopes to JetStream subjects and consumes
 //! them through durable consumers, with JetStream's acknowledgements and redelivery.
 //!
 //! [`NatsTransport`] connects with [`NatsSettings`], creates or updates the stream that captures

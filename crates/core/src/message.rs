@@ -42,7 +42,7 @@ fn check_message_type(value: &str) -> Result<(), &'static str> {
 ///
 /// ```
 /// use serde::{Deserialize, Serialize};
-/// use sisa_messaging_core::Message;
+/// use sisa_eventing_core::Message;
 ///
 /// #[derive(Serialize, Deserialize)]
 /// struct OrderPlaced {
@@ -68,7 +68,7 @@ pub trait Message: Serialize + DeserializeOwned + Send + Sync + 'static {
 /// characters, Kafka's limit.
 ///
 /// ```
-/// use sisa_messaging_core::MessageType;
+/// use sisa_eventing_core::MessageType;
 ///
 /// assert!(MessageType::new("orders.order_placed.v1").is_ok());
 /// assert!(MessageType::new("Orders.OrderPlaced").is_err());

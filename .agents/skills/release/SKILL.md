@@ -1,14 +1,14 @@
 ---
 name: release
-description: Prepares a release of the sisa-messaging crates (versions, changelog, semver checks, tag, GitHub release, approval, crates.io) and diagnoses failed release runs. Use when asked about the release PR, the changelog, a version bump or a pre-release, publishing to crates.io, release notes, or a red release workflow.
+description: Prepares a release of the sisa-eventing crates (versions, changelog, semver checks, tag, GitHub release, approval, crates.io) and diagnoses failed release runs. Use when asked about the release PR, the changelog, a version bump or a pre-release, publishing to crates.io, release notes, or a red release workflow.
 ---
 
 # Release
 
 [release.yml](../../../.github/workflows/release.yml) opens the release PR with release-plz
 ([release-plz.toml](../../../release-plz.toml)) and does the rest in its own jobs. The five
-library crates (`sisa-messaging-core`, `-runtime`, `-nats`, `-postgres` and `sisa-messaging`)
-share one version, one changelog at the root and one `v<version>` tag. `sisa-messaging-testing`
+library crates (`sisa-eventing-core`, `-runtime`, `-nats`, `-postgres` and `sisa-eventing`)
+share one version, one changelog at the root and one `v<version>` tag. `sisa-eventing-testing`
 and the examples are never published.
 
 - Releases are cut by hand, so each one batches several changes. The maintainer opens the release
@@ -71,7 +71,7 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.2.
   title and body follow.
 - Merging releases it like any version. The GitHub release is marked Pre-release, so it is never
   Latest. On crates.io, `cargo add` and
-  requirements such as `"0.2"` skip it: users opt in with `sisa-messaging = "0.2.0-rc.1"`, which
+  requirements such as `"0.2"` skip it: users opt in with `sisa-eventing = "0.2.0-rc.1"`, which
   `cargo update` later moves to the next rc and to `0.2.0`.
 - The next rc needs no input: from a published `0.2.0-rc.1`, release-plz picks `0.2.0-rc.2`
   whatever the commits are.

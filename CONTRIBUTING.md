@@ -10,7 +10,7 @@ as in CI; a dependency change updates the lock file on purpose and commits it.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-(set -e; for f in "" nats iggy postgres; do cargo check -p sisa-messaging --features "$f" --locked; done)
+(set -e; for f in "" nats iggy postgres; do cargo check -p sisa-eventing --features "$f" --locked; done)
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.95 check --workspace --all-targets --all-features --locked
 cargo test --workspace --all-features --locked
@@ -30,7 +30,7 @@ several parts together, such as a bus with its dispatcher, or anything on NATS, 
 a file in the crate's `tests/it/` folder, which builds as one test binary, so the files run side by
 side. A test that installs something process-wide, such as a meter provider, gets a binary of its
 own. Each NATS, PostgreSQL or Iggy test starts its own server in Docker through
-`sisa-messaging-testing`, so the suite needs Docker and nothing else. `NATS_IMAGE` picks the NATS
+`sisa-eventing-testing`, so the suite needs Docker and nothing else. `NATS_IMAGE` picks the NATS
 server, `nats:2.15-alpine` by default, `POSTGRES_IMAGE` the database, `postgres:18-alpine` by
 default, and `IGGY_IMAGE` the Iggy server, `apache/iggy:0.10.0` by default. CI tests these newest
 releases only. The Iggy server runs on io_uring, so its container gets the `SYS_NICE` capability
@@ -131,7 +131,7 @@ Every issue and pull request also gets labels from these groups, so anyone can f
 
 | Group | Labels | Rule |
 | --- | --- | --- |
-| Crate | `crate: sisa-messaging`, `crate: core`, `crate: runtime`, `crate: nats`, `crate: iggy`, `crate: postgres`, `crate: testing`, `ci` | Every part the change touches. |
+| Crate | `crate: sisa-eventing`, `crate: core`, `crate: runtime`, `crate: nats`, `crate: iggy`, `crate: postgres`, `crate: testing`, `ci` | Every part the change touches. |
 | Other | `documentation`, `needs info`, `breaking`, `good first issue`, `help wanted` | When they apply. |
 | Automated | `dependencies`, `release` | Set by Dependabot and release-plz on their PRs. |
 
@@ -143,7 +143,7 @@ Every issue and pull request also gets labels from these groups, so anyone can f
 - Close a duplicate as "duplicate" with a link, and a declined request as "not planned" with the
   reason. Answer a question in its issue, then close it.
 
-Work moves across the `sisa-messaging` project board:
+Work moves across the `sisa-eventing` project board:
 
 ```mermaid
 flowchart LR

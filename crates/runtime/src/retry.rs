@@ -11,7 +11,7 @@ use std::time::Duration;
 /// ```
 /// use std::time::Duration;
 ///
-/// use sisa_messaging_runtime::RetryPolicy;
+/// use sisa_eventing_runtime::RetryPolicy;
 ///
 /// let mut policy = RetryPolicy::default();
 /// policy.attempts = 3;

@@ -5,15 +5,15 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use sisa_messaging_core::{
+use sisa_eventing_core::{
     ContentType, Correlation, Envelope, InboxStore, Message, MessageId, MessageType, Publisher,
     Source, Timestamp, TransportPublisher,
 };
-use sisa_messaging_postgres::{PostgresInbox, PostgresOutbox};
-use sisa_messaging_runtime::{
+use sisa_eventing_postgres::{PostgresInbox, PostgresOutbox};
+use sisa_eventing_runtime::{
     Bus, Handler, HandlerContext, HandlerError, InMemoryTransport, RetryPolicy, StartError,
 };
-use sisa_messaging_testing::{Postgres, eventually};
+use sisa_eventing_testing::{Postgres, eventually};
 use sqlx::types::Uuid;
 use sqlx::{PgPool, PgTransaction};
 

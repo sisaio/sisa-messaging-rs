@@ -5,9 +5,9 @@ use futures_util::StreamExt;
 use iggy::prelude::{
     Consumer, Identifier, IggyMessage, MessageClient, PollOptions, PollingStrategy,
 };
-use sisa_messaging_core::{ContentType, Deliveries, Envelope, MessageType, Source, TransportError};
-use sisa_messaging_iggy::{IggyDelivery, IggySettings};
-use sisa_messaging_testing::Iggy;
+use sisa_eventing_core::{ContentType, Deliveries, Envelope, MessageType, Source, TransportError};
+use sisa_eventing_iggy::{IggyDelivery, IggySettings};
+use sisa_eventing_testing::Iggy;
 
 pub fn settings(iggy: &Iggy) -> IggySettings {
     let mut settings = IggySettings::default();
