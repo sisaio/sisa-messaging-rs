@@ -411,6 +411,34 @@ async fn ce_headers_are_read_without_regard_to_case() {
 }
 
 #[tokio::test]
+async fn the_kafka_content_type_header_names_the_content_type() {
+    let iggy = Iggy::start().await;
+    let transport = IggyTransport::connect(settings(&iggy)).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let envelope = envelope();
+    let mut headers: BTreeMap<HeaderKey, HeaderValue> = envelope
+        .to_attributes()
+        .into_iter()
+        .filter(|(name, _)| name != "datacontenttype")
+        .map(|(name, value)| {
+            (
+                HeaderKey::try_from(format!("ce_{name}").as_str()).unwrap(),
+                HeaderValue::try_from(value.as_str()).unwrap(),
+            )
+        })
+        .collect();
+    headers.insert(
+        HeaderKey::try_from("Content-Type").unwrap(),
+        HeaderValue::try_from("application/json").unwrap(),
+    );
+    send_raw(&iggy, headers, br#"{"id":42}"#).await;
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope(), &envelope);
+    delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
 async fn a_ce_header_that_isnt_a_string_goes_to_the_error_topic() {
     let iggy = Iggy::start().await;
     let mut one_partition = settings(&iggy);

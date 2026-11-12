@@ -399,32 +399,40 @@ async fn release(
     }
 }
 
+// The Kafka binding's header for the content type.
+const CONTENT_TYPE: &str = "content-type";
+
 // Reads the envelope from the `ce_` string headers and the payload. Header names are compared
-// without case, so `Ce_id` from another client counts.
+// without case, so `Ce_id` from another client counts. Without `ce_datacontenttype`, the
+// `content-type` header names the content type, as a Kafka-style producer writes it.
 fn read_envelope(message: &IggyMessage) -> Result<Envelope, String> {
     let headers = message
         .user_headers_map()
         .map_err(|error| error.to_string())?
         .unwrap_or_default();
     let mut attributes = BTreeMap::new();
+    let mut content_type = None;
     for (name, value) in &headers {
-        let Some(attribute) = name.as_str().ok().and_then(|name| {
-            name.to_ascii_lowercase()
-                .strip_prefix(CE)
-                .map(str::to_owned)
-        }) else {
+        let Ok(name) = name.as_str().map(str::to_ascii_lowercase) else {
             continue;
         };
+        if name != CONTENT_TYPE && !name.starts_with(CE) {
+            continue;
+        }
         // A CloudEvents attribute of another type would otherwise go missing unnoticed.
         let text = match value.kind() {
             HeaderKind::String => value.as_str().map_err(|error| error.to_string())?,
-            kind => {
-                return Err(format!(
-                    "the header {CE}{attribute} is a {kind:?}, not a string"
-                ));
-            }
+            kind => return Err(format!("the header {name} is a {kind:?}, not a string")),
         };
-        attributes.insert(attribute, text.to_owned());
+        match name.strip_prefix(CE) {
+            Some(attribute) => attributes.insert(attribute.to_owned(), text.to_owned()),
+            None => content_type.replace(text.to_owned()),
+        };
+    }
+    if let Some(content_type) = content_type {
+        attributes
+            .entry("datacontenttype".to_owned())
+            .or_insert(content_type);
     }
     Envelope::from_attributes(attributes, message.payload.clone())
         .map_err(|error| error.to_string())
