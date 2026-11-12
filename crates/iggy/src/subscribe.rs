@@ -419,6 +419,10 @@ fn read_envelope(message: &IggyMessage) -> Result<Envelope, String> {
         if name != CONTENT_TYPE && !name.starts_with(CE) {
             continue;
         }
+        // `content-type` isn't ours, so one of another type is left alone.
+        if name == CONTENT_TYPE && value.kind() != HeaderKind::String {
+            continue;
+        }
         // A CloudEvents attribute of another type would otherwise go missing unnoticed.
         let text = match value.kind() {
             HeaderKind::String => value.as_str().map_err(|error| error.to_string())?,
