@@ -21,3 +21,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+# The CloudEvents reference SDK, which the envelope's attributes are checked against.
+cloudevents-sdk = { workspace = true }
