@@ -224,7 +224,7 @@ async fn an_error_copy_goes_to_the_error_subject_next_to_the_original() {
     assert_eq!(header("ce-id"), Some(envelope.id.to_string()));
     assert_eq!(
         header("ce-errormessage").as_deref(),
-        Some("card declined retry later")
+        Some("card%20declined%0Aretry%20later")
     );
     assert_eq!(header("Nats-Msg-Id"), None);
 }
@@ -265,7 +265,10 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_subject() {
     };
     assert_eq!(header("ce-errorendpoint").as_deref(), Some("billing"));
     assert_eq!(header("ce-errortype").as_deref(), Some("invalid_envelope"));
-    assert!(header("ce-errormessage").is_some());
+    assert_eq!(
+        header("ce-errormessage").as_deref(),
+        Some("missing%20CloudEvents%20attribute%20`specversion`")
+    );
 }
 
 #[tokio::test]
@@ -315,6 +318,69 @@ async fn ce_headers_are_read_without_regard_to_case() {
     let delivery = next(&mut deliveries).await;
     assert_eq!(delivery.envelope(), &envelope);
     delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn ce_headers_are_percent_decoded_once() {
+    let nats = Nats::start().await;
+    let transport = NatsTransport::connect(settings(&nats)).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let mut envelope = envelope();
+    envelope.subject = Some("Euro € 100%25".into());
+    let mut headers = async_nats::HeaderMap::new();
+    for (name, value) in envelope.to_attributes() {
+        headers.insert(format!("ce-{name}"), value);
+    }
+    // As the binding's example encodes it, and the source encoded without need.
+    headers.insert("ce-subject", "Euro%20%E2%82%AC%20100%2525");
+    headers.insert("ce-source", "%2Forders");
+    publish_raw(&nats, headers, envelope.data.clone()).await;
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope(), &envelope);
+    delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_header_with_a_bad_percent_encoding_goes_to_the_error_subject() {
+    let nats = Nats::start().await;
+    let transport = NatsTransport::connect(settings(&nats)).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let envelope = envelope();
+    let mut headers = async_nats::HeaderMap::new();
+    for (name, value) in envelope.to_attributes() {
+        headers.insert(format!("ce-{name}"), value);
+    }
+    // An overlong encoding of a space, which the binding says to reject.
+    headers.insert("ce-subject", "%C0%A0");
+    publish_raw(&nats, headers, envelope.data.clone()).await;
+    let next_envelope = crate::common::envelope();
+    transport.publish(&next_envelope).await.unwrap();
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope().id, next_envelope.id);
+    delivery.ack().await.unwrap();
+    sisa_messaging_testing::eventually("the copy is in the error subject", async || {
+        stored_messages(&nats).await == 3
+    })
+    .await;
+    let stream = nats.jetstream().await.get_stream("SISA").await.unwrap();
+    let copy = stream
+        .get_last_raw_message_by_subject("sisa._error.billing")
+        .await
+        .unwrap();
+    let subject = copy.headers.get("ce-subject").map(|value| value.as_str());
+    assert_eq!(subject, Some("%C0%A0"));
+}
+
+async fn publish_raw(nats: &Nats, headers: async_nats::HeaderMap, payload: Bytes) {
+    nats.jetstream()
+        .await
+        .publish_with_headers("sisa.orders.order_placed.v1", headers, payload)
+        .await
+        .unwrap()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

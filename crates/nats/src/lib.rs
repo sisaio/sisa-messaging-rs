@@ -9,6 +9,7 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod binding;
 mod settings;
 mod subscribe;
 mod transport;
