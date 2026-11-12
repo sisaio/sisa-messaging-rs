@@ -79,6 +79,14 @@ if [ "$(grep -c . <<<"$number")" -gt 1 ]; then
   exit 1
 fi
 if [ -z "$number" ]; then
+  # The board was called sisa-messaging before the rename; rename it so it keeps its items.
+  number=$(gh project list --owner "$OWNER" --limit 1000 --format json --jq '.projects[] | select(.title == "sisa-messaging") | .number' | head -n 1)
+  if [ -n "$number" ]; then
+    gh project edit "$number" --owner "$OWNER" --title "$TITLE" >/dev/null
+    echo "project sisa-messaging renamed to $TITLE"
+  fi
+fi
+if [ -z "$number" ]; then
   number=$(gh project create --owner "$OWNER" --title "$TITLE" --format json --jq .number)
   echo "project $TITLE created"
 fi

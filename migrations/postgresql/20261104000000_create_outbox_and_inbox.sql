@@ -1,5 +1,5 @@
 -- The outbox and inbox tables. No name is qualified with a schema: the connection's search_path
--- picks it, such as `options=-c search_path=eventing` in the URL. Run it with
+-- picks it, such as `options=-c search_path=messaging` in the URL. Run it with
 -- `sqlx migrate run --source migrations/postgresql`, or by hand with psql.
 
 CREATE TABLE outbox_messages (
