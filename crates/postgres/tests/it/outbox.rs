@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sisa_messaging_core::{
-    ContentType, Correlation, Envelope, Message, MessageId, MessageType, OutboxStore, Publisher,
-    Source, StoreError, TraceContext,
+    Codec, CodecError, ContentType, Correlation, Envelope, JsonCodec, Message, MessageId,
+    MessageType, OutboxStore, Publisher, Source, StoreError, TraceContext,
 };
 use sisa_messaging_postgres::PostgresOutbox;
 use sisa_messaging_runtime::{Bus, InMemoryTransport, PublishError};
@@ -113,6 +113,54 @@ async fn a_committed_transaction_leaves_a_pending_row() {
         transport.published().is_empty(),
         "nothing goes out without the dispatcher"
     );
+}
+
+/// JSON with its bytes reversed, standing in for a codec that encrypts.
+struct Reversed;
+
+impl Codec for Reversed {
+    fn content_type(&self) -> &'static str {
+        "application/x-reversed+json"
+    }
+
+    fn encode<Msg: Message>(&self, message: &Msg) -> Result<Bytes, CodecError> {
+        let mut data = JsonCodec.encode(message)?.to_vec();
+        data.reverse();
+        Ok(data.into())
+    }
+
+    fn decode<Msg: Message>(&self, data: &[u8]) -> Result<Msg, CodecError> {
+        let mut data = data.to_vec();
+        data.reverse();
+        JsonCodec.decode(&data)
+    }
+}
+
+#[tokio::test]
+async fn a_row_holds_the_data_as_the_bus_s_codec_encodes_it() {
+    let postgres = Postgres::start().await;
+    let pool = migrated(&postgres).await;
+    let bus = Bus::builder("/orders", InMemoryTransport::new())
+        .codec(Reversed)
+        .outbox(PostgresOutbox::new(pool.clone()))
+        .start()
+        .await
+        .unwrap();
+    bus.shutdown().await;
+
+    let mut tx = pool.begin().await.unwrap();
+    bus.outbox(&mut tx)
+        .publish(&OrderPlaced { id: 42 })
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let [(envelope, _)] = rows(&pool).await.try_into().unwrap();
+    assert_eq!(
+        envelope.content_type.as_str(),
+        "application/x-reversed+json"
+    );
+    assert_eq!(&envelope.data[..], br#"}24:"di"{"#);
 }
 
 #[tokio::test]
