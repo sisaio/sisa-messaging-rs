@@ -394,12 +394,14 @@ follows Kafka's, the closest one, and keeps every attribute in a header:
 
 | Transport | Header names | Example |
 | --- | --- | --- |
-| NATS | `ce-` and the attribute | `ce-id`, `ce-type`, `ce-datacontenttype` |
+| NATS | `ce-` and the attribute, its value percent-encoded as the binding says | `ce-id`, `ce-type`, `ce-datacontenttype`; `ce-subject: Euro%20%E2%82%AC` |
 | Kafka family | `ce_` and the attribute | `ce_id`, `ce_type`; `content-type` for the content type |
-| Iggy | `ce_` and the attribute, as string user headers; the Iggy message id is the message id | `ce_id`, `ce_type`, `ce_datacontenttype` |
+| Iggy | `ce_` and the attribute, as string user headers; the Iggy message id is the message id. A message without `ce_datacontenttype` takes its `content-type` header, as Kafka's binding has it | `ce_id`, `ce_type`, `ce_datacontenttype` |
 | AMQP | `cloudEvents:` and the attribute, from the AMQP 1.0 binding, since AMQP 0-9-1 has none | `cloudEvents:id`; the content type in the `content_type` property |
 
-On NATS the publish also sets `Nats-Msg-Id` to the message id, so JetStream drops a duplicate
+On NATS a space, `"`, `%` and every character outside printable ASCII becomes `%XY` of its UTF-8
+bytes, so a line break can't end a header early; a receiver decodes each value once and sends one
+that doesn't decode to UTF-8 to the error destination. On NATS the publish also sets `Nats-Msg-Id` to the message id, so JetStream drops a duplicate
 publish inside the stream's duplicate window. A copy to the error subject goes without it, so the
 stream keeps it next to the original of the same id. Iggy has no deduplication by id, so it keeps
 every publish. An Iggy header value holds at most 255 bytes: a publish with a longer attribute
