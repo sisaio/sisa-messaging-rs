@@ -90,40 +90,41 @@ where
 /// with any outbox, and for an [`InboxStore`] whose transaction the outbox writes on, so an
 /// outbox on another database doesn't compile; not for use on its own.
 #[doc(hidden)]
-pub trait InboxPipeline<Outbox>: EndpointInbox {
+pub trait InboxPipeline<Outbox, Codec>: EndpointInbox {
     fn pipeline(
         self,
         endpoint: String,
-        handlers: Handlers<Self::Transaction>,
+        handlers: Handlers<Self::Transaction, Codec>,
         outbox: &Arc<Outbox>,
-    ) -> Box<dyn Pipeline>;
+    ) -> Box<dyn Pipeline<Codec>>;
 }
 
 // The handler alone.
-impl<Outbox> InboxPipeline<Outbox> for NoInbox {
+impl<Outbox, Codec: Send + Sync + 'static> InboxPipeline<Outbox, Codec> for NoInbox {
     fn pipeline(
         self,
         endpoint: String,
-        handlers: Handlers<()>,
+        handlers: Handlers<(), Codec>,
         _outbox: &Arc<Outbox>,
-    ) -> Box<dyn Pipeline> {
+    ) -> Box<dyn Pipeline<Codec>> {
         Box::new(Plain { endpoint, handlers })
     }
 }
 
 // The handler in a transaction with its receipt.
-impl<Store, Outbox> InboxPipeline<Outbox> for Store
+impl<Store, Outbox, Codec> InboxPipeline<Outbox, Codec> for Store
 where
     Store: InboxStore,
     Store::Transaction: 'static,
     Outbox: HandlerOutbox<Store::Transaction>,
+    Codec: Send + Sync + 'static,
 {
     fn pipeline(
         self,
         endpoint: String,
-        handlers: Handlers<Store::Transaction>,
+        handlers: Handlers<Store::Transaction, Codec>,
         outbox: &Arc<Outbox>,
-    ) -> Box<dyn Pipeline> {
+    ) -> Box<dyn Pipeline<Codec>> {
         Box::new(Transactional {
             endpoint,
             handlers,
@@ -134,9 +135,9 @@ where
 }
 
 // An endpoint with an inbox.
-struct Transactional<Store: InboxStore, Outbox> {
+struct Transactional<Store: InboxStore, Outbox, Codec> {
     endpoint: String,
-    handlers: Handlers<Store::Transaction>,
+    handlers: Handlers<Store::Transaction, Codec>,
     inbox: Store,
     outbox: Arc<Outbox>,
 }
@@ -144,13 +145,17 @@ struct Transactional<Store: InboxStore, Outbox> {
 // Begins a transaction, records the message, runs the handler, writes its publishes to the outbox
 // and commits. A message recorded before is committed at once, without running the handler. On a
 // failure the transaction drops, which rolls the receipt back with the handler's work.
-impl<Store, Outbox> Pipeline for Transactional<Store, Outbox>
+impl<Store, Outbox, Codec> Pipeline<Codec> for Transactional<Store, Outbox, Codec>
 where
     Store: InboxStore,
     Store::Transaction: 'static,
     Outbox: HandlerOutbox<Store::Transaction>,
+    Codec: Send + Sync + 'static,
 {
-    fn run(&self, context: HandlerContext) -> BoxFuture<'_, Result<Vec<Envelope>, Failure>> {
+    fn run(
+        &self,
+        context: HandlerContext<(), Codec>,
+    ) -> BoxFuture<'_, Result<Vec<Envelope>, Failure>> {
         Box::pin(async move {
             let handler = find(&self.handlers, &self.endpoint, context.envelope())?;
             let mut transaction = self.inbox.begin().await?;

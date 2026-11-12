@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use futures_util::{FutureExt, StreamExt};
 use sisa_messaging_core::{
-    Codec, CodecError, Deliveries, Delivery, Envelope, EnvelopeError, InboxStore, JsonCodec,
-    Message, MessageType, Source, StoreError, TransportPublisher, TransportSubscriber,
+    CodecError, Deliveries, Delivery, Envelope, EnvelopeError, InboxStore, JsonCodec, Message,
+    MessageType, Source, StoreError, TransportPublisher, TransportSubscriber,
 };
 use tokio::sync::watch;
 use tracing::Instrument;
@@ -50,16 +50,17 @@ impl From<StoreError> for Failure {
 
 /// A handler with its message type erased, so an endpoint keeps handlers of several types. It
 /// gives the context back when the handler returns `Ok`.
-pub trait ErasedHandler<Transaction>: Send + Sync {
+pub trait ErasedHandler<Transaction, Codec>: Send + Sync {
     /// Decodes the delivered data and runs the handler.
     fn handle(
         &self,
-        context: HandlerContext<Transaction>,
-    ) -> BoxFuture<'_, Result<HandlerContext<Transaction>, Failure>>;
+        context: HandlerContext<Transaction, Codec>,
+    ) -> BoxFuture<'_, Result<HandlerContext<Transaction, Codec>, Failure>>;
 }
 
 /// An endpoint's handlers by the message type they handle.
-pub type Handlers<Transaction> = BTreeMap<MessageType, Arc<dyn ErasedHandler<Transaction>>>;
+pub type Handlers<Transaction, Codec> =
+    BTreeMap<MessageType, Arc<dyn ErasedHandler<Transaction, Codec>>>;
 
 struct Typed<Msg, Inner> {
     handler: Inner,
@@ -67,21 +68,23 @@ struct Typed<Msg, Inner> {
 }
 
 impl<Msg: Message, Inner> Typed<Msg, Inner> {
-    async fn decode_and_handle<Transaction>(
+    async fn decode_and_handle<Transaction, Codec>(
         &self,
-        context: &mut HandlerContext<Transaction>,
+        context: &mut HandlerContext<Transaction, Codec>,
     ) -> Result<(), Failure>
     where
-        Inner: Handler<Msg, Transaction>,
+        Inner: Handler<Msg, Transaction, Codec>,
+        Codec: sisa_messaging_core::Codec,
     {
         let envelope = context.envelope();
-        if !JsonCodec.can_decode(&envelope.content_type) {
+        if !context.codec.can_decode(&envelope.content_type) {
             return Err(Failure::Undecodable(HandlerError::new(
                 type_name::<CodecError>(),
                 format!("no codec reads {}", envelope.content_type),
             )));
         }
-        let message = JsonCodec
+        let message = context
+            .codec
             .decode::<Msg>(&envelope.data)
             .map_err(|error| Failure::Undecodable(error.into()))?;
         self.handler
@@ -92,16 +95,17 @@ impl<Msg: Message, Inner> Typed<Msg, Inner> {
 }
 
 // Decodes the delivered data as `Msg`, then runs the handler.
-impl<Msg, Transaction, Inner> ErasedHandler<Transaction> for Typed<Msg, Inner>
+impl<Msg, Transaction, Codec, Inner> ErasedHandler<Transaction, Codec> for Typed<Msg, Inner>
 where
     Msg: Message,
     Transaction: Send + 'static,
-    Inner: Handler<Msg, Transaction>,
+    Codec: sisa_messaging_core::Codec,
+    Inner: Handler<Msg, Transaction, Codec>,
 {
     fn handle(
         &self,
-        mut context: HandlerContext<Transaction>,
-    ) -> BoxFuture<'_, Result<HandlerContext<Transaction>, Failure>> {
+        mut context: HandlerContext<Transaction, Codec>,
+    ) -> BoxFuture<'_, Result<HandlerContext<Transaction, Codec>, Failure>> {
         Box::pin(async move {
             self.decode_and_handle(&mut context).await?;
             Ok(context)
@@ -111,14 +115,16 @@ where
 
 // A handler added before the endpoint's inbox: it runs in the delivery's transaction, without
 // seeing it.
-struct WithoutTransaction(Arc<dyn ErasedHandler<()>>);
+struct WithoutTransaction<Codec>(Arc<dyn ErasedHandler<(), Codec>>);
 
 // Sets the transaction aside while the handler runs.
-impl<Transaction: Send + 'static> ErasedHandler<Transaction> for WithoutTransaction {
+impl<Transaction: Send + 'static, Codec: Send + Sync + 'static> ErasedHandler<Transaction, Codec>
+    for WithoutTransaction<Codec>
+{
     fn handle(
         &self,
-        context: HandlerContext<Transaction>,
-    ) -> BoxFuture<'_, Result<HandlerContext<Transaction>, Failure>> {
+        context: HandlerContext<Transaction, Codec>,
+    ) -> BoxFuture<'_, Result<HandlerContext<Transaction, Codec>, Failure>> {
         Box::pin(async move {
             let (context, transaction) = context.with_transaction(());
             let context = self.0.handle(context).await?;
@@ -128,11 +134,11 @@ impl<Transaction: Send + 'static> ErasedHandler<Transaction> for WithoutTransact
 }
 
 /// The handler for the context's message type.
-pub(crate) fn find<'handlers, Transaction>(
-    handlers: &'handlers Handlers<Transaction>,
+pub(crate) fn find<'handlers, Transaction, Codec>(
+    handlers: &'handlers Handlers<Transaction, Codec>,
     endpoint: &str,
     envelope: &Envelope,
-) -> Result<&'handlers dyn ErasedHandler<Transaction>, Failure> {
+) -> Result<&'handlers dyn ErasedHandler<Transaction, Codec>, Failure> {
     handlers
         .get(&envelope.message_type)
         .map(|handler| &**handler)
@@ -146,10 +152,10 @@ pub(crate) fn find<'handlers, Transaction>(
 
 /// Runs `handler`. A handler that panics fails like one that returns an error, so one bad
 /// message doesn't stop the endpoint.
-pub(crate) async fn call<Transaction>(
-    handler: &dyn ErasedHandler<Transaction>,
-    context: HandlerContext<Transaction>,
-) -> Result<HandlerContext<Transaction>, Failure> {
+pub(crate) async fn call<Transaction, Codec>(
+    handler: &dyn ErasedHandler<Transaction, Codec>,
+    context: HandlerContext<Transaction, Codec>,
+) -> Result<HandlerContext<Transaction, Codec>, Failure> {
     AssertUnwindSafe(handler.handle(context))
         .catch_unwind()
         .await
@@ -163,20 +169,26 @@ pub(crate) async fn call<Transaction>(
 
 /// Runs a delivery's handler with the steps around it, such as the inbox's transaction, and
 /// returns the publishes to send before the ack.
-pub trait Pipeline: Send + Sync {
+pub trait Pipeline<Codec>: Send + Sync {
     /// Handles the delivery in `context`.
-    fn run(&self, context: HandlerContext) -> BoxFuture<'_, Result<Vec<Envelope>, Failure>>;
+    fn run(
+        &self,
+        context: HandlerContext<(), Codec>,
+    ) -> BoxFuture<'_, Result<Vec<Envelope>, Failure>>;
 }
 
 // An endpoint without an inbox: the handler alone.
-pub(crate) struct Plain {
+pub(crate) struct Plain<Codec> {
     pub(crate) endpoint: String,
-    pub(crate) handlers: Handlers<()>,
+    pub(crate) handlers: Handlers<(), Codec>,
 }
 
 // Runs the handler and hands its publishes back.
-impl Pipeline for Plain {
-    fn run(&self, context: HandlerContext) -> BoxFuture<'_, Result<Vec<Envelope>, Failure>> {
+impl<Codec: Send + Sync + 'static> Pipeline<Codec> for Plain<Codec> {
+    fn run(
+        &self,
+        context: HandlerContext<(), Codec>,
+    ) -> BoxFuture<'_, Result<Vec<Envelope>, Failure>> {
         Box::pin(async move {
             let handler = find(&self.handlers, &self.endpoint, context.envelope())?;
             Ok(call(handler, context).await?.held)
@@ -185,23 +197,23 @@ impl Pipeline for Plain {
 }
 
 // A handler as added, with the message type it handles, checked when the endpoint is built.
-type Added<Transaction> = (
+type Added<Transaction, Codec> = (
     Result<MessageType, EnvelopeError>,
-    Arc<dyn ErasedHandler<Transaction>>,
+    Arc<dyn ErasedHandler<Transaction, Codec>>,
 );
 
 /// Sets up one endpoint: its inbox, its handlers and its retry policy. [`BusBuilder::endpoint`]
 /// hands one out.
 ///
 /// [`BusBuilder::endpoint`]: crate::BusBuilder::endpoint
-pub struct EndpointBuilder<Inbox: EndpointInbox = NoInbox> {
+pub struct EndpointBuilder<Inbox: EndpointInbox = NoInbox, Codec = JsonCodec> {
     pub(crate) name: String,
     retry: RetryPolicy,
     inbox: Inbox,
-    handlers: Vec<Added<Inbox::Transaction>>,
+    handlers: Vec<Added<Inbox::Transaction, Codec>>,
 }
 
-impl EndpointBuilder {
+impl<Codec: Send + Sync + 'static> EndpointBuilder<NoInbox, Codec> {
     pub(crate) fn new(name: String) -> Self {
         Self {
             name,
@@ -221,7 +233,7 @@ impl EndpointBuilder {
     /// the handler fails. On a bus with an outbox, the handlers' publishes go to the outbox in the
     /// same transaction; add the outbox to the bus before this endpoint.
     #[must_use]
-    pub fn inbox<Store>(self, store: Store) -> EndpointBuilder<Store>
+    pub fn inbox<Store>(self, store: Store) -> EndpointBuilder<Store, Codec>
     where
         Store: InboxStore,
         Store::Transaction: 'static,
@@ -230,7 +242,7 @@ impl EndpointBuilder {
             .handlers
             .into_iter()
             .map(|(message_type, handler)| {
-                let handler: Arc<dyn ErasedHandler<Store::Transaction>> =
+                let handler: Arc<dyn ErasedHandler<Store::Transaction, Codec>> =
                     Arc::new(WithoutTransaction(handler));
                 (message_type, handler)
             })
@@ -244,11 +256,14 @@ impl EndpointBuilder {
     }
 }
 
-impl<Inbox: EndpointInbox> EndpointBuilder<Inbox> {
+impl<Inbox: EndpointInbox, Codec: sisa_messaging_core::Codec> EndpointBuilder<Inbox, Codec> {
     /// Handles messages of type `Msg` with `handler`. The endpoint subscribes to every message
     /// type it has a handler for.
     #[must_use]
-    pub fn handle<Msg: Message>(mut self, handler: impl Handler<Msg, Inbox::Transaction>) -> Self {
+    pub fn handle<Msg: Message>(
+        mut self,
+        handler: impl Handler<Msg, Inbox::Transaction, Codec>,
+    ) -> Self {
         let typed = Typed {
             handler,
             message: PhantomData::<fn() -> Msg>,
@@ -266,9 +281,13 @@ impl<Inbox: EndpointInbox> EndpointBuilder<Inbox> {
     }
 
     // The endpoint with its handlers by message type, for a bus with `outbox`.
-    pub(crate) fn build<Outbox>(self, outbox: &Arc<Outbox>) -> Result<Endpoint, crate::StartError>
+    pub(crate) fn build<Outbox>(
+        self,
+        outbox: &Arc<Outbox>,
+        codec: &Arc<Codec>,
+    ) -> Result<Endpoint<Codec>, crate::StartError>
     where
-        Inbox: InboxPipeline<Outbox>,
+        Inbox: InboxPipeline<Outbox, Codec>,
     {
         let mut handlers = BTreeMap::new();
         for (message_type, handler) in self.handlers {
@@ -285,6 +304,7 @@ impl<Inbox: EndpointInbox> EndpointBuilder<Inbox> {
             message_types: handlers.keys().cloned().collect(),
             transactional: Inbox::TRANSACTIONAL,
             pipeline: self.inbox.pipeline(self.name.clone(), handlers, outbox),
+            codec: Arc::clone(codec),
             name: self.name,
             retry: self.retry,
         })
@@ -292,7 +312,7 @@ impl<Inbox: EndpointInbox> EndpointBuilder<Inbox> {
 }
 
 // Shows the endpoint's name, retry policy and how many handlers it has.
-impl<Inbox: EndpointInbox> fmt::Debug for EndpointBuilder<Inbox> {
+impl<Inbox: EndpointInbox, Codec> fmt::Debug for EndpointBuilder<Inbox, Codec> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("EndpointBuilder")
@@ -337,16 +357,17 @@ async fn send_held(transport: &impl TransportPublisher, held: &[Envelope]) -> Re
     Ok(())
 }
 
-pub(crate) struct Endpoint {
+pub(crate) struct Endpoint<Codec> {
     pub(crate) name: String,
     retry: RetryPolicy,
     pub(crate) message_types: Vec<MessageType>,
     // Whether it has an inbox, whose transaction the bus's outbox must be able to write in.
     pub(crate) transactional: bool,
-    pipeline: Box<dyn Pipeline>,
+    pipeline: Box<dyn Pipeline<Codec>>,
+    codec: Arc<Codec>,
 }
 
-impl Endpoint {
+impl<Codec> Endpoint<Codec> {
     // Handles one delivery and settles it. A delivery is acked only once its handler returned
     // `Ok`, its transaction committed, and the handler's publishes are in the outbox or the
     // broker.
@@ -369,8 +390,13 @@ impl Endpoint {
             attempt,
             traceparent = envelope.trace.as_ref().map(|trace| trace.traceparent.as_str()),
         );
-        let context =
-            HandlerContext::new(source.clone(), self.name.clone(), envelope.clone(), attempt);
+        let context = HandlerContext::new(
+            source.clone(),
+            Arc::clone(&self.codec),
+            self.name.clone(),
+            envelope.clone(),
+            attempt,
+        );
 
         let result = match self.pipeline.run(context).instrument(span).await {
             Ok(held) => send_held(transport, &held).await,

@@ -4,8 +4,9 @@ use std::any::type_name;
 use std::error::Error;
 use std::fmt;
 use std::ops::DerefMut;
+use std::sync::Arc;
 
-use sisa_messaging_core::{Correlation, Envelope, Message, Publisher, Source};
+use sisa_messaging_core::{Correlation, Envelope, JsonCodec, Message, Publisher, Source};
 
 use crate::publish::{PublishError, encode};
 
@@ -68,9 +69,11 @@ impl fmt::Display for HandlerError {
 /// and before it acks the delivery.
 ///
 /// `Transaction` is the inbox store's transaction, such as `sqlx::PgTransaction<'static>`, and
-/// `()` on an endpoint without an inbox.
-pub struct HandlerContext<Transaction = ()> {
+/// `()` on an endpoint without an inbox. `Codec` is the bus's [codec](crate::BusBuilder::codec),
+/// which encodes the publishes.
+pub struct HandlerContext<Transaction = (), Codec = JsonCodec> {
     source: Source,
+    pub(crate) codec: Arc<Codec>,
     endpoint: String,
     envelope: Envelope,
     attempt: u32,
@@ -78,10 +81,17 @@ pub struct HandlerContext<Transaction = ()> {
     pub(crate) transaction: Transaction,
 }
 
-impl HandlerContext {
-    pub(crate) fn new(source: Source, endpoint: String, envelope: Envelope, attempt: u32) -> Self {
+impl<Codec> HandlerContext<(), Codec> {
+    pub(crate) fn new(
+        source: Source,
+        codec: Arc<Codec>,
+        endpoint: String,
+        envelope: Envelope,
+        attempt: u32,
+    ) -> Self {
         Self {
             source,
+            codec,
             endpoint,
             envelope,
             attempt,
@@ -91,14 +101,15 @@ impl HandlerContext {
     }
 }
 
-impl<Transaction> HandlerContext<Transaction> {
+impl<Transaction, Codec> HandlerContext<Transaction, Codec> {
     // The same context with another transaction, and the transaction it had.
     pub(crate) fn with_transaction<Other>(
         self,
         transaction: Other,
-    ) -> (HandlerContext<Other>, Transaction) {
+    ) -> (HandlerContext<Other, Codec>, Transaction) {
         let context = HandlerContext {
             source: self.source,
+            codec: self.codec,
             endpoint: self.endpoint,
             envelope: self.envelope,
             attempt: self.attempt,
@@ -127,7 +138,7 @@ impl<Transaction> HandlerContext<Transaction> {
     }
 }
 
-impl<Transaction: DerefMut> HandlerContext<Transaction> {
+impl<Transaction: DerefMut, Codec> HandlerContext<Transaction, Codec> {
     /// The delivery's transaction, on an endpoint with an inbox, such as a `&mut PgConnection`
     /// for sqlx queries. The handler's database work goes here, so it commits with the inbox
     /// receipt, and rolls back with it when the handler fails.
@@ -137,11 +148,13 @@ impl<Transaction: DerefMut> HandlerContext<Transaction> {
 }
 
 // Holds each publish, tied to the handled message, until the handler returns `Ok`.
-impl<Transaction: Send> Publisher for HandlerContext<Transaction> {
+impl<Transaction: Send, Codec: sisa_messaging_core::Codec> Publisher
+    for HandlerContext<Transaction, Codec>
+{
     type Error = PublishError;
 
     async fn publish<Msg: Message>(&mut self, message: &Msg) -> Result<(), PublishError> {
-        let mut envelope = encode(&self.source, message)?;
+        let mut envelope = encode(&self.source, &*self.codec, message)?;
         envelope.correlation = Correlation::new(
             self.envelope.correlation.correlation_id,
             Some(self.envelope.id),
@@ -153,7 +166,7 @@ impl<Transaction: Send> Publisher for HandlerContext<Transaction> {
 }
 
 // Shows which delivery this is and how many publishes it holds, not the data.
-impl<Transaction> fmt::Debug for HandlerContext<Transaction> {
+impl<Transaction, Codec> fmt::Debug for HandlerContext<Transaction, Codec> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HandlerContext")
@@ -170,7 +183,9 @@ impl<Transaction> fmt::Debug for HandlerContext<Transaction> {
 ///
 /// An `async fn` taking the message and `&mut HandlerContext` is a handler, and so is a type
 /// that implements this trait. On an endpoint with an inbox, a handler takes
-/// `&mut HandlerContext<Transaction>`, with the inbox store's transaction, to work in it.
+/// `&mut HandlerContext<Transaction>`, with the inbox store's transaction, to work in it. On a bus
+/// with another [codec](crate::BusBuilder::codec), it takes `&mut HandlerContext<Transaction,
+/// Codec>`.
 ///
 /// ```
 /// use serde::{Deserialize, Serialize};
@@ -194,47 +209,53 @@ impl<Transaction> fmt::Debug for HandlerContext<Transaction> {
 ///     Ok(())
 /// }
 /// ```
-pub trait Handler<Msg, Transaction = ()>: Send + Sync + 'static {
+pub trait Handler<Msg, Transaction = (), Codec = JsonCodec>: Send + Sync + 'static {
     /// Handles a message. An error makes the endpoint retry the delivery, as its
     /// [`RetryPolicy`](crate::RetryPolicy) says.
     fn handle(
         &self,
         message: Msg,
-        context: &mut HandlerContext<Transaction>,
+        context: &mut HandlerContext<Transaction, Codec>,
     ) -> impl Future<Output = Result<(), HandlerError>> + Send;
 }
 
 /// A function that is a [`Handler`] for every lifetime of its context, which Rust can't say in
 /// one bound on stable. Implemented for every such function; not for use on its own.
 #[doc(hidden)]
-pub trait HandlerFn<'ctx, Msg, Transaction: 'ctx>: Send + Sync + 'static {
+pub trait HandlerFn<'ctx, Msg, Transaction: 'ctx, Codec: 'ctx>: Send + Sync + 'static {
     type Future: Future<Output = Result<(), HandlerError>> + Send + 'ctx;
 
-    fn call(&self, message: Msg, context: &'ctx mut HandlerContext<Transaction>) -> Self::Future;
+    fn call(
+        &self,
+        message: Msg,
+        context: &'ctx mut HandlerContext<Transaction, Codec>,
+    ) -> Self::Future;
 }
 
 // Names the future of a handler function, whose type depends on the context's lifetime.
-impl<'ctx, Msg, Transaction: 'ctx, Function, Fut> HandlerFn<'ctx, Msg, Transaction> for Function
+impl<'ctx, Msg, Transaction: 'ctx, Codec: 'ctx, Function, Fut>
+    HandlerFn<'ctx, Msg, Transaction, Codec> for Function
 where
-    Function: Fn(Msg, &'ctx mut HandlerContext<Transaction>) -> Fut + Send + Sync + 'static,
+    Function: Fn(Msg, &'ctx mut HandlerContext<Transaction, Codec>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), HandlerError>> + Send + 'ctx,
 {
     type Future = Fut;
 
-    fn call(&self, message: Msg, context: &'ctx mut HandlerContext<Transaction>) -> Fut {
+    fn call(&self, message: Msg, context: &'ctx mut HandlerContext<Transaction, Codec>) -> Fut {
         self(message, context)
     }
 }
 
-// Lets an `async fn(Msg, &mut HandlerContext<Transaction>)` be a handler.
-impl<Msg, Transaction: 'static, Function> Handler<Msg, Transaction> for Function
+// Lets an `async fn(Msg, &mut HandlerContext<Transaction, Codec>)` be a handler.
+impl<Msg, Transaction: 'static, Codec: 'static, Function> Handler<Msg, Transaction, Codec>
+    for Function
 where
-    Function: for<'ctx> HandlerFn<'ctx, Msg, Transaction>,
+    Function: for<'ctx> HandlerFn<'ctx, Msg, Transaction, Codec>,
 {
     fn handle(
         &self,
         message: Msg,
-        context: &mut HandlerContext<Transaction>,
+        context: &mut HandlerContext<Transaction, Codec>,
     ) -> impl Future<Output = Result<(), HandlerError>> + Send {
         self.call(message, context)
     }
@@ -271,6 +292,7 @@ mod tests {
         ));
         HandlerContext::new(
             Source::new("/billing").unwrap(),
+            Arc::new(JsonCodec),
             "billing".into(),
             envelope,
             1,

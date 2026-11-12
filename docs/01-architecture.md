@@ -126,10 +126,17 @@ pub trait Codec: Send + Sync + 'static {
 }
 ```
 
-In 0.1.0 the bus publishes and receives with `JsonCodec` only: `Codec` has generic methods, so a
-bus can't hold one chosen at run time yet. A delivery whose content type `JsonCodec` can't decode
-goes to the error destination at once. Picking the codec by the envelope's content type, so a
-service can move to another codec while old messages drain, comes with the second codec.
+A bus has one codec, `JsonCodec` unless `BusBuilder::codec` sets another, such as MessagePack or
+Avro over serde. `Codec` has generic methods, so the codec is a type parameter with `JsonCodec` as
+its default: `Bus<Transport, Outbox, Codec>`, and handlers take `HandlerContext<Transaction,
+Codec>`. Every publish, the outbox's and the handlers' included, is encoded with it, and every
+handler decodes with it; a delivery whose content type it can't decode goes to the error
+destination at once. Picking the codec by the envelope's content type, so a service can move to
+another codec while old messages drain, would need a codec chosen at run time.
+
+The library encrypts nothing. An application that must encrypts the data with a codec that wraps
+another, or encrypts fields in the message itself. Either way only the data is encrypted: the
+CloudEvents attributes go in the headers and the outbox's columns as they are.
 
 ### Transport
 
@@ -292,7 +299,7 @@ publishes matter.
 
 For each delivery, an endpoint:
 
-1. Decodes the data with `JsonCodec`. Data that isn't JSON or doesn't decode, and a type the
+1. Decodes the data with the bus's codec. Data of another content type or that doesn't decode, and a type the
    endpoint has no handler for, go to the error destination at once, without retries, since no
    retry can fix them; the delivery is rejected once that publish succeeds, as in step 5.
 2. With an inbox, begins a transaction and records the message. A message recorded before is
