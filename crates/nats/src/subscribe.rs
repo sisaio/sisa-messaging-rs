@@ -4,16 +4,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
+use async_nats::HeaderMap;
 use async_nats::jetstream::context::ConsumerInfoErrorKind;
 use async_nats::jetstream::{self, AckKind, consumer};
-use async_nats::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
 use sisa_messaging_core::{
     Deliveries, Delivery, EndpointSpec, Envelope, TransportError, TransportSubscriber,
 };
 
-use crate::NatsTransport;
-use crate::transport::{CE, MSG_ID, broker};
+use crate::transport::{CE, MSG_ID, broker, insert};
+use crate::{NatsTransport, binding};
 
 impl TransportSubscriber for NatsTransport {
     type Delivery = NatsDelivery;
@@ -109,8 +109,7 @@ impl TransportSubscriber for NatsTransport {
     }
 
     /// Publishes the envelope to `{prefix}._error.{endpoint}`, without `Nats-Msg-Id`, so the
-    /// stream keeps it next to the original of the same id. A line break in an attribute, which
-    /// a NATS header can't hold, becomes a space.
+    /// stream keeps it next to the original of the same id.
     async fn publish_error(
         &self,
         endpoint: &str,
@@ -118,7 +117,7 @@ impl TransportSubscriber for NatsTransport {
     ) -> Result<(), TransportError> {
         let mut headers = HeaderMap::new();
         for (name, value) in envelope.to_attributes() {
-            headers.insert(format!("{CE}{name}"), HeaderValue::from_lossy(&value));
+            insert(&mut headers, &name, &value);
         }
         self.publish_to(self.error_subject(endpoint), headers, envelope.data.clone())
             .await
@@ -147,9 +146,9 @@ impl NatsTransport {
                 }
             }
         }
-        headers.insert(format!("{CE}errorendpoint"), endpoint);
-        headers.insert(format!("{CE}errortype"), "invalid_envelope");
-        headers.insert(format!("{CE}errormessage"), HeaderValue::from_lossy(error));
+        insert(&mut headers, "errorendpoint", endpoint);
+        insert(&mut headers, "errortype", "invalid_envelope");
+        insert(&mut headers, "errormessage", error);
         self.publish_to(
             self.error_subject(endpoint),
             headers,
@@ -181,12 +180,12 @@ impl fmt::Debug for NatsDelivery {
 }
 
 impl NatsDelivery {
-    // Reads the envelope from the `ce-` headers and the body, as the CloudEvents NATS binding
-    // writes it in binary mode, and the attempt from the delivery count.
+    // Reads the envelope from the `ce-` headers, percent-decoded once, and the body, as the
+    // CloudEvents NATS binding writes it in binary mode, and the attempt from the delivery count.
     fn read(message: &jetstream::Message) -> Result<(Envelope, u32), String> {
         let info = message.info().map_err(|error| error.to_string())?;
         let attempt = u32::try_from(info.delivered).unwrap_or(u32::MAX);
-        let attributes: BTreeMap<String, String> = message
+        let attributes = message
             .headers
             .iter()
             .flat_map(HeaderMap::iter)
@@ -194,9 +193,10 @@ impl NatsDelivery {
                 // Header names are compared without case, so `Ce-Id` from another client counts.
                 let name = name.to_string().to_ascii_lowercase();
                 let attribute = name.strip_prefix(CE)?.to_owned();
-                Some((attribute, values.first()?.as_str().to_owned()))
+                let value = binding::decode(values.first()?.as_str());
+                Some(value.map(|value| (attribute, value)))
             })
-            .collect();
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
         let envelope = Envelope::from_attributes(attributes, message.payload.clone())
             .map_err(|error| error.to_string())?;
         Ok((envelope, attempt))

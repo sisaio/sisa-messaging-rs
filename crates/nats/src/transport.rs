@@ -7,7 +7,7 @@ use async_nats::{HeaderMap, HeaderValue, jetstream};
 use bytes::Bytes;
 use sisa_messaging_core::{Envelope, MessageType, TransportError, TransportPublisher};
 
-use crate::NatsSettings;
+use crate::{NatsSettings, binding};
 
 /// The header that JetStream deduplicates publishes by.
 pub(crate) const MSG_ID: &str = "Nats-Msg-Id";
@@ -18,9 +18,10 @@ pub(crate) const CE: &str = "ce-";
 /// The NATS JetStream transport. Clones share one connection.
 ///
 /// It publishes each envelope to `{prefix}.{message type}` as the CloudEvents NATS binding says,
-/// in binary mode: every attribute in a `ce-` header, such as `ce-id` and `ce-type`, and the data
-/// as the body. It also sets `Nats-Msg-Id` to the message id, so the stream drops a second
-/// publish of one message inside its duplicate window.
+/// in binary mode: every attribute in a `ce-` header, such as `ce-id` and `ce-type`, with its value
+/// percent-encoded as the binding asks, and the data as the body. It also sets `Nats-Msg-Id` to
+/// the message id, so the stream drops a second publish of one message inside its duplicate
+/// window.
 #[derive(Debug, Clone)]
 pub struct NatsTransport {
     jetstream: jetstream::Context,
@@ -95,26 +96,31 @@ impl TransportPublisher for NatsTransport {
     async fn publish(&self, envelope: &Envelope) -> Result<(), TransportError> {
         self.publish_to(
             self.subject(&envelope.message_type),
-            headers(envelope)?,
+            headers(envelope),
             envelope.data.clone(),
         )
         .await
     }
 }
 
-/// The NATS headers of an envelope: its CloudEvents attributes as `ce-` headers, and its id as
-/// `Nats-Msg-Id`.
-fn headers(envelope: &Envelope) -> Result<HeaderMap, TransportError> {
+/// The NATS headers of an envelope: its CloudEvents attributes as percent-encoded `ce-` headers,
+/// and its id as `Nats-Msg-Id`.
+fn headers(envelope: &Envelope) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for (name, value) in envelope.to_attributes() {
-        // A line break would end the header, so the server would read the rest as something else.
-        let value: HeaderValue = value
-            .parse()
-            .map_err(|error| broker("writing the CloudEvents headers", error))?;
-        headers.insert(format!("{CE}{name}"), value);
+        insert(&mut headers, &name, &value);
     }
     headers.insert(MSG_ID, envelope.id.to_string());
-    Ok(headers)
+    headers
+}
+
+/// Sets the `ce-` header of an attribute. Percent-encoding leaves only printable ASCII, so a
+/// line break can't end the header early.
+pub(crate) fn insert(headers: &mut HeaderMap, attribute: &str, value: &str) {
+    headers.insert(
+        format!("{CE}{attribute}"),
+        HeaderValue::from_lossy(&binding::encode(value)),
+    );
 }
 
 pub(crate) fn broker(

@@ -106,12 +106,27 @@ async fn connect_to_a_server_that_is_down_errors() {
 }
 
 #[tokio::test]
-async fn an_attribute_with_a_line_break_isnt_published() {
+async fn publish_percent_encodes_the_header_values() {
     let nats = Nats::start().await;
     let transport = NatsTransport::connect(settings(&nats)).await.unwrap();
     let mut envelope = envelope();
-    envelope.subject = Some("42\r\nce-type: forged".into());
+    envelope.subject = Some("Euro € 😀".into());
+    envelope
+        .extensions
+        .insert("note", "42\r\nce-type: forged")
+        .unwrap();
 
-    assert!(transport.publish(&envelope).await.is_err());
-    assert_eq!(stored_messages(&nats).await, 0);
+    transport.publish(&envelope).await.unwrap();
+
+    let stream = nats.jetstream().await.get_stream("SISA").await.unwrap();
+    let message = stream.get_raw_message(1).await.unwrap();
+    let header = |name: &str| message.headers.get(name).map(|value| value.as_str());
+    // The binding's own example.
+    assert_eq!(
+        header("ce-subject"),
+        Some("Euro%20%E2%82%AC%20%F0%9F%98%80")
+    );
+    // A line break can't end the header and forge another.
+    assert_eq!(header("ce-note"), Some("42%0D%0Ace-type:%20forged"));
+    assert_eq!(header("ce-type"), Some("orders.order_placed.v1"));
 }
