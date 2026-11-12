@@ -1,5 +1,6 @@
 //! The value encoding of the CloudEvents NATS binding: a `ce-` header value is percent-encoded,
-//! so it holds only printable ASCII without space, `"` or `%`.
+//! so it holds only printable ASCII without space, `"` or `%`. A receiver also accepts the
+//! double-quoted strings that older versions of the binding allowed.
 
 use std::fmt::Write as _;
 
@@ -20,15 +21,41 @@ pub(crate) fn encode(value: &str) -> String {
     encoded
 }
 
-/// Percent-decodes a header value once. Characters encoded without need are accepted, as the
-/// binding asks.
+/// Removes the double quotes of the quoted strings in a header value and their backslash
+/// escapes, as RFC 7230 section 3.2.6 describes them.
+fn unquote(value: &str) -> Result<String, String> {
+    let mut unquoted = String::with_capacity(value.len());
+    let mut quoted = false;
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '"' => quoted = !quoted,
+            '\\' if quoted => match characters.next() {
+                Some(escaped) => unquoted.push(escaped),
+                None => break,
+            },
+            character => unquoted.push(character),
+        }
+    }
+    if quoted {
+        return Err(format!(
+            "the header value {value:?} has an unterminated quoted string"
+        ));
+    }
+    Ok(unquoted)
+}
+
+/// Decodes a header value as the binding says: its quoted strings are unquoted, then it is
+/// percent-decoded once. Characters encoded without need are accepted.
 ///
 /// # Errors
 ///
-/// When a `%` isn't followed by two hex digits, or the decoded bytes aren't UTF-8.
+/// When a quoted string isn't closed, a `%` isn't followed by two hex digits, or the decoded
+/// bytes aren't UTF-8.
 pub(crate) fn decode(value: &str) -> Result<String, String> {
-    let mut bytes = Vec::with_capacity(value.len());
-    let mut rest = value.as_bytes();
+    let unquoted = unquote(value)?;
+    let mut bytes = Vec::with_capacity(unquoted.len());
+    let mut rest = unquoted.as_bytes();
     while let Some((&byte, after)) = rest.split_first() {
         if byte == b'%' {
             let hex = after
@@ -81,6 +108,25 @@ mod tests {
     #[test]
     fn decodes_needless_encoding_and_lower_case() {
         assert_eq!(decode("%2forders%e2%82%ac").as_deref(), Ok("/orders€"));
+    }
+
+    #[test]
+    fn unquotes_before_percent_decoding() {
+        assert_eq!(decode(r#""order%2042""#).as_deref(), Ok("order 42"));
+        assert_eq!(
+            decode(r#""say \"hi\" \\ 100%25""#).as_deref(),
+            Ok(r#"say "hi" \ 100%"#)
+        );
+        assert_eq!(decode(r#"a"b c"d"#).as_deref(), Ok("ab cd"));
+        // A backslash outside quotes is kept.
+        assert_eq!(decode(r"a\b").as_deref(), Ok(r"a\b"));
+    }
+
+    #[test]
+    fn rejects_an_unterminated_quoted_string() {
+        assert!(decode(r#""order"#).is_err());
+        assert!(decode(r#""order\""#).is_err());
+        assert!(decode(r#""order\"#).is_err());
     }
 
     #[test]
