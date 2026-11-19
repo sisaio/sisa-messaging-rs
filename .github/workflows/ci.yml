@@ -1,5 +1,6 @@
 # Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
-# links, the tests, which run against the newest NATS and PostgreSQL, and coverage on main. The
+# links, the tests, which run against the newest NATS, PostgreSQL, Iggy and Redis, the Redis
+# transport's tests against Valkey and Dragonfly, and coverage on main. The
 # tests start their servers in Docker. PRs and pushes to main that change no Rust inputs skip the
 # Rust jobs; `ci` sums them up for the ruleset.
 name: CI
@@ -66,7 +67,7 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           api=false
           if git diff --no-renames --name-only "$BASE...$HEAD" | grep -qE \
-            '^crates/(core|runtime|nats|iggy|postgres|sisa-messaging)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
+            '^crates/(core|runtime|nats|iggy|redis|postgres|sisa-messaging)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
             api=true
           fi
           echo "api=$api" >> "$GITHUB_OUTPUT"
@@ -119,7 +120,7 @@ jobs:
       # Alone, so the workspace's other members don't turn its features on.
       - name: Build the facade with each feature
         run: |
-          for features in "" nats iggy postgres; do
+          for features in "" nats iggy redis postgres; do
             cargo check -p sisa-messaging --features "$features" --locked
           done
 
@@ -261,7 +262,7 @@ jobs:
       - name: Check the links
         run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 
-  # The newest NATS and PostgreSQL releases only; older servers aren't tested.
+  # The newest NATS, PostgreSQL, Iggy and Redis releases only; older servers aren't tested.
   test:
     name: test
     needs: changes
@@ -272,6 +273,7 @@ jobs:
       NATS_IMAGE: nats:2.15-alpine
       POSTGRES_IMAGE: postgres:18-alpine
       IGGY_IMAGE: apache/iggy:0.10.0
+      REDIS_IMAGE: redis:8.10-alpine
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -286,17 +288,53 @@ jobs:
 
       # Pulled once here, so no test waits on the download.
       - name: Pull the server images
-        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE"
+        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE" && docker pull "$REDIS_IMAGE"
 
-      - name: Run all tests including NATS, PostgreSQL and Iggy
+      - name: Run all tests including NATS, PostgreSQL, Iggy and Redis
         run: cargo test --workspace --all-features --locked
+
+  # The Redis transport's tests on the other servers that speak the Redis protocol, each at its
+  # newest release. Redis itself runs in `test`.
+  redis-family:
+    name: redis-family (${{ matrix.server }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - server: valkey
+            image: valkey/valkey:9.1-alpine
+          - server: dragonfly
+            image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2
+    env:
+      REDIS_IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Pull the server image
+        run: docker pull "$REDIS_IMAGE"
+
+      - name: Run the Redis transport's tests
+        run: cargo test -p sisa-messaging-redis --locked
 
   # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
   # job reports no check, so the jobs themselves can't be required directly.
   ci:
     name: ci
     if: always()
-    needs: [changes, lint, msrv, deny, semver, links, test]
+    needs: [changes, lint, msrv, deny, semver, links, test, redis-family]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:
@@ -316,6 +354,7 @@ jobs:
       NATS_IMAGE: nats:2.15-alpine
       POSTGRES_IMAGE: postgres:18-alpine
       IGGY_IMAGE: apache/iggy:0.10.0
+      REDIS_IMAGE: redis:8.10-alpine
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -334,7 +373,7 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Pull the server images
-        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE"
+        run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE" && docker pull "$REDIS_IMAGE"
 
       - name: Measure coverage
         run: cargo llvm-cov --workspace --all-features --locked --ignore-filename-regex 'crates/testing/' --lcov --output-path lcov.info
