@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -71,6 +71,7 @@ impl TransportSubscriber for RedisTransport {
                 .iter()
                 .map(|message_type| self.stream(message_type))
                 .collect(),
+            held: Mutex::new(Vec::new()),
         });
         group.create().await?;
         let connection = self.blocking_connection(POLL_WAIT).await?;
@@ -102,6 +103,18 @@ struct Group {
     name: String,
     consumer: String,
     streams: Vec<String>,
+    /// The entries this instance holds for a retry, until their delay has passed.
+    held: Mutex<Vec<Held>>,
+}
+
+/// An entry held for a retry: kept fresh, so no other instance takes it over, and delivered
+/// again by this instance once it is due.
+struct Held {
+    stream: String,
+    id: String,
+    attempt: u32,
+    due: Instant,
+    refreshed: Instant,
 }
 
 /// An entry of another consumer, or of a retry, that is due to be taken over.
@@ -197,29 +210,87 @@ impl Group {
         Ok(claimed.ids.into_iter().next())
     }
 
-    /// Sets how long the server takes the entry to have been idle, keeping it for this consumer.
-    /// Returns false when the entry is no longer pending, as after an ack.
-    async fn set_idle(
+    /// Claims an entry of this consumer again, which resets its idle time. With `count`, the
+    /// server counts a delivery and the entry comes back; without, only the id. `None` when the
+    /// entry is no longer pending, as after an ack.
+    async fn claim_own(
         &self,
         stream: &str,
         id: &str,
-        idle: Duration,
-    ) -> Result<bool, TransportError> {
+        count: bool,
+    ) -> Result<Option<StreamId>, TransportError> {
         let mut command = redis::cmd("XCLAIM");
         command
             .arg(stream)
             .arg(&self.name)
             .arg(&self.consumer)
             .arg(0)
-            .arg(id)
-            .arg("IDLE")
-            .arg(millis(idle))
-            .arg("JUSTID");
+            .arg(id);
+        if count {
+            let claimed: StreamClaimReply = self
+                .transport
+                .query("delivering a Redis entry again", &command)
+                .await?;
+            return Ok(claimed.ids.into_iter().next());
+        }
+        command.arg("JUSTID");
         let claimed: Vec<String> = self
             .transport
             .query("holding a Redis entry for a retry", &command)
             .await?;
-        Ok(!claimed.is_empty())
+        Ok(claimed.into_iter().next().map(|claimed_id| StreamId {
+            id: claimed_id,
+            ..StreamId::default()
+        }))
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, Vec<Held>> {
+        self.held.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Refreshes the held entries that have waited half the ack wait since their last refresh,
+    /// and forgets those no longer pending. A failed refresh only lets another instance take the
+    /// entry over sooner.
+    async fn refresh_held(&self) {
+        let now = Instant::now();
+        let refresh = self.ack_wait() / 2;
+        let stale: Vec<(String, String)> = self
+            .held()
+            .iter_mut()
+            .filter(|held| held.refreshed + refresh <= now)
+            .map(|held| {
+                held.refreshed = now;
+                (held.stream.clone(), held.id.clone())
+            })
+            .collect();
+        for (stream, id) in stale {
+            match self.claim_own(&stream, &id, false).await {
+                Ok(Some(_)) => {}
+                Ok(None) => self
+                    .held()
+                    .retain(|held| held.id != id || held.stream != stream),
+                Err(error) => {
+                    tracing::warn!(endpoint = self.name, %error, "could not hold a Redis entry for its retry; another instance may take it over early");
+                }
+            }
+        }
+    }
+
+    /// Takes out one held entry whose delay has passed, if any.
+    fn take_due(&self) -> Option<Held> {
+        let now = Instant::now();
+        let mut held = self.held();
+        let index = held.iter().position(|held| held.due <= now)?;
+        Some(held.swap_remove(index))
+    }
+
+    /// When the reading task next has to act on a held entry.
+    fn next_held_event(&self) -> Option<Instant> {
+        let refresh = self.ack_wait() / 2;
+        self.held()
+            .iter()
+            .map(|held| held.due.min(held.refreshed + refresh))
+            .min()
     }
 
     async fn ack(&self, stream: &str, id: &str) -> Result<(), TransportError> {
@@ -279,6 +350,12 @@ impl Group {
         connection: &mut ConnectionManager,
         reading: &mut Reading,
     ) -> Result<Option<RedisDelivery>, TransportError> {
+        self.refresh_held().await;
+        while let Some(held) = self.take_due() {
+            if let Some(entry) = self.claim_own(&held.stream, &held.id, true).await? {
+                return self.deliver(held.stream, entry, held.attempt).await;
+            }
+        }
         if Instant::now() >= reading.next_look {
             reading.next_look = Instant::now() + self.look_interval();
             reading.looks = reading.looks.wrapping_add(1);
@@ -295,8 +372,10 @@ impl Group {
         }
 
         // `BLOCK 0` would wait forever.
-        let block = reading
-            .next_look
+        let wake = self
+            .next_held_event()
+            .map_or(reading.next_look, |held| held.min(reading.next_look));
+        let block = wake
             .saturating_duration_since(Instant::now())
             .max(Duration::from_millis(1));
         let mut command = redis::cmd("XREADGROUP");
@@ -388,23 +467,6 @@ impl Group {
             .await?;
         self.ack(stream, &entry.id).await
     }
-
-    // Keeps a retried entry fresh for this consumer until `until`, so no instance takes it over
-    // before its delay, then lets it age for the ack wait. A failed refresh only lets it come
-    // back sooner.
-    async fn hold(self: Arc<Self>, stream: String, id: String, until: Instant) {
-        let refresh = (self.ack_wait() / 2).max(Duration::from_millis(10));
-        while Instant::now() < until {
-            tokio::time::sleep_until(until.min(Instant::now() + refresh)).await;
-            match self.set_idle(&stream, &id, Duration::ZERO).await {
-                Ok(true) => {}
-                Ok(false) => return,
-                Err(error) => {
-                    tracing::warn!(endpoint = self.name, %error, "could not hold a Redis entry for its retry; it may come back early");
-                }
-            }
-        }
-    }
 }
 
 // Reads one delivery each time the endpoint has room for it, so none waits long in a buffer
@@ -485,11 +547,11 @@ fn read_envelope(entry: &StreamId) -> Result<Envelope, String> {
 /// A message received on an endpoint through its consumer group.
 ///
 /// [`ack`](Delivery::ack) and [`reject`](Delivery::reject) acknowledge the entry with `XACK`.
-/// [`retry`](Delivery::retry) leaves it pending and sets its idle time, so any instance of the
-/// endpoint takes it over once the delay has passed; a delay longer than the ack wait also keeps
-/// the entry fresh until then, from a task of this instance. The server counts the deliveries,
-/// so the attempt survives a restart. A delivery dropped unsettled comes again after the ack
-/// wait.
+/// [`retry`](Delivery::retry) leaves it pending, and this instance holds it: it claims the entry
+/// again every half ack wait so no other instance takes it over, and delivers it again once the
+/// delay has passed. If the instance stops first, another takes the entry over after the ack wait.
+/// The server counts the deliveries it takes over, so the attempt survives a restart. A delivery
+/// dropped unsettled comes again after the ack wait.
 pub struct RedisDelivery {
     envelope: Envelope,
     attempt: u32,
@@ -526,27 +588,26 @@ impl Delivery for RedisDelivery {
         self.group.ack(&self.stream, &self.id).await
     }
 
-    /// Leaves the entry pending, so it comes again once the delay has passed.
+    /// Leaves the entry pending and holds it, so this instance delivers it again once the delay
+    /// has passed.
     async fn retry(self, delay: Duration) -> Result<(), TransportError> {
-        let ack_wait = self.group.ack_wait();
-        match ack_wait.checked_sub(delay) {
-            Some(idle) => self
-                .group
-                .set_idle(&self.stream, &self.id, idle)
-                .await
-                .map(drop),
-            None => {
-                if self
-                    .group
-                    .set_idle(&self.stream, &self.id, Duration::ZERO)
-                    .await?
-                {
-                    let until = Instant::now() + (delay - ack_wait);
-                    tokio::spawn(Arc::clone(&self.group).hold(self.stream, self.id, until));
-                }
-                Ok(())
-            }
+        // Resets its idle time, and finds out whether it is still this consumer's.
+        if self
+            .group
+            .claim_own(&self.stream, &self.id, false)
+            .await?
+            .is_some()
+        {
+            let now = Instant::now();
+            self.group.held().push(Held {
+                stream: self.stream,
+                id: self.id,
+                attempt: self.attempt.saturating_add(1),
+                due: now + delay,
+                refreshed: now,
+            });
         }
+        Ok(())
     }
 
     /// Acknowledges the entry, so the group never delivers it again.

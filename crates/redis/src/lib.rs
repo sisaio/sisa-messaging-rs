@@ -10,9 +10,9 @@
 //! A stream entry stays pending in its group until it is acknowledged, and Redis has no
 //! negative acknowledgement with a delay. So this crate builds the redelivery from the pending
 //! entries: a delivery left unsettled for [`RedisSettings::ack_wait`], such as one of an instance
-//! that stopped, is taken over by any instance of the endpoint, and a retry sets its entry's idle
-//! time so it is taken over once its delay has passed. The server counts the deliveries, so the
-//! attempt number survives a restart.
+//! that stopped, is taken over by any instance of the endpoint, and a retry is held by its
+//! instance, which keeps the entry claimed and delivers it again once its delay has passed. The
+//! server counts the deliveries, so the attempt number survives a restart.
 //!
 //! It uses only commands that Redis, Valkey and Dragonfly all have, and is tested against the
 //! newest release of each. It connects to one server, or the primary of a replicated one;
