@@ -13,10 +13,11 @@ use sisa_messaging_core::{
 use sisa_messaging_iggy::{IggySettings, IggyTransport};
 use sisa_messaging_nats::{NatsSettings, NatsTransport};
 use sisa_messaging_postgres::PostgresOutbox;
+use sisa_messaging_redis::{RedisSettings, RedisTransport};
 use sisa_messaging_runtime::{
     Bus, DispatchSettings, Handler, HandlerContext, HandlerError, InMemoryTransport, StartError,
 };
-use sisa_messaging_testing::{Iggy, Nats, Postgres, eventually};
+use sisa_messaging_testing::{Iggy, Nats, Postgres, Redis, eventually};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
 
@@ -371,6 +372,47 @@ async fn a_committed_message_reaches_an_iggy_endpoint_with_its_outbox_id() {
     let bus = Bus::builder(
         "/orders",
         IggyTransport::connect(iggy_settings).await.unwrap(),
+    )
+    .outbox(PostgresOutbox::new(pool.clone()))
+    .dispatch(settings())
+    .endpoint("billing", |endpoint| {
+        endpoint.handle::<OrderPlaced>(billing.clone())
+    })
+    .start()
+    .await
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    bus.outbox(&mut tx)
+        .publish(&OrderPlaced { id: 42 })
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    eventually("billing handles the order", async || {
+        !billing.received.lock().unwrap().is_empty()
+    })
+    .await;
+    eventually("the row is dispatched", async || {
+        all_have_status(&pool, "dispatched").await
+    })
+    .await;
+    let [(id, _, _)] = statuses(&pool).await.try_into().unwrap();
+    assert_eq!(*billing.received.lock().unwrap(), [id]);
+    bus.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_committed_message_reaches_a_redis_endpoint_with_its_outbox_id() {
+    let postgres = Postgres::start().await;
+    let redis = Redis::start().await;
+    let pool = migrated(&postgres).await;
+    let mut redis_settings = RedisSettings::default();
+    redis_settings.url = redis.url().to_owned();
+    let billing = Billing::default();
+
+    let bus = Bus::builder(
+        "/orders",
+        RedisTransport::connect(redis_settings).await.unwrap(),
     )
     .outbox(PostgresOutbox::new(pool.clone()))
     .dispatch(settings())

@@ -21,6 +21,8 @@ default = []
 nats = ["dep:sisa-messaging-nats"]
 # The Apache Iggy transport.
 iggy = ["dep:sisa-messaging-iggy"]
+# The Redis Streams transport, for Redis, Valkey and Dragonfly.
+redis = ["dep:sisa-messaging-redis"]
 # The PostgreSQL outbox and inbox.
 postgres = ["dep:sisa-messaging-postgres"]
 
@@ -30,6 +32,7 @@ sisa-messaging-core = { workspace = true }
 sisa-messaging-runtime = { workspace = true }
 sisa-messaging-nats = { workspace = true, optional = true }
 sisa-messaging-iggy = { workspace = true, optional = true }
+sisa-messaging-redis = { workspace = true, optional = true }
 sisa-messaging-postgres = { workspace = true, optional = true }
 
 [dev-dependencies]
