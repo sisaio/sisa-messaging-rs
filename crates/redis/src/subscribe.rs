@@ -127,6 +127,9 @@ struct Due {
 /// What the reading task keeps between reads.
 struct Reading {
     due: VecDeque<Due>,
+    /// New entries a read returned beyond the first: a read over several streams returns up to
+    /// one entry of each, and all of them are already pending for this consumer.
+    ready: VecDeque<(String, StreamId)>,
     next_look: Instant,
     looks: u32,
 }
@@ -351,6 +354,9 @@ impl Group {
         reading: &mut Reading,
     ) -> Result<Option<RedisDelivery>, TransportError> {
         self.refresh_held().await;
+        if let Some((stream, entry)) = reading.ready.pop_front() {
+            return self.deliver(stream, entry, 1).await;
+        }
         while let Some(held) = self.take_due() {
             if let Some(entry) = self.claim_own(&held.stream, &held.id, true).await? {
                 return self.deliver(held.stream, entry, held.attempt).await;
@@ -400,11 +406,13 @@ impl Group {
                 return Err(broker("reading from Redis", error));
             }
         };
-        let Some(key) = read.and_then(|read| read.keys.into_iter().next()) else {
-            return Ok(None);
-        };
-        match key.ids.into_iter().next() {
-            Some(entry) => self.deliver(key.key, entry, 1).await,
+        for key in read.into_iter().flat_map(|read| read.keys) {
+            for entry in key.ids {
+                reading.ready.push_back((key.key.clone(), entry));
+            }
+        }
+        match reading.ready.pop_front() {
+            Some((stream, entry)) => self.deliver(stream, entry, 1).await,
             None => Ok(None),
         }
     }
@@ -470,7 +478,8 @@ impl Group {
 }
 
 // Reads one delivery each time the endpoint has room for it, so none waits long in a buffer
-// while its ack wait runs, until the endpoint's deliveries are dropped.
+// while its ack wait runs, until the endpoint's deliveries are dropped. While the endpoint is busy
+// with a delivery, the entries held for a retry are still kept fresh.
 async fn read(
     group: Arc<Group>,
     mut connection: ConnectionManager,
@@ -478,10 +487,21 @@ async fn read(
 ) {
     let mut reading = Reading {
         due: VecDeque::new(),
+        ready: VecDeque::new(),
         next_look: Instant::now(),
         looks: 0,
     };
-    while let Ok(permit) = sender.reserve().await {
+    loop {
+        let permit = tokio::select! {
+            permit = sender.reserve() => match permit {
+                Ok(permit) => permit,
+                Err(_) => break,
+            },
+            () = tokio::time::sleep(group.look_interval()) => {
+                group.refresh_held().await;
+                continue;
+            }
+        };
         match group.next(&mut connection, &mut reading).await {
             Ok(Some(delivery)) => permit.send(Ok(delivery)),
             Ok(None) => {}

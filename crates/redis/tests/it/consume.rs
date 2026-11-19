@@ -138,6 +138,81 @@ async fn each_endpoint_gets_every_message_of_its_types() {
 }
 
 #[tokio::test]
+async fn messages_of_several_types_published_together_all_come_at_once() {
+    let redis = Redis::start().await;
+    let transport = RedisTransport::connect(settings(&redis)).await.unwrap();
+    let shipping = EndpointSpec::new(
+        "shipping",
+        vec![
+            MessageType::new("orders.order_placed.v1").unwrap(),
+            MessageType::new("orders.order_paid.v1").unwrap(),
+        ],
+    );
+    let mut deliveries = transport.subscribe(&shipping).await.unwrap();
+    // One message in the handler and one waiting in the channel keep the reader from reading, so
+    // its next read finds an entry in both streams.
+    transport.publish(&envelope()).await.unwrap();
+    let handled = next(&mut deliveries).await;
+    transport.publish(&envelope()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let placed = envelope();
+    let paid = envelope_of("orders.order_paid.v1");
+    transport.publish(&placed).await.unwrap();
+    transport.publish(&paid).await.unwrap();
+    handled.ack().await.unwrap();
+    next(&mut deliveries).await.ack().await.unwrap();
+
+    let mut shipped = HashSet::new();
+    for _ in 0..2 {
+        let delivery = next_within(&mut deliveries, Duration::from_secs(5))
+            .await
+            .expect("both messages well within the ack wait");
+        assert_eq!(delivery.attempt(), 1);
+        shipped.insert(delivery.envelope().id);
+        delivery.ack().await.unwrap();
+    }
+    assert_eq!(shipped, HashSet::from([placed.id, paid.id]));
+}
+
+#[tokio::test]
+async fn a_held_retry_isnt_taken_over_while_its_endpoint_is_busy() {
+    let redis = Redis::start().await;
+    let first = quick(&redis).await;
+    let second = quick(&redis).await;
+    let mut first_deliveries = first.subscribe(&billing()).await.unwrap();
+    let retried = envelope();
+    first.publish(&retried).await.unwrap();
+    let delay = Duration::from_secs(3);
+    let retried_at = Instant::now();
+    next(&mut first_deliveries)
+        .await
+        .retry(delay)
+        .await
+        .unwrap();
+    // A second message fills the endpoint's channel and stays unread there.
+    first.publish(&envelope()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut second_deliveries = second.subscribe(&billing()).await.unwrap();
+
+    // The unread message ages in the channel, so the second instance may take that one over.
+    let until = retried_at + delay - Duration::from_millis(500);
+    while let Some(delivery) = next_within(
+        &mut second_deliveries,
+        until.saturating_duration_since(Instant::now()),
+    )
+    .await
+    {
+        assert_ne!(
+            delivery.envelope().id,
+            retried.id,
+            "taken over after {:?}",
+            retried_at.elapsed()
+        );
+        delivery.ack().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn a_retried_message_comes_again_after_its_delay() {
     let redis = Redis::start().await;
     let transport = RedisTransport::connect(settings(&redis)).await.unwrap();
