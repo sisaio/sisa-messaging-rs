@@ -5,7 +5,7 @@ progress. Each milestone is a release.
 
 | Milestone | Goal |
 | --- | --- |
-| 0.1.0 | Done. NATS JetStream, Apache Iggy, PostgreSQL and JSON: publish, consume on durable endpoints, an optional outbox and inbox, retries and an error destination. Simple, but enough to run a service on |
+| 0.1.0 | Done. NATS JetStream, Redis Streams (Redis, Valkey, Dragonfly), Apache Iggy, PostgreSQL and JSON: publish, consume on durable endpoints, an optional outbox and inbox, retries and an error destination. Simple, but enough to run a service on |
 | 0.2.0 | Production readiness: OpenTelemetry metrics and trace propagation, dispatch woken by `LISTEN`/`NOTIFY` instead of polling alone, sending a command to one endpoint, graceful shutdown, benchmarks and a chaos test |
 | 0.3.0 | The Kafka family: Kafka, Redpanda and WarpStream, with retry topics for per-message delays, which Iggy gets too |
 | 0.4.0 | AMQP: RabbitMQ and LavinMQ over AMQP 0-9-1 |
@@ -17,6 +17,7 @@ progress. Each milestone is a release.
 Ideas that wait until users ask for them:
 
 - Ordering by a partition key, through the outbox and on every transport.
+- Redis Cluster and TLS for the Redis transport, and Garnet once it has stream consumer groups.
 - Scheduled messages, through the outbox's due time.
 - Request and response.
 - Sagas, on top of the bus.

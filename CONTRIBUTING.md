@@ -10,7 +10,7 @@ as in CI; a dependency change updates the lock file on purpose and commits it.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-(set -e; for f in "" nats iggy postgres; do cargo check -p sisa-messaging --features "$f" --locked; done)
+(set -e; for f in "" nats iggy redis postgres; do cargo check -p sisa-messaging --features "$f" --locked; done)
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.95 check --workspace --all-targets --all-features --locked
 cargo test --workspace --all-features --locked
@@ -26,19 +26,23 @@ version: `cargo +nightly update -Z direct-minimal-versions`, then `cargo check -
 ## Tests
 
 Unit tests sit at the end of the file they test, in `#[cfg(test)] mod tests`. Tests that put
-several parts together, such as a bus with its dispatcher, or anything on NATS, PostgreSQL or Iggy, go in
-a file in the crate's `tests/it/` folder, which builds as one test binary, so the files run side by
-side. A test that installs something process-wide, such as a meter provider, gets a binary of its
-own. Each NATS, PostgreSQL or Iggy test starts its own server in Docker through
-`sisa-messaging-testing`, so the suite needs Docker and nothing else. `NATS_IMAGE` picks the NATS
-server, `nats:2.15-alpine` by default, `POSTGRES_IMAGE` the database, `postgres:18-alpine` by
-default, and `IGGY_IMAGE` the Iggy server, `apache/iggy:0.10.0` by default. CI tests these newest
-releases only. The Iggy server runs on io_uring, so its container gets the `SYS_NICE` capability
-and no seccomp profile; a Docker that refuses those can't run the Iggy tests.
+several parts together, such as a bus with its dispatcher, or anything on NATS, PostgreSQL, Iggy
+or Redis, go in a file in the crate's `tests/it/` folder, which builds as one test binary, so the
+files run side by side. A test that installs something process-wide, such as a meter provider,
+gets a binary of its own. Each NATS, PostgreSQL, Iggy or Redis test starts its own server in
+Docker through `sisa-messaging-testing`, so the suite needs Docker and nothing else. `NATS_IMAGE`
+picks the NATS server, `nats:2.15-alpine` by default, `POSTGRES_IMAGE` the database,
+`postgres:18-alpine` by default, `IGGY_IMAGE` the Iggy server, `apache/iggy:0.10.0` by default,
+and `REDIS_IMAGE` the Redis server, `redis:8.10-alpine` by default. CI tests these newest releases
+only, and runs the Redis transport's tests on Valkey (`valkey/valkey:9.1-alpine`) and Dragonfly
+(`docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2`) too. The Iggy server runs on io_uring, so
+its container gets the `SYS_NICE` capability and no seccomp profile; a Docker that refuses those
+can't run the Iggy tests.
 
 ```sh
 NATS_IMAGE=nats:2.15-alpine POSTGRES_IMAGE=postgres:18-alpine IGGY_IMAGE=apache/iggy:0.10.0 \
-  cargo test --workspace --all-features
+  REDIS_IMAGE=redis:8.10-alpine cargo test --workspace --all-features
+REDIS_IMAGE=valkey/valkey:9.1-alpine cargo test -p sisa-messaging-redis
 ```
 
 Docker Hub limits anonymous pulls. When a pull fails with `429 Too Many Requests`, run
@@ -131,7 +135,7 @@ Every issue and pull request also gets labels from these groups, so anyone can f
 
 | Group | Labels | Rule |
 | --- | --- | --- |
-| Crate | `crate: sisa-messaging`, `crate: core`, `crate: runtime`, `crate: nats`, `crate: iggy`, `crate: postgres`, `crate: testing`, `ci` | Every part the change touches. |
+| Crate | `crate: sisa-messaging`, `crate: core`, `crate: runtime`, `crate: nats`, `crate: iggy`, `crate: redis`, `crate: postgres`, `crate: testing`, `ci` | Every part the change touches. |
 | Other | `documentation`, `needs info`, `breaking`, `good first issue`, `help wanted` | When they apply. |
 | Automated | `dependencies`, `release` | Set by Dependabot and release-plz on their PRs. |
 
@@ -204,8 +208,8 @@ What was wrong and why this fixes it, wrapped at 72 columns.
 
 - The subject is `type(scope): summary`, at most 72 characters, with no period at the end.
   Write the summary in the imperative: "add", "fix", "keep".
-- The scope is optional. Use it when the change sits in one crate: `core`, `runtime`, `nats`, `iggy`, `postgres`,
-  `testing` or `facade`, or `deps` for a dependency bump.
+- The scope is optional. Use it when the change sits in one crate: `core`, `runtime`, `nats`, `iggy`, `redis`,
+  `postgres`, `testing` or `facade`, or `deps` for a dependency bump.
 - Add `!` after the type or scope for a breaking change (`feat(core)!: ...`), and say how to
   migrate in the body.
 - The body says what changed and why. Put `[skip ci]` there, never in the subject.
