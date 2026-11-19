@@ -14,7 +14,7 @@ transactional outbox and inbox in your own database.
 
 | Part | 0.1.0 | Later |
 | --- | --- | --- |
-| Transport | NATS JetStream; Apache Iggy (experimental) | Kafka, Redpanda, WarpStream, RabbitMQ, LavinMQ |
+| Transport | NATS JetStream; Redis Streams, on Redis, Valkey or Dragonfly; Apache Iggy (experimental) | Kafka, Redpanda, WarpStream, RabbitMQ, LavinMQ |
 | Persistence | PostgreSQL on sqlx | MySQL, SQL Server |
 | Codec | JSON | MessagePack, Avro |
 
