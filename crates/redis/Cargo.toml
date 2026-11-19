@@ -1,0 +1,49 @@
+[package]
+name = "sisa-messaging-redis"
+description = "The Redis Streams transport of Sisa Messaging, for Redis, Valkey and Dragonfly"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+# The tests use sisa-messaging-testing, which isn't published, so a downloaded crate couldn't
+# build them.
+exclude = ["tests/"]
+keywords = ["messaging", "redis", "valkey", "streams", "async"]
+categories = ["asynchronous", "network-programming"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The shared contracts that this crate implements.
+sisa-messaging-core = { workspace = true }
+
+# The Redis client.
+redis = { workspace = true }
+# The settings, read from the application's config.
+serde = { workspace = true }
+# The bytes of a message.
+bytes = { workspace = true }
+# The channel the reading task feeds, as a stream of deliveries.
+futures-util = { workspace = true }
+# The reading task, the channel it feeds and the retry timers.
+tokio = { workspace = true }
+# The consumer names of the instances.
+uuid = { workspace = true }
+# A retry that can't keep its entry or a consumer that can't be removed.
+tracing = { workspace = true }
+
+[dev-dependencies]
+# The bus, to check that the runtime's retries and error destination work over Redis, and a
+# message for it.
+serde = { workspace = true }
+sisa-messaging-runtime = { workspace = true }
+# A Redis server per test, in Docker.
+sisa-messaging-testing = { workspace = true }
+tokio = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
