@@ -12,6 +12,11 @@ ignore = [
   # 0.28, the newest, uses it, for the test containers of the unpublished sisa-messaging-testing.
   # Drop this once testcontainers moves off it.
   { id = "RUSTSEC-2026-0440", reason = "test-only, through testcontainers; no upgrade exists" },
+  # chrono is unmaintained (2026-11, chronotope/chrono#1768), and humantime is too because it wraps
+  # chrono. Neither has a safe upgrade. Only the Iggy client pulls them in, through iggy_common
+  # 0.12, the newest. Drop these once iggy moves off chrono.
+  { id = "RUSTSEC-2026-0543", reason = "only through the Iggy client; no upgrade exists" },
+  { id = "RUSTSEC-2026-0542", reason = "only through the Iggy client; no upgrade exists" },
 ]
 
 [licenses]
