@@ -20,6 +20,9 @@ confidence-threshold = 0.9
 allow = [
   "Apache-2.0",
   "BSD-3-Clause",
+  # xxhash-rust, which the redis client uses for the XXH3 digests of values; the Boost license is
+  # permissive.
+  "BSL-1.0",
   # webpki-roots, Mozilla's root certificates, which the iggy client's HTTP and QUIC clients bundle.
   "CDLA-Permissive-2.0",
   "ISC",
