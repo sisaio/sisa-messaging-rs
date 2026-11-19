@@ -471,11 +471,14 @@ Redis acknowledges one entry at a time but has no negative acknowledgement with 
 is shorter, for entries no consumer has touched for the ack wait (`XPENDING ... IDLE`), and takes
 each over with `XCLAIM`, which only one instance wins and which counts the delivery, so the attempt
 survives a restart. That brings back a delivery left unsettled, such as one of an instance that
-stopped. `retry` leaves the entry pending and sets its idle time with `XCLAIM ... IDLE ... JUSTID`,
-which doesn't count a delivery, so it is taken over once its delay has passed; a delay longer than
-the ack wait is kept fresh by a task of the instance until what is left is shorter. A retried
-message goes behind the ones published after it, and a handler that runs longer than the ack wait
-has its message taken over by another instance.
+stopped. `retry` leaves the entry pending, and the instance holds it in memory: every half ack
+wait it claims the entry again with `XCLAIM ... JUSTID`, which resets the idle time without
+counting a delivery, so no other instance takes it over, and once the delay has passed it claims it
+with `XCLAIM`, which counts the delivery, and delivers it again. An instance that stops with held
+entries leaves them to be taken over after the ack wait, so their delay may come out shorter or
+longer. `XCLAIM ... IDLE` would let the server hold the delay instead, but Dragonfly doesn't honor
+it. A retried message goes behind the ones published after it, and a handler that runs longer than
+the ack wait has its message taken over by another instance.
 
 ### PostgreSQL tables
 
@@ -612,7 +615,7 @@ Settled; reopen only with new evidence.
 | An expired partition is detached by default, dropped only when asked | Detaching keeps the data as a table to archive or query; dropping it is the step nobody can undo |
 | The tables come from plain SQL migrations in `migrations/postgresql`, which the application runs with sqlx-cli or by hand; the SQL names no schema, and the connection's `search_path` picks it | Applications already run sqlx migrations in their deploy pipelines, and a schema per deployment needs no setting of ours. Run in a schema of their own, the migrations keep their own `_sqlx_migrations` table there |
 | NATS uses JetStream, not core NATS | Core NATS has no acknowledgement or redelivery, so it can't be at least once |
-| A Redis retry leaves its entry pending, with its idle time set so it is taken over after the delay; Garnet isn't supported | Redis has no negative acknowledgement with a delay, and an entry acked and appended again would reach every endpoint's group, not only the one retrying. The pending list already gives the takeover after a crash and counts the deliveries. Garnet has no consumer groups yet |
+| A Redis retry leaves its entry pending, held by its instance until the delay has passed; Garnet isn't supported | Redis has no negative acknowledgement with a delay, and an entry acked and appended again would reach every endpoint's group, not only the one retrying. The pending list already gives the takeover after a crash and counts the deliveries. Garnet has no consumer groups yet |
 | An Iggy retry holds its partition and reads it again from the message's offset; retry topics come with the Kafka family | A log commits positions, not messages, so a later message can't be committed past a failed one without losing it on a crash. Holding the partition keeps the order and needs no extra topics |
 | Transports, persistences and codecs are open traits | Users asked to bring their own; sealing them would rule that out. Their docs say which changes a minor release may make |
 | The engine lives in `sisa-messaging-runtime`; database crates implement only store traits; the facade has no code | The dispatcher, the inbox step and partition maintenance would otherwise be copied into every database crate, where only the SQL differs |

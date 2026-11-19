@@ -40,7 +40,7 @@ codecs, and a documented cross-language format together. The clients we build on
 | Endpoint | Durable pull consumer | Consumer group | Queue bound to the exchange | Consumer group | Consumer group, a consumer per instance |
 | Fan-out | One consumer per endpoint on the stream | One group per endpoint | One queue per endpoint | One group per endpoint | One group per endpoint |
 | Ack | `ack` | Commit the offset | `basic.ack` | Store the offset | `XACK` |
-| Retry later | `nak` with a delay | No per-message delay: a retry topic, or pause and seek | Reject to a delay queue, or a dead letter exchange with a TTL | Hold the partition and seek back to the message after the delay; later messages of its partition wait | Leave it pending with its idle time set by `XCLAIM`, so it is taken over once the delay has passed |
+| Retry later | `nak` with a delay | No per-message delay: a retry topic, or pause and seek | Reject to a delay queue, or a dead letter exchange with a TTL | Hold the partition and seek back to the message after the delay; later messages of its partition wait | Leave it pending and claimed by the instance until the delay has passed, then claim it again |
 | Give up | `term`, then the error subject | The error topic | `basic.reject` without requeue, to a dead letter exchange | The error topic | `XACK`, after the error stream |
 | Broker dedup | `Nats-Msg-Id` within the duplicate window | Idempotent producer, within one session only | None | None | None in Valkey and Dragonfly; Redis 8.6 added `XADD IDMP` |
 | Order | Per subject, while one consumer holds the messages | Per partition | Per queue, without redelivery | Per partition | Per stream, while one consumer reads it |
