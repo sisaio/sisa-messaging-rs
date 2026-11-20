@@ -1,0 +1,14 @@
+# The repository's milestones. .github/workflows/repo-settings.yml syncs GitHub with this file on
+# each push to main that changes it, so edit here, not on GitHub. The readable version is ROADMAP.md.
+#
+# A milestone is a release: it stays open until that release is published. Each is
+# { title, description } and, optionally, `due_on` (YYYY-MM-DD, the target date) and
+# `state: closed` once its release is out. A milestone that exists keeps its number and its issues;
+# one taken out of this file is left as it is on GitHub.
+
+- { title: "0.1.0", state: closed, description: "First release: NATS JetStream, Redis Streams, Apache Iggy, PostgreSQL and JSON, with an optional outbox and inbox." }
+- { title: "0.2.0", description: "Production readiness: metrics, trace propagation, prompt dispatch, commands, graceful shutdown, benchmarks." }
+- { title: "0.3.0", description: "The Kafka family: Kafka, Redpanda and WarpStream." }
+- { title: "0.4.0", description: "AMQP: RabbitMQ and LavinMQ." }
+- { title: "0.5.0", description: "More databases: MySQL and SQL Server." }
+- { title: "0.6.0", description: "More codecs: MessagePack and Avro." }

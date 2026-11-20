@@ -7,32 +7,50 @@ reviews:
   # Short walkthroughs: one maintainer reviews, so no reviewer suggestions, and no poem.
   poem: false
   suggested_reviewers: false
-  # Suggest labels, never apply them: a PR carries its crate labels and, when it breaks the public
-  # API or a data format, `breaking`, which the semver check reads.
+  # Suggest labels, never apply them: a PR carries its `type:` label, the `area:` label of each
+  # part it touches and, when it breaks the public API or a data format, `breaking`, which the
+  # semver check reads. The names come from .github/labels.yml.
   suggested_labels: true
   auto_apply_labels: false
   labeling_instructions:
-    - label: "crate: core"
+    - label: "type:feature"
+      instructions: The PR title's type is feat.
+    - label: "type:bug"
+      instructions: The PR title's type is fix or revert.
+    - label: "type:security"
+      instructions: The PR title's type is security.
+    - label: "type:perf"
+      instructions: The PR title's type is perf.
+    - label: "type:docs"
+      instructions: The PR title's type is docs.
+    - label: "type:chore"
+      instructions: The PR title's type is refactor, test, build, ci or chore, and it isn't a dependency update.
+    - label: "area:core"
       instructions: The PR changes crates/core.
-    - label: "crate: runtime"
+    - label: "area:runtime"
       instructions: The PR changes crates/runtime.
-    - label: "crate: nats"
+    - label: "area:nats"
       instructions: The PR changes crates/nats.
-    - label: "crate: postgres"
-      instructions: The PR changes crates/postgres.
-    - label: "crate: testing"
+    - label: "area:iggy"
+      instructions: The PR changes crates/iggy.
+    - label: "area:redis"
+      instructions: The PR changes crates/redis.
+    - label: "area:postgres"
+      instructions: The PR changes crates/postgres or migrations/postgresql.
+    - label: "area:testing"
       instructions: The PR changes crates/testing.
-    - label: "crate: sisa-messaging"
+    - label: "area:facade"
       instructions: The PR changes crates/sisa-messaging, the facade crate.
-    - label: ci
+    - label: "area:ci"
       instructions: The PR changes .github/workflows, .github/scripts or .githooks.
     - label: breaking
       instructions: >-
-        The PR breaks what CONTRIBUTING.md's "What the public API is" lists: it removes or
+        The PR breaks what CONTRIBUTING.md's "Public API and breaking changes" lists: it removes or
         changes a public item that isn't `#[doc(hidden)]`, a settings field name or default, a
         metric or span name or attribute, the wire format (headers and data), the subject, stream
-        and consumer names, or the outbox and inbox tables, or moves to an async-nats or sqlx release that breaks its API. A new item,
-        setting or error variant isn't breaking. A commit subject with `!` always is.
+        and consumer names, or the outbox and inbox tables, or moves to an async-nats or sqlx
+        release that breaks its API. A new item, setting or error variant isn't breaking. A commit
+        subject with `!` always is.
 
   # Approve a PR once its findings are resolved, so Scorecard's Code-Review check sees the review.
   # The author can't approve their own PR with `@coderabbitai approve`.
@@ -48,7 +66,7 @@ reviews:
   path_instructions:
     - path: "crates/**/*.rs"
       instructions: >-
-        Check the rules in docs/01-architecture.md: a message is acknowledged only after its
+        Check the rules in docs/architecture.md and the crate's spec in docs/specs: a message is acknowledged only after its
         handler's work is committed; an outbox row is written in the caller's transaction, never
         in one of its own; only the clock module reads the wall clock; no new dependency in a
         library crate. Look for a lock held across `.await`, a transaction held across a
@@ -59,7 +77,8 @@ reviews:
       instructions: >-
         Diagrams are Mermaid, and tables beat long lists. Every relative link and `#anchor` must
         resolve. A change to the headers, the body or the outbox and inbox tables must update
-        Data formats in docs/01-architecture.md.
+        docs/formats.md. A change to what a crate does must update its spec in docs/specs. An
+        accepted ADR in docs/adr is never rewritten: a new one supersedes it.
     - path: ".github/workflows/*.yml"
       instructions: >-
         Every action is pinned to a full commit SHA with its version in a comment. Workflow names
@@ -74,9 +93,10 @@ reviews:
       mode: warning
       requirements: >-
         Conventional Commits as CONTRIBUTING.md says: `type(scope): summary`, at most 72
-        characters, no period at the end, the summary in the imperative. The type is one of feat,
-        fix, perf, refactor, docs, test, build, ci, chore or revert. The scope is optional: core,
-        runtime, nats, iggy, redis, postgres, testing, facade or deps. A breaking change adds `!` after the type or scope.
+        characters, no period at the end, the summary in the imperative and starting lowercase.
+        The type is one of feat, fix, perf, refactor, docs, test, build, ci, chore, revert or
+        security. The scope is optional: core, runtime, nats, iggy, redis, postgres, testing,
+        facade, deps, docs or release. A breaking change adds `!` after the type or scope.
 
   # Commits on a PR come from its author only, so CodeRabbit doesn't write docstrings or tests.
   finishing_touches:
@@ -104,5 +124,7 @@ knowledge_base:
       - CONTRIBUTING.md
       - files: .agents/skills/review-changes/SKILL.md
         applyTo: "**"
-      - files: docs/01-architecture.md
+      - files: docs/architecture.md
+        applyTo: "**"
+      - files: docs/adr/README.md
         applyTo: "**"
