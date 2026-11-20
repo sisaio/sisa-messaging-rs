@@ -20,7 +20,7 @@ consumers that don't know CloudEvents still read a plain body.
 | `datacontenttype` | Yes | The codec's content type, such as `application/json` |
 | `subject` | No | What the message is about within the source, such as an order id |
 | `dataschema` | No | The schema's URI, for Avro and other schema codecs |
-| `partitionkey` | No | Messages with one key keep their order; the CloudEvents Partitioning extension. The Kafka message key; a NATS subject token later |
+| `partitionkey` | No | A routing key, the CloudEvents Partitioning extension: the Kafka message key, the Iggy partition, a NATS subject token later. Order per key is not guaranteed |
 | `traceparent`, `tracestate` | No | W3C Trace Context, per the CloudEvents Distributed Tracing extension |
 | `correlationid` | No | Our extension: the id that ties a conversation together |
 | `causationid` | No | Our extension: the id of the message whose handler published this one |

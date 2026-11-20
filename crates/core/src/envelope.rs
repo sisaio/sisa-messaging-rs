@@ -292,7 +292,8 @@ pub struct Envelope {
     pub content_type: ContentType,
     /// `dataschema`: the URI of the data's schema, for schema codecs such as Avro.
     pub data_schema: Option<String>,
-    /// `partitionkey`: messages with one key keep their order, where the transport can.
+    /// `partitionkey`: picks the partition where the transport has them. Order per key is not
+    /// guaranteed.
     pub partition_key: Option<String>,
     /// `correlationid` and `causationid`.
     pub correlation: Correlation,

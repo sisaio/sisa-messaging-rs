@@ -28,8 +28,8 @@ const MAX_HEADER: usize = 255;
 /// [`IggySettings::stream`], creating the topic with [`IggySettings::partitions`] partitions when
 /// it is missing. The Iggy message id is the envelope's id, every CloudEvents attribute goes in a
 /// `ce_` string user header, such as `ce_id` and `ce_type`, and the data is the payload. An
-/// envelope with a `partitionkey` goes to the partition its key picks, so messages with one key
-/// keep their order; the others are spread over the partitions.
+/// envelope with a `partitionkey` goes to the partition its key picks; the others are spread over
+/// the partitions. Order per key is not guaranteed: a retry puts a message behind later ones.
 ///
 /// Iggy takes at most 255 bytes in a header value and no empty data, so such an envelope isn't
 /// published. Iggy doesn't drop a second publish of one id, so an outbox row published twice

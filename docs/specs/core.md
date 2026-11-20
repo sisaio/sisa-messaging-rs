@@ -32,7 +32,7 @@ pub struct Envelope {
     pub subject: Option<String>,        // ce-subject: what the message is about, such as an order id
     pub content_type: ContentType,      // ce-datacontenttype: from the codec
     pub data_schema: Option<String>,    // ce-dataschema: for Avro later
-    pub partition_key: Option<String>,  // ce-partitionkey: messages with one key keep their order
+    pub partition_key: Option<String>,  // ce-partitionkey: picks the partition where the transport has them; order per key is not guaranteed
     pub correlation: Correlation,       // ce-correlationid, ce-causationid
     pub trace: Option<TraceContext>,    // ce-traceparent, ce-tracestate (W3C)
     pub extensions: Extensions,         // any other ce- attribute, kept as it came

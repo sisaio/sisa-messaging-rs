@@ -15,8 +15,8 @@ Each mode builds on the one before:
 | Mode | What you get | What you need |
 | --- | --- | --- |
 | Plain messaging | Publish, and handlers on durable endpoints, at least once | A transport |
-| With the outbox | A message is published if and only if the transaction that wrote it commits | A persistence |
-| With the inbox | A redelivered message doesn't run its handler's transaction twice | A persistence |
+| With the outbox | A message is published only if the transaction that wrote it commits. After the commit it is published, or kept as a `failed` row to send again once every attempt has failed | A persistence |
+| With the inbox | A redelivered message doesn't run its handler's transaction twice, while its receipt is kept | A persistence |
 
 ## Layout
 
