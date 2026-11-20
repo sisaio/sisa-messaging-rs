@@ -34,7 +34,8 @@ transports and codecs, and a documented cross-language format together.
 ## Consequences
 
 - Only the caller's transaction makes the row commit or roll back with the business data, so a
-  message is published if and only if its transaction commits.
+  message is published only if its transaction commits. A committed row is published, or stays
+  `failed` for a person to send again once every attempt has failed.
 - Ids already sort by creation, so the table has one column fewer, and MySQL and SQL Server will
   need no identity column on a partitioned table. Rows from two instances in the same
   millisecond may swap, which the guarantees already allow.

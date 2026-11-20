@@ -22,7 +22,9 @@ claim. On a partitioned table, a primary key only holds inside one partition.
 
 - Expiring a partition is one cheap statement that leaves no bloat.
 - A redelivery carries the same envelope, so its receipt lands in the same partition as the
-  first one and the primary key catches it, however many days later it comes.
+  first one and the unique constraint on endpoint, message id and message time
+  (`uq_inbox_receipts_endpoint_message`) catches it, while that partition is kept. The primary
+  key can't: each receipt gets a new id.
 - Detaching keeps the data as a table to archive or query; dropping it is the step nobody can
   undo.
 - The inbox retention must be longer than the longest redelivery, or a very late redelivery is
@@ -35,5 +37,5 @@ claim. On a partitioned table, a primary key only holds inside one partition.
 - **Deleting dispatched and old rows with `DELETE`:** needs vacuum, slows the claim, and removes
   business data by default.
 - **Partitioning the inbox by when the receipt was written:** a redelivery on another day would
-  land in another partition, where the primary key can't see the first receipt.
+  land in another partition, where the unique constraint can't see the first receipt.
 - **Dropping an expired partition by default:** it can't be undone.

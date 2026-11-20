@@ -20,7 +20,7 @@ transaction picks one:
 | Publisher | Where it sends | When to use it |
 | --- | --- | --- |
 | `Bus` | Straight to the broker; returns when the broker has it | Outside a database transaction: before it begins or after it commits |
-| `OutboxPublisher`, from `bus.outbox(&mut tx)` | A row in `outbox_messages`, in the caller's transaction; the dispatcher sends it after the commit | Inside the caller's transaction, so the message goes out if and only if it commits |
+| `OutboxPublisher`, from `bus.outbox(&mut tx)` | A row in `outbox_messages`, in the caller's transaction; the dispatcher sends it after the commit | Inside the caller's transaction, so the message goes out only if it commits. A committed row that fails every attempt stays `failed` and isn't sent until it is set back to `pending` |
 | `HandlerContext` | As the endpoint is set up: a row in the handler's transaction on an endpoint with an inbox and a bus with an outbox, otherwise held and sent after the handler succeeds | Inside a handler |
 
 ```rust,ignore
@@ -90,7 +90,9 @@ For each delivery, an endpoint:
    committed and acked here.
 3. Runs the handler.
 4. On success, writes the handler's publishes to the outbox (or holds them), commits, sends any
-   held publishes, then acks.
+   held publishes, then acks. With an inbox and no outbox, the held publishes are sent after the
+   commit, which can't be rolled back: if the process stops or a send fails, the redelivery finds
+   the receipt and is acked without running the handler, so those publishes are lost.
 5. On an error, rolls back and asks the transport to retry after the retry policy's delay: 5
    attempts by default, 1 second after the first failure and twice as long after each next one,
    at most a minute. A handler that panics fails like one that returns an error. Past
@@ -127,7 +129,9 @@ sent and handled. Both tables are range-partitioned by time, one partition per d
 - **The outbox** is partitioned by `created_at`, when the row was written.
 - **The inbox** is partitioned by `message_time`, the envelope's own `time`, not by when the
   receipt was written. A redelivery carries the same envelope, so its receipt falls in the same
-  partition and the primary key catches it, however many days later it comes.
+  partition and the unique constraint on endpoint, message id and message time catches it, while
+  that partition is kept. Once the partition has expired, a redelivery is handled again, so keep
+  the inbox longer than the longest redelivery.
 - **Maintenance** is a runtime worker the bus starts for each table given to
   `BusBuilder::partitions`, such as `PostgresPartitions::outbox(pool)`; the store only runs the
   DDL. Once an hour, with one instance at a time through a session advisory lock on the table, it

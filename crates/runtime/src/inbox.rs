@@ -66,7 +66,7 @@ impl<Transaction> HandlerOutbox<Transaction> for NoOutbox {
     }
 }
 
-// Writes them to the outbox in the handler's transaction, so they go out if and only if it
+// Writes them to the outbox in the handler's transaction, so they go out only if it
 // commits.
 impl<Store, Transaction> HandlerOutbox<Transaction> for Store
 where
