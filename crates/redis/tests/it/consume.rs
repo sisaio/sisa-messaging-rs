@@ -265,7 +265,7 @@ async fn a_held_retry_taken_over_elsewhere_isnt_taken_back() {
     transport.publish(&envelope()).await.unwrap();
     next(&mut deliveries)
         .await
-        .retry(Duration::from_secs(1))
+        .retry(Duration::from_secs(2))
         .await
         .unwrap();
     // Another instance takes the entry over, as after this one stalled past the ack wait.
@@ -283,10 +283,10 @@ async fn a_held_retry_taken_over_elsewhere_isnt_taken_back() {
         .await
         .unwrap();
 
-    // Neither the refresh nor the due delivery claims it back, before the ack wait lets this
-    // instance take it over from the other.
+    // Neither the refresh at half the ack wait nor the due delivery after it claims it back,
+    // before the ack wait lets this instance take it over from the other.
     assert!(
-        next_within(&mut deliveries, Duration::from_secs(2))
+        next_within(&mut deliveries, Duration::from_millis(2500))
             .await
             .is_none()
     );
@@ -433,18 +433,34 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_stream() {
     );
 }
 
+/// The `XADD` of a valid envelope's fields, with `extra` after them.
+fn raw_envelope(id: &str, extra: &[(&[u8], &[u8])]) -> redis::Cmd {
+    let mut command = redis::cmd("XADD");
+    command.arg("sisa:orders.order_placed.v1").arg("*");
+    for (name, value) in [
+        (b"ce_specversion".as_slice(), b"1.0".as_slice()),
+        (b"ce_id", id.as_bytes()),
+        (b"ce_type", b"orders.order_placed.v1"),
+        (b"ce_source", b"/orders"),
+        (b"ce_time", b"2026-11-20T00:00:00Z"),
+        (b"ce_datacontenttype", b"application/json"),
+    ]
+    .into_iter()
+    .chain(extra.iter().copied())
+    {
+        command.arg(name).arg(value);
+    }
+    command.arg("data").arg(b"{}".as_slice());
+    command
+}
+
 #[tokio::test]
 async fn an_entry_with_a_field_name_that_isnt_utf8_goes_to_the_error_stream() {
     let redis = Redis::start().await;
     let transport = RedisTransport::connect(settings(&redis)).await.unwrap();
     let mut deliveries = transport.subscribe(&billing()).await.unwrap();
-    redis::cmd("XADD")
-        .arg("sisa:orders.order_placed.v1")
-        .arg("*")
-        .arg(b"\xffname".as_slice())
-        .arg("legacy")
-        .arg("data")
-        .arg("plain")
+    let id = envelope().id.to_string();
+    raw_envelope(&id, &[(b"ce_\xffx", b"legacy")])
         .query_async::<String>(&mut redis.connection().await)
         .await
         .unwrap();
@@ -455,7 +471,7 @@ async fn an_entry_with_a_field_name_that_isnt_utf8_goes_to_the_error_stream() {
     assert_eq!(delivery.envelope().id, envelope.id);
     delivery.ack().await.unwrap();
 
-    // The copy keeps the name as it came.
+    // The copy keeps the name as it came, and the error names it.
     let copies: Vec<(String, Vec<Vec<u8>>)> = redis::cmd("XRANGE")
         .arg("sisa:_error:billing")
         .arg("-")
@@ -471,9 +487,32 @@ async fn an_entry_with_a_field_name_that_isnt_utf8_goes_to_the_error_stream() {
             .find(|pair| pair[0] == name)
             .map(|pair| pair[1].clone())
     };
-    assert_eq!(field(b"\xffname"), Some(b"legacy".to_vec()));
-    assert_eq!(field(b"data"), Some(b"plain".to_vec()));
-    assert_eq!(field(b"ce_errortype"), Some(b"invalid_envelope".to_vec()));
+    assert_eq!(field(b"ce_\xffx"), Some(b"legacy".to_vec()));
+    assert_eq!(field(b"ce_id"), Some(id.into_bytes()));
+    assert_eq!(
+        field(b"ce_errormessage"),
+        Some(
+            "the field name ce_\u{fffd}x isn't UTF-8 text"
+                .as_bytes()
+                .to_vec()
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_content_type_field_is_read_only_without_the_cloudevents_attribute() {
+    let redis = Redis::start().await;
+    let transport = RedisTransport::connect(settings(&redis)).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    let id = envelope().id.to_string();
+    raw_envelope(&id, &[(b"content-type", b"\xff")])
+        .query_async::<String>(&mut redis.connection().await)
+        .await
+        .unwrap();
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope().id.to_string(), id);
+    delivery.ack().await.unwrap();
 }
 
 #[tokio::test]
