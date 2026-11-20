@@ -458,7 +458,7 @@ The same names and commands on Redis, Valkey and Dragonfly.
 | --- | --- | --- |
 | Stream | `{prefix}:{message type}`, created by the first publish or subscribe | `sisa:orders.order_placed.v1` |
 | Consumer group | The endpoint name, on the stream of each message type it handles. A new one starts with the messages published after it is created, and a stream deleted since gets its group back the same way | `billing` |
-| Consumer | One per instance and subscription, named with a UUID version 7. One with nothing pending that hasn't read for an hour is removed by another instance | `019a9b5e-...` |
+| Consumer | One per instance and subscription, named with a UUID version 7. One with nothing pending that hasn't read for an hour is removed by another instance, in a Lua script that checks again that nothing is pending | `019a9b5e-...` |
 | Error stream | `{prefix}:_error:{endpoint}` | `sisa:_error:billing` |
 
 The prefix keeps deployments that share a server apart, such as `prod` and `staging`. A stream has
@@ -474,11 +474,13 @@ survives a restart. That brings back a delivery left unsettled, such as one of a
 stopped. `retry` leaves the entry pending, and the instance holds it in memory: every half ack
 wait it claims the entry again with `XCLAIM ... JUSTID`, which resets the idle time without
 counting a delivery, so no other instance takes it over, and once the delay has passed it claims it
-with `XCLAIM`, which counts the delivery, and delivers it again. An instance that stops with held
-entries leaves them to be taken over after the ack wait, so their delay may come out shorter or
-longer. `XCLAIM ... IDLE` would let the server hold the delay instead, but Dragonfly doesn't honor
-it. A retried message goes behind the ones published after it, and a handler that runs longer than
-the ack wait has its message taken over by another instance.
+with `XCLAIM`, which counts the delivery, and delivers it again. Both claims run in a Lua script
+that first checks with `XPENDING` that the entry is still the instance's, so one that stalled past
+the ack wait doesn't take back an entry another instance has taken over. An instance that stops
+with held entries leaves them to be taken over after the ack wait, so their delay may come out
+shorter or longer. `XCLAIM ... IDLE` would let the server hold the delay instead, but Dragonfly
+doesn't honor it. A retried message goes behind the ones published after it, and a handler that
+runs longer than the ack wait has its message taken over by another instance.
 
 ### PostgreSQL tables
 

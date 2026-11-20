@@ -36,6 +36,29 @@ const IDLE_CONSUMER: Duration = Duration::from_secs(60 * 60);
 /// How many looks for entries to take over come between two looks for idle consumers.
 const LOOKS_PER_CLEAN_UP: u32 = 60;
 
+/// Claims an entry again, with no minimum idle time, only while this consumer still owns it, so
+/// an instance that stalled can't take back an entry another one has taken over since. KEYS[1]
+/// is the stream; ARGV is the group, the consumer, the id and `1` for `JUSTID`. Replies with
+/// what `XCLAIM` does, or an empty list.
+const CLAIM_OWN: &str = r"
+if #redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[3], ARGV[3], 1, ARGV[2]) == 0 then
+  return {}
+end
+if ARGV[4] == '1' then
+  return redis.call('XCLAIM', KEYS[1], ARGV[1], ARGV[2], 0, ARGV[3], 'JUSTID')
+end
+return redis.call('XCLAIM', KEYS[1], ARGV[1], ARGV[2], 0, ARGV[3])
+";
+
+/// Removes a consumer only while it has nothing pending, since its pending entries would become
+/// unclaimable. KEYS[1] is the stream; ARGV is the group and the consumer.
+const REMOVE_IDLE_CONSUMER: &str = r"
+if #redis.call('XPENDING', KEYS[1], ARGV[1], '-', '+', 1, ARGV[2]) > 0 then
+  return 0
+end
+return redis.call('XGROUP', 'DELCONSUMER', KEYS[1], ARGV[1], ARGV[2])
+";
+
 // The Kafka binding's header for the content type.
 const CONTENT_TYPE: &str = "content-type";
 
@@ -183,10 +206,19 @@ impl Group {
                 .arg("-")
                 .arg("+")
                 .arg(CLAIM_BATCH);
-            let pending: StreamPendingCountReply = self
+            let pending: StreamPendingCountReply = match self
                 .transport
                 .query("reading the pending Redis entries", &command)
-                .await?;
+                .await
+            {
+                Ok(pending) => pending,
+                // A stream deleted since gets its group back, with nothing pending.
+                Err(error) if code(&error) == Some("NOGROUP") => {
+                    self.create().await?;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             due.extend(pending.ids.into_iter().map(|entry| Due {
                 stream: stream.clone(),
                 id: entry.id,
@@ -197,8 +229,8 @@ impl Group {
     }
 
     /// Takes an entry over for this consumer if it is still idle for the ack wait, so only one
-    /// instance gets it. The server counts the delivery.
-    async fn take_over(&self, due: &Due) -> Result<Option<StreamId>, TransportError> {
+    /// instance gets it, with its attempt. The server counts the delivery.
+    async fn take_over(&self, due: &Due) -> Result<Option<(StreamId, u32)>, TransportError> {
         let mut command = redis::cmd("XCLAIM");
         command
             .arg(&due.stream)
@@ -210,25 +242,57 @@ impl Group {
             .transport
             .query("taking over a Redis entry", &command)
             .await?;
-        Ok(claimed.ids.into_iter().next())
+        let Some(entry) = claimed.ids.into_iter().next() else {
+            return Ok(None);
+        };
+        Ok(Some((entry, self.delivered(due).await)))
+    }
+
+    /// How many times the server has delivered an entry this consumer just took over, which is
+    /// its attempt: the count of the look that found it is behind if another instance took it
+    /// over in between. Freshly claimed, no other instance takes it over before this reads.
+    async fn delivered(&self, due: &Due) -> u32 {
+        let mut command = redis::cmd("XPENDING");
+        command
+            .arg(&due.stream)
+            .arg(&self.name)
+            .arg(&due.id)
+            .arg(&due.id)
+            .arg(1)
+            .arg(&self.consumer);
+        let delivered = match self
+            .transport
+            .query::<StreamPendingCountReply>("reading a Redis entry's deliveries", &command)
+            .await
+        {
+            Ok(pending) => pending.ids.first().map(|entry| entry.times_delivered),
+            Err(error) => {
+                tracing::warn!(endpoint = self.name, %error, "could not read a Redis entry's deliveries; its attempt may be low");
+                None
+            }
+        };
+        let delivered = delivered.unwrap_or(due.delivered.saturating_add(1));
+        u32::try_from(delivered).unwrap_or(u32::MAX)
     }
 
     /// Claims an entry of this consumer again, which resets its idle time. With `count`, the
     /// server counts a delivery and the entry comes back; without, only the id. `None` when the
-    /// entry is no longer pending, as after an ack.
+    /// entry is no longer this consumer's: acked, or taken over by another instance.
     async fn claim_own(
         &self,
         stream: &str,
         id: &str,
         count: bool,
     ) -> Result<Option<StreamId>, TransportError> {
-        let mut command = redis::cmd("XCLAIM");
+        let mut command = redis::cmd("EVAL");
         command
+            .arg(CLAIM_OWN)
+            .arg(1)
             .arg(stream)
             .arg(&self.name)
             .arg(&self.consumer)
-            .arg(0)
-            .arg(id);
+            .arg(id)
+            .arg(if count { "0" } else { "1" });
         if count {
             let claimed: StreamClaimReply = self
                 .transport
@@ -236,7 +300,6 @@ impl Group {
                 .await?;
             return Ok(claimed.ids.into_iter().next());
         }
-        command.arg("JUSTID");
         let claimed: Vec<String> = self
             .transport
             .query("holding a Redis entry for a retry", &command)
@@ -329,9 +392,11 @@ impl Group {
                 {
                     continue;
                 }
-                let mut remove = redis::cmd("XGROUP");
+                // It may have read since the look, so the pending check is made again.
+                let mut remove = redis::cmd("EVAL");
                 remove
-                    .arg("DELCONSUMER")
+                    .arg(REMOVE_IDLE_CONSUMER)
+                    .arg(1)
                     .arg(stream)
                     .arg(&self.name)
                     .arg(&consumer.name);
@@ -371,8 +436,7 @@ impl Group {
             reading.due = self.look_for_due().await?;
         }
         while let Some(due) = reading.due.pop_front() {
-            if let Some(entry) = self.take_over(&due).await? {
-                let attempt = u32::try_from(due.delivered.saturating_add(1)).unwrap_or(u32::MAX);
+            if let Some((entry, attempt)) = self.take_over(&due).await? {
                 return self.deliver(due.stream, entry, attempt).await;
             }
         }
