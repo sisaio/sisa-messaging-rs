@@ -465,6 +465,15 @@ The prefix keeps deployments that share a server apart, such as `prod` and `stag
 no partitions: an endpoint's instances read each stream as competing consumers, and a
 `partitionkey` is carried but picks nothing.
 
+An instance reads only when its endpoint asks for the next delivery, so no entry waits read in a
+buffer while its ack wait runs. A read over several streams returns up to one entry of each; those
+beyond the first wait in the instance, which claims them again with `XCLAIM ... JUSTID` every half
+ack wait, and once more just before it hands one over, which checks that it is still the
+instance's and gives the handler the whole ack wait. Field names are read as bytes, so an entry
+another client wrote with a name that isn't UTF-8 still reaches the error stream, its names as
+they came. `RedisSettings::connect_timeout` bounds each command with the reconnecting before it,
+and the blocking read by that plus its wait.
+
 Redis acknowledges one entry at a time but has no negative acknowledgement with a delay, so
 `RedisDelivery` builds the redelivery from the group's pending entries. `ack` and `reject` run
 `XACK`. Each instance looks every second, or every quarter of `RedisSettings::ack_wait` when that

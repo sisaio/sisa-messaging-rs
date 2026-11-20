@@ -94,23 +94,32 @@ impl RedisTransport {
         &self,
         block: Duration,
     ) -> Result<ConnectionManager, TransportError> {
-        self.inner
-            .client
-            .get_connection_manager_with_config(config(&self.inner.settings, block))
-            .await
-            .map_err(|error| broker("connecting to Redis", error))
+        // The timeout covers each attempt; this covers the retries between them too.
+        tokio::time::timeout(
+            self.inner.settings.connect_timeout,
+            self.inner
+                .client
+                .get_connection_manager_with_config(config(&self.inner.settings, block)),
+        )
+        .await
+        .map_err(|elapsed| broker("connecting to Redis", elapsed))?
+        .map_err(|error| broker("connecting to Redis", error))
     }
 
-    /// Runs a command on the shared connection.
+    /// Runs a command on the shared connection, within the connect timeout, which also covers
+    /// the reconnecting a lost connection does first.
     pub(crate) async fn query<Reply: redis::FromRedisValue>(
         &self,
         context: &'static str,
         command: &Cmd,
     ) -> Result<Reply, TransportError> {
-        command
-            .query_async(&mut self.inner.connection.clone())
-            .await
-            .map_err(|error| broker(context, error))
+        tokio::time::timeout(
+            self.inner.settings.connect_timeout,
+            command.query_async(&mut self.inner.connection.clone()),
+        )
+        .await
+        .map_err(|elapsed| broker(context, elapsed))?
+        .map_err(|error| broker(context, error))
     }
 
     pub(crate) fn stream(&self, message_type: &MessageType) -> String {
@@ -134,7 +143,7 @@ fn config(settings: &RedisSettings, block: Duration) -> ConnectionManagerConfig 
 /// An `XADD` of the fields and the data, which creates the stream when it is missing.
 pub(crate) fn append<'fields>(
     stream: &str,
-    fields: impl IntoIterator<Item = (&'fields str, &'fields [u8])>,
+    fields: impl IntoIterator<Item = (&'fields [u8], &'fields [u8])>,
     data: &[u8],
 ) -> Cmd {
     let mut command = redis::cmd("XADD");
@@ -157,7 +166,7 @@ pub(crate) fn append_envelope(stream: &str, envelope: &Envelope) -> Cmd {
         stream,
         fields
             .iter()
-            .map(|(name, value)| (name.as_str(), value.as_bytes())),
+            .map(|(name, value)| (name.as_bytes(), value.as_bytes())),
         &envelope.data,
     )
 }

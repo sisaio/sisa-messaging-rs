@@ -65,9 +65,68 @@ impl fmt::Debug for RedisSettings {
     }
 }
 
-/// The URL with `***` for the password of its user, if it has one. Redis URLs may carry a
-/// password without a user, as `redis://:secret@host`.
+/// The URL with `***` for its password: the one of its user, and the `pass` parameter a Unix
+/// socket URL takes, as `unix:///run/redis.sock?pass=secret`. Redis URLs may carry a password
+/// without a user, as `redis://:secret@host`.
 fn without_password(url: &str) -> String {
+    let (url, fragment) = url
+        .split_once('#')
+        .map_or((url, None), |(url, fragment)| (url, Some(fragment)));
+    let mut shown = match url.split_once('?') {
+        Some((base, query)) => format!(
+            "{}?{}",
+            without_user_password(base),
+            without_pass_parameter(query)
+        ),
+        None => without_user_password(url),
+    };
+    if let Some(fragment) = fragment {
+        shown.push('#');
+        shown.push_str(fragment);
+    }
+    shown
+}
+
+/// The query with `***` for the value of each `pass` parameter, its name percent-decoded as the
+/// client reads it.
+fn without_pass_parameter(query: &str) -> String {
+    query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((name, _)) if percent_decoded(name) == b"pass" => format!("{name}=***"),
+            _ => pair.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn percent_decoded(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        let escaped = (byte == b'%')
+            .then(|| bytes.get(index + 1..index + 3))
+            .flatten()
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match escaped {
+            Some(escaped) => {
+                decoded.push(escaped);
+                index += 3;
+            }
+            None => {
+                decoded.push(if byte == b'+' { b' ' } else { byte });
+                index += 1;
+            }
+        }
+    }
+    decoded
+}
+
+/// The URL, without its query, with `***` for the password of its user.
+fn without_user_password(url: &str) -> String {
     let start = url.find("://").map_or(0, |scheme| scheme + 3);
     let authority_end = url[start..]
         .find(['/', '?', '#'])
@@ -104,6 +163,18 @@ mod tests {
         assert_eq!(
             without_password("redis://:s3cret@localhost:6379"),
             "redis://:***@localhost:6379"
+        );
+    }
+
+    #[test]
+    fn the_pass_parameter_of_a_unix_socket_url_is_hidden() {
+        assert_eq!(
+            without_password("unix:///run/redis.sock?db=2&pass=s3cret"),
+            "unix:///run/redis.sock?db=2&pass=***"
+        );
+        assert_eq!(
+            without_password("redis+unix:///run/redis.sock?user=billing&%70ass=s3cret#x"),
+            "redis+unix:///run/redis.sock?user=billing&%70ass=***#x"
         );
     }
 

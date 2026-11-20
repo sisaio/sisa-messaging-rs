@@ -3576,7 +3576,6 @@ dependencies = [
  "sisa-messaging-testing",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
