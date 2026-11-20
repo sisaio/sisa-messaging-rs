@@ -1,15 +1,17 @@
-# Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
-# links, the tests, which run against the newest NATS, PostgreSQL, Iggy and Redis, the Redis
-# transport's tests against Valkey and Dragonfly, and coverage on main. The
-# tests start their servers in Docker. PRs and pushes to main that change no Rust inputs skip the
-# Rust jobs; `ci` sums them up for the ruleset.
+# The commit and branch rules, the Markdown links and the dependency policy; formatting, lints,
+# the docs and the MSRV build; breaking API changes; the tests, which run against the newest NATS,
+# PostgreSQL, Iggy and Redis, and the Redis transport's tests against Valkey and Dragonfly; and
+# coverage on main. The tests start their servers in Docker. PRs and pushes to main that change no
+# Rust inputs skip the Rust jobs; `ci` sums them up for the ruleset.
+#
+# Every sisaio crate repository has the same jobs under the same names: changes, policy, lint,
+# semver, test, ci and coverage. The crate names, the MSRV, the facade's features and the servers
+# are this repository's own.
 name: CI
 
 on:
   pull_request:
     branches: [main]
-    # `edited` re-runs the title check after a title change.
-    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -25,8 +27,9 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # Whether the Rust jobs need to run, and the commit check every PR needs. A PR is diffed against
-  # its base and a push to main against the commit before it, so a docs-only merge skips them too.
+  # Whether the Rust jobs need to run, and the commit and branch checks every PR needs. A PR is
+  # diffed against its base and a push to main against the commit before it, so a docs-only merge
+  # skips them too.
   # A merge with the same files as its PR's head, which passed CI, skips them as well; coverage
   # still runs on every code change, for the badge. `semver` runs only when a published crate's
   # source or manifest, the lock file, the toolchain or this workflow changes: tests, benches and
@@ -72,8 +75,9 @@ jobs:
           fi
           echo "api=$api" >> "$GITHUB_OUTPUT"
 
-      # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
-      # checked on the next push. Dependabot's titles run long, so its PRs are left out.
+      # The PR's commits and title against CONTRIBUTING.md#commit-messages, with the hook a clone
+      # runs. A title edited later is checked on the next push: no run starts on an edit.
+      # Dependabot's titles run long, so its PRs are left out.
       - name: Check commit messages
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
@@ -88,12 +92,48 @@ jobs:
           SUBJECT_ONLY=1 .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           exit "$status"
 
+      # The PR's branch against CONTRIBUTING.md#branches, with the script the pre-push hook runs.
+      - name: Check the branch name
+        if: github.event_name == 'pull_request'
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: .githooks/check-branch "$BRANCH"
+
+  # What needs no build. The links: relative links and #anchors in the Markdown files, hidden
+  # folders such as .agents and .github included; .claude only links to .agents. External links
+  # stay out, since they flake; rustdoc checks the links in doc comments. The dependency policy:
+  # advisories, licenses, bans and sources, as deny.toml sets them, when a Rust input changed.
+  policy:
+    name: policy
+    needs: changes
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # cargo-deny-action's image holds an x64 binary, so the tool is installed instead.
+      - name: Install lychee and cargo-deny
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: lychee,cargo-deny
+
+      - name: Check the links
+        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
+
+      - name: Check the dependency policy
+        if: needs.changes.outputs.code == 'true'
+        run: cargo deny --log-level warn --all-features check
+
   lint:
     name: lint
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      MSRV: "1.95"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,51 +170,13 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-  msrv:
-    name: msrv
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # The workspace `rust-version`.
+      # The workspace `rust-version`, in MSRV above. Last, so the faster checks fail first. Cargo
+      # keeps each compiler's artifacts apart in the one target/.
       - name: Install the MSRV toolchain
-        run: rustup toolchain install 1.95 --profile minimal
-
-      # Keyed on the MSRV compiler; the default from rust-toolchain.toml isn't installed here.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        env:
-          RUSTUP_TOOLCHAIN: "1.95"
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+        run: rustup toolchain install "$MSRV" --profile minimal
 
       - name: Build at the MSRV
-        run: cargo +1.95 check --workspace --all-targets --all-features --locked
-
-  deny:
-    name: deny
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # cargo-deny-action's image holds an x64 binary, so the tool is installed instead.
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
-        with:
-          tool: cargo-deny
-
-      # Advisories, licenses, bans and sources, as deny.toml sets them.
-      - name: Check the dependency policy
-        run: cargo deny --log-level warn --all-features check
+        run: cargo "+$MSRV" check --workspace --all-targets --all-features --locked
 
   # A change that breaks a published crate's API, against the PR's base, fails unless the PR
   # carries the `breaking` label. The base rather than crates.io, so that a break already merged
@@ -242,26 +244,6 @@ jobs:
           fi
           cargo semver-checks "${packages[@]}" --all-features --baseline-rev "$BASE"
 
-  # Relative links and #anchors in the Markdown files, hidden folders such as .agents and .github
-  # included; .claude only links to .agents. External links stay out, since they flake; rustdoc
-  # checks the links in doc comments.
-  links:
-    name: links
-    runs-on: ubuntu-26.04-arm
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install lychee
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
-        with:
-          tool: lychee
-
-      - name: Check the links
-        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
-
   # The newest NATS, PostgreSQL, Iggy and Redis releases only; older servers aren't tested.
   test:
     name: test
@@ -286,12 +268,21 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: nextest
+
       # Pulled once here, so no test waits on the download.
       - name: Pull the server images
         run: docker pull "$NATS_IMAGE" && docker pull "$POSTGRES_IMAGE" && docker pull "$IGGY_IMAGE" && docker pull "$REDIS_IMAGE"
 
       - name: Run all tests including NATS, PostgreSQL, Iggy and Redis
-        run: cargo test --workspace --all-features --locked
+        run: cargo nextest run --profile ci --workspace --all-features --locked
+
+      # nextest doesn't run the examples in doc comments.
+      - name: Run the doc tests
+        run: cargo test --doc --workspace --all-features --locked
 
   # The Redis transport's tests on the other servers that speak the Redis protocol, each at its
   # newest release. Redis itself runs in `test`.
@@ -323,18 +314,23 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: nextest
+
       - name: Pull the server image
         run: docker pull "$REDIS_IMAGE"
 
       - name: Run the Redis transport's tests
-        run: cargo test -p sisa-messaging-redis --locked
+        run: cargo nextest run --profile ci -p sisa-messaging-redis --locked
 
   # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
   # job reports no check, so the jobs themselves can't be required directly.
   ci:
     name: ci
     if: always()
-    needs: [changes, lint, msrv, deny, semver, links, test, redis-family]
+    needs: [changes, policy, lint, semver, test, redis-family]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:

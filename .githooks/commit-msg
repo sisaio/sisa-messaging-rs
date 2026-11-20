@@ -1,7 +1,13 @@
 #!/bin/sh
 # Checks a commit message against CONTRIBUTING.md#commit-messages. Git runs it on each commit once
 # a clone sets `git config core.hooksPath .githooks`; CI runs it on a PR's commits and title.
+#
+# The same file in every sisaio repository, except SCOPES below.
 set -eu
+
+TYPES='feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security'
+# This repository's scopes: its crates, then the three every repository has.
+SCOPES='core|runtime|nats|iggy|redis|postgres|testing|facade|deps|docs|release'
 
 subject=$(grep -v '^#' "$1" | grep -m 1 . || true)
 
@@ -16,8 +22,9 @@ case "$subject" in
 esac
 
 echo "$subject" |
-  grep -Eq '^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\((core|runtime|nats|iggy|redis|postgres|testing|facade|deps)\))?!?: [^ ]' ||
-  fail 'start with type(scope): summary, for example "fix(postgres): release a claimed row on shutdown"'
+  grep -Eq "^($TYPES)(\(($SCOPES)\))?!?: [^ ]" ||
+  fail "start with type(scope): summary; a type is one of $TYPES, and a scope one of $SCOPES"
+echo "$subject" | grep -Eq '^[^:]+: [^A-Z]' || fail 'start the summary with a lowercase letter'
 [ "${#subject}" -le 72 ] || fail 'keep the subject to 72 characters'
 case "$subject" in
   *.) fail 'end the subject without a period' ;;

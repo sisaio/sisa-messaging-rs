@@ -4,7 +4,7 @@
 # `nats:2.15-alpine`, `postgres:18-alpine`, `redis:8.10-alpine` and `valkey/valkey:9.1-alpine`, which
 # follow patch releases by themselves, except `apache/iggy:0.10.0` and Dragonfly's `v2.0.2`, which
 # have no minor tag; move them to a new version by hand.
-# Commit titles start with `build(deps)`, and PRs carry only the `dependencies` label, not
+# Commit titles start with `build(deps)`, and PRs carry only the `type:deps` label, not
 # Dependabot's per-ecosystem ones.
 version: 2
 updates:
@@ -15,7 +15,7 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: build(deps)
-    labels: [dependencies]
+    labels: ["type:deps"]
     groups:
       cargo-minor-and-patch:
         update-types: [minor, patch]
@@ -27,7 +27,7 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: build(deps)
-    labels: [dependencies]
+    labels: ["type:deps"]
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
