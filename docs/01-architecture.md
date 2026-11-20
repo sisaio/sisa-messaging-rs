@@ -457,7 +457,7 @@ The same names and commands on Redis, Valkey and Dragonfly.
 | Thing | Name | Example |
 | --- | --- | --- |
 | Stream | `{prefix}:{message type}`, created by the first publish or subscribe | `sisa:orders.order_placed.v1` |
-| Consumer group | The endpoint name, on the stream of each message type it handles. A new one starts with the messages published after it is created, and a stream deleted since gets its group back the same way, within a second while the endpoint is busy | `billing` |
+| Consumer group | The endpoint name, on the stream of each message type it handles. A new one starts with the messages published after it is created, and a stream deleted since gets its group back the same way on the endpoint's next look, after any read or refresh in progress; messages published before then don't reach it | `billing` |
 | Consumer | One per instance and subscription, named with a UUID version 7. One with nothing pending that hasn't read for an hour is removed by another instance, in a Lua script that checks again that nothing is pending | `019a9b5e-...` |
 | Error stream | `{prefix}:_error:{endpoint}` | `sisa:_error:billing` |
 
@@ -469,9 +469,10 @@ An instance reads only when its endpoint asks for the next delivery, so no entry
 buffer while its ack wait runs. A read over several streams returns up to one entry of each; those
 beyond the first wait in the instance, which claims them again with `XCLAIM ... JUSTID` every half
 ack wait. Every entry a read returns, the first too, is claimed once more just before the handoff,
-which checks that it is still the instance's and gives the handler the whole ack wait. Field names are read as bytes, so an entry
-another client wrote with a name that isn't UTF-8 still reaches the error stream, its names as
-they came. `RedisSettings::connect_timeout` bounds each command with the reconnecting before it,
+which checks that it is still the instance's and restarts its ack wait. The wait restarts when the
+server runs the claim, so a slow reply takes from the handler's share, and nothing checks again
+after the reply. Field names are read as bytes, so an entry another client wrote with a name that
+isn't UTF-8 still reaches the error stream, its names as they came. `RedisSettings::connect_timeout` bounds each command with the reconnecting before it,
 and the blocking read by that plus its wait.
 
 Redis acknowledges one entry at a time but has no negative acknowledgement with a delay, so
