@@ -66,78 +66,27 @@ impl fmt::Debug for RedisSettings {
 }
 
 /// The URL with `***` for its password: the one of its user, and the `pass` parameter a Unix
-/// socket URL takes, as `unix:///run/redis.sock?pass=secret`. Redis URLs may carry a password
-/// without a user, as `redis://:secret@host`.
+/// socket URL takes, as `unix:///run/redis.sock?pass=secret`. It is read as the client reads it,
+/// so no spelling the client takes for either slips by. A URL the client can't read is not shown.
 fn without_password(url: &str) -> String {
-    let (url, fragment) = url
-        .split_once('#')
-        .map_or((url, None), |(url, fragment)| (url, Some(fragment)));
-    let mut shown = match url.split_once('?') {
-        Some((base, query)) => format!(
-            "{}?{}",
-            without_user_password(base),
-            without_pass_parameter(query)
-        ),
-        None => without_user_password(url),
+    let Some(mut url) = redis::parse_redis_url(url) else {
+        return "(a URL the Redis client can't read)".to_owned();
     };
-    if let Some(fragment) = fragment {
-        shown.push('#');
-        shown.push_str(fragment);
+    if url.password().is_some() {
+        // A URL with a host takes a password; one without has none to hide here.
+        let _ = url.set_password(Some("***"));
     }
-    shown
-}
-
-/// The query with `***` for the value of each `pass` parameter, its name percent-decoded as the
-/// client reads it.
-fn without_pass_parameter(query: &str) -> String {
-    query
-        .split('&')
-        .map(|pair| match pair.split_once('=') {
-            Some((name, _)) if percent_decoded(name) == b"pass" => format!("{name}=***"),
-            _ => pair.to_owned(),
-        })
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
-fn percent_decoded(text: &str) -> Vec<u8> {
-    let bytes = text.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        let escaped = (byte == b'%')
-            .then(|| bytes.get(index + 1..index + 3))
-            .flatten()
-            .and_then(|hex| std::str::from_utf8(hex).ok())
-            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
-        match escaped {
-            Some(escaped) => {
-                decoded.push(escaped);
-                index += 3;
-            }
-            None => {
-                decoded.push(if byte == b'+' { b' ' } else { byte });
-                index += 1;
-            }
-        }
+    if url.query_pairs().any(|(name, _)| name == "pass") {
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .map(|(name, value)| {
+                let value = if name == "pass" { "***".into() } else { value };
+                (name.into_owned(), value.into_owned())
+            })
+            .collect();
+        url.query_pairs_mut().clear().extend_pairs(&pairs);
     }
-    decoded
-}
-
-/// The URL, without its query, with `***` for the password of its user.
-fn without_user_password(url: &str) -> String {
-    let start = url.find("://").map_or(0, |scheme| scheme + 3);
-    let authority_end = url[start..]
-        .find(['/', '?', '#'])
-        .map_or(url.len(), |end| start + end);
-    let Some(at) = url[start..authority_end].rfind('@').map(|at| start + at) else {
-        return url.to_owned();
-    };
-    match url[start..at].find(':').map(|colon| start + colon) {
-        Some(colon) => format!("{}:***{}", &url[..colon], &url[at..]),
-        None => url.to_owned(),
-    }
+    url.to_string()
 }
 
 #[cfg(test)]
@@ -172,10 +121,21 @@ mod tests {
             without_password("unix:///run/redis.sock?db=2&pass=s3cret"),
             "unix:///run/redis.sock?db=2&pass=***"
         );
-        assert_eq!(
-            without_password("redis+unix:///run/redis.sock?user=billing&%70ass=s3cret#x"),
-            "redis+unix:///run/redis.sock?user=billing&%70ass=***#x"
-        );
+        // Spelled as the client still reads it: percent-encoded, or with a tab the URL drops.
+        for url in [
+            "redis+unix:///run/redis.sock?user=billing&%70ass=s3cret",
+            "redis+unix:///run/redis.sock?user=billing&pa\tss=s3cret",
+        ] {
+            let shown = without_password(url);
+            assert!(!shown.contains("s3cret"), "{shown}");
+            assert!(shown.contains("billing"), "{shown}");
+        }
+    }
+
+    #[test]
+    fn a_url_the_client_cant_read_is_not_shown() {
+        let shown = without_password("http://billing:s3cret@redis.internal");
+        assert!(!shown.contains("s3cret"), "{shown}");
     }
 
     #[test]

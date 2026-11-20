@@ -468,8 +468,8 @@ no partitions: an endpoint's instances read each stream as competing consumers, 
 An instance reads only when its endpoint asks for the next delivery, so no entry waits read in a
 buffer while its ack wait runs. A read over several streams returns up to one entry of each; those
 beyond the first wait in the instance, which claims them again with `XCLAIM ... JUSTID` every half
-ack wait, and once more just before it hands one over, which checks that it is still the
-instance's and gives the handler the whole ack wait. Field names are read as bytes, so an entry
+ack wait. Every entry a read returns, the first too, is claimed once more just before the handoff,
+which checks that it is still the instance's and gives the handler the whole ack wait. Field names are read as bytes, so an entry
 another client wrote with a name that isn't UTF-8 still reaches the error stream, its names as
 they came. `RedisSettings::connect_timeout` bounds each command with the reconnecting before it,
 and the blocking read by that plus its wait.

@@ -202,6 +202,12 @@ impl Group {
         (self.ack_wait() / 4).clamp(Duration::from_millis(10), POLL_WAIT)
     }
 
+    /// How often the task acts while the endpoint is busy: every look, and at least every half
+    /// ack wait, so a short ack wait still has its entries refreshed in time.
+    fn tick_interval(&self) -> Duration {
+        self.look_interval().min(self.ack_wait() / 2)
+    }
+
     /// Creates the group on each stream, and the streams that are missing. An existing group
     /// keeps its position.
     async fn create(&self) -> Result<(), TransportError> {
@@ -279,13 +285,18 @@ impl Group {
         let Some(entry) = entries_of(claimed).into_iter().next() else {
             return Ok(None);
         };
-        Ok(Some((entry, self.delivered(due).await)))
+        // Another instance took it over after the claim, as after this one stalled.
+        let Some(attempt) = self.delivered(due).await else {
+            return Ok(None);
+        };
+        Ok(Some((entry, attempt)))
     }
 
     /// How many times the server has delivered an entry this consumer just took over, which is
     /// its attempt: the count of the look that found it is behind if another instance took it
-    /// over in between. Freshly claimed, no other instance takes it over before this reads.
-    async fn delivered(&self, due: &Due) -> u32 {
+    /// over in between. `None` when it is no longer this consumer's. If the count can't be read,
+    /// the look's count stands in.
+    async fn delivered(&self, due: &Due) -> Option<u32> {
         let mut command = redis::cmd("XPENDING");
         command
             .arg(&due.stream)
@@ -299,14 +310,13 @@ impl Group {
             .query::<StreamPendingCountReply>("reading a Redis entry's deliveries", &command)
             .await
         {
-            Ok(pending) => pending.ids.first().map(|entry| entry.times_delivered),
+            Ok(pending) => pending.ids.first()?.times_delivered,
             Err(error) => {
                 tracing::warn!(endpoint = self.name, %error, "could not read a Redis entry's deliveries; its attempt may be low");
-                None
+                due.delivered.saturating_add(1)
             }
         };
-        let delivered = delivered.unwrap_or(due.delivered.saturating_add(1));
-        u32::try_from(delivered).unwrap_or(u32::MAX)
+        Some(u32::try_from(delivered).unwrap_or(u32::MAX))
     }
 
     /// Claims an entry of this consumer again, which resets its idle time. With `count`, the
@@ -434,20 +444,21 @@ impl Group {
         self.refresh_ready(reading).await;
     }
 
-    /// The next read entry still this consumer's. One that waited is claimed again first, which
-    /// checks that, and gives its handler the whole ack wait.
+    /// The next read entry still this consumer's. Each is claimed again first, which checks
+    /// that, as the read's reply may come long after the server counted the delivery, and gives
+    /// its handler the whole ack wait. One whose claim fails stays, for the next ask.
     async fn take_ready(
         &self,
         reading: &mut Reading,
     ) -> Result<Option<(String, Entry)>, TransportError> {
         while let Some(ready) = reading.ready.pop_front() {
-            if ready.refreshed.elapsed() < self.look_interval()
-                || self
-                    .claim_own(&ready.stream, &ready.entry.id, false)
-                    .await?
-                    .is_some()
-            {
-                return Ok(Some((ready.stream, ready.entry)));
+            match self.claim_own(&ready.stream, &ready.entry.id, false).await {
+                Ok(Some(_)) => return Ok(Some((ready.stream, ready.entry))),
+                Ok(None) => {}
+                Err(error) => {
+                    reading.ready.push_front(ready);
+                    return Err(error);
+                }
             }
         }
         Ok(None)
@@ -546,9 +557,12 @@ impl Group {
         }
 
         // `BLOCK 0` would wait forever.
+        let refresh = self.ack_wait() / 2;
         let wake = self
             .next_held_event()
-            .map_or(reading.next_look, |held| held.min(reading.next_look));
+            .into_iter()
+            .chain(reading.ready.iter().map(|ready| ready.refreshed + refresh))
+            .fold(reading.next_look, Instant::min);
         let block = wake
             .saturating_duration_since(Instant::now())
             .max(Duration::from_millis(1));
@@ -589,8 +603,8 @@ impl Group {
                 entry,
                 refreshed: now,
             }));
-        match reading.ready.pop_front() {
-            Some(ready) => self.deliver(ready.stream, ready.entry, 1).await,
+        match self.take_ready(reading).await? {
+            Some((stream, entry)) => self.deliver(stream, entry, 1).await,
             None => Ok(None),
         }
     }
@@ -682,7 +696,7 @@ async fn read(
             ask = asked.recv() => if ask.is_none() {
                 break;
             },
-            () = tokio::time::sleep(group.look_interval()) => {
+            () = tokio::time::sleep(group.tick_interval()) => {
                 tokio::select! {
                     () = group.tick(&mut reading) => {}
                     () = sender.closed() => break,
@@ -780,6 +794,10 @@ fn entry_of(entry: Value) -> Option<Entry> {
     Some(Entry { id, fields })
 }
 
+fn utf8(value: &Value) -> Option<String> {
+    String::from_utf8(bytes_of(value)?).ok()
+}
+
 /// The bytes of a field's value, as the server sends them.
 fn bytes_of(value: &Value) -> Option<Vec<u8>> {
     match value {
@@ -812,18 +830,20 @@ fn read_envelope(entry: &Entry) -> Result<Envelope, String> {
                 String::from_utf8_lossy(name.as_bytes())
             )
         })?;
-        let text = bytes_of(value)
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .ok_or_else(|| format!("the field {name} isn't UTF-8 text"))?;
-        match name.strip_prefix(CE) {
-            Some(attribute) => attributes.insert(attribute.to_owned(), text),
-            None => content_type.replace(text),
+        let Some(attribute) = name.strip_prefix(CE) else {
+            // Read only if no `ce_datacontenttype` comes, below.
+            content_type = Some(value);
+            continue;
         };
+        let text = utf8(value).ok_or_else(|| format!("the field {name} isn't UTF-8 text"))?;
+        attributes.insert(attribute.to_owned(), text);
     }
-    if let Some(content_type) = content_type {
-        attributes
-            .entry("datacontenttype".to_owned())
-            .or_insert(content_type);
+    if let Some(content_type) = content_type
+        && !attributes.contains_key("datacontenttype")
+    {
+        let text = utf8(content_type)
+            .ok_or_else(|| format!("the field {CONTENT_TYPE} isn't UTF-8 text"))?;
+        attributes.insert("datacontenttype".to_owned(), text);
     }
     let data = data.ok_or_else(|| format!("the entry has no {DATA} field"))?;
     Envelope::from_attributes(attributes, Bytes::from(data)).map_err(|error| error.to_string())
