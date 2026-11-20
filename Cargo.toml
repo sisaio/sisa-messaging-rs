@@ -45,7 +45,7 @@ sisa-messaging-redis = { path = "crates/redis", version = "0.1.0" }
 sisa-messaging-runtime = { path = "crates/runtime", version = "0.1.0" }
 
 # The NATS client, for core NATS and JetStream.
-async-nats = { version = "0.52.0" }
+async-nats = { version = "0.53.0" }
 
 # The Apache Iggy client. It builds every protocol it speaks (TCP, QUIC, HTTP, WebSocket); the
 # transport uses TCP.
