@@ -19,7 +19,7 @@ transactional outbox and inbox in your own database.
 | Codec | JSON | MessagePack, Avro |
 
 The outbox and the inbox are optional: use plain messaging, add the outbox so a message is
-published if and only if its database transaction commits, and add the inbox so a redelivered
+published only if its database transaction commits, and add the inbox so a redelivered
 message isn't handled twice. Messages travel as CloudEvents 1.0 in each transport's binary mode,
 so services in other languages read and write them too.
 

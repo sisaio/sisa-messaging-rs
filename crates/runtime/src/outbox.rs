@@ -7,7 +7,7 @@ use sisa_messaging_core::{JsonCodec, Message, OutboxStore, Publisher, Source};
 use crate::publish::{PublishError, encode};
 
 /// Publishes by writing outbox rows in the caller's transaction; the dispatcher sends them after
-/// the commit, so a message goes out if and only if the transaction commits.
+/// the commit, so a message goes out only if the transaction commits.
 ///
 /// Get one from [`Bus::outbox`](crate::Bus::outbox). It borrows the transaction only while it
 /// lives, so the application keeps using the transaction between publishes.

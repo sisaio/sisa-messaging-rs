@@ -12,10 +12,13 @@ words used everywhere are in the [docs index](README.md#words-used-everywhere).
   family, RabbitMQ and LavinMQ), a persistence (PostgreSQL first, then MySQL and SQL Server) and a codec (JSON
   first, then MessagePack and Avro). Handlers and publishing code don't change when a part does.
 - **The outbox and the inbox are optional.** An application can use plain messaging, add an
-  outbox so a message is published if and only if its database transaction commits, and add an
+  outbox so a message is published only if its database transaction commits, and add an
   inbox so a redelivered message is skipped instead of handled twice.
-- **At least once, everywhere.** No mode loses a message the broker or the database accepted.
-  With the inbox, a handler's database work happens once per endpoint and message.
+- **At least once, everywhere.** No mode drops a message the broker or the database accepted,
+  within the [limits](#guarantees-and-limits): a broker's own retention can remove a message, an
+  outbox row that fails every attempt stays `failed` until a person sends it again, and an inbox
+  without an outbox can lose a handler's publishes. With the inbox, a handler's database work
+  happens once per endpoint and message while the receipt is kept.
 - **A shared, documented wire format.** Services in other languages publish and consume the same
   messages: the envelope follows CloudEvents 1.0 in each transport's binary mode.
 - **Small and explicit.** Building a bus is all the setup; it runs its own workers. Each part has
