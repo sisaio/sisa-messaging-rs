@@ -6,9 +6,9 @@ description: Prepares a release of the sisa-messaging crates (versions, changelo
 # Release
 
 [release.yml](../../../.github/workflows/release.yml) opens the release PR with release-plz
-([release-plz.toml](../../../release-plz.toml)) and does the rest in its own jobs. The five
-library crates (`sisa-messaging-core`, `-runtime`, `-nats`, `-postgres` and `sisa-messaging`)
-share one version, one changelog at the root and one `v<version>` tag. `sisa-messaging-testing`
+([release-plz.toml](../../../release-plz.toml)) and does the rest in its own jobs. The seven
+library crates (`sisa-messaging-core`, `-runtime`, `-nats`, `-iggy`, `-redis`, `-postgres` and
+`sisa-messaging`) share one version, one changelog at the root and one `v<version>` tag. `sisa-messaging-testing`
 and the examples are never published.
 
 - Releases are cut by hand, so each one batches several changes. The maintainer opens the release
@@ -30,8 +30,9 @@ and the examples are never published.
   maintainer to approve the `release` environment. Once approved, it publishes the crates to
   crates.io, and the draft is published. Releases are immutable once published, so nothing may
   change one after that.
-- Merged issues show as Done on the board; their milestone stays open until the release is
-  published, and then the maintainer closes it.
+- A merged issue is closed while its milestone is still open: the milestone stays open until the
+  release is published. The maintainer then closes it by marking it `state: closed` in
+  [.github/milestones.yml](../../../.github/milestones.yml).
 
 The maintainer starts and merges the release PR and approves the publish. An agent never starts
 or merges it, approves, publishes, or pushes a tag.
@@ -96,6 +97,11 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.2.
   workflow by hand doesn't help: a manual run only opens release PRs.
 - A publish that stopped halfway is finished by re-running the publish job: it skips the crates
   crates.io already has.
+- crates.io limits how fast an account publishes: 5 crates it has never seen, then one more every
+  10 minutes; and 30 new versions of crates it has, then one more a minute. The publish job
+  waits out a `429 Too Many Requests` and publishes again, for up to an hour in all, so the first
+  release of more than 5 new crates takes 10 minutes more for each crate past the fifth. If it
+  runs out of time, re-run the failed jobs once the time in the error has passed.
 - The first release PR lists every commit since the start. Replace it with the summary in
   [CHANGELOG.md](../../../CHANGELOG.md).
 
@@ -109,5 +115,6 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.2.
 | `wait for ci` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
 | crates.io `403`, or no token from `crates-io-auth-action` | With `CARGO_REGISTRY_TOKEN` set, the token has expired or lacks publish rights on the crate. Without it, the crate needs a trusted publisher for `release.yml` and the `release` environment ([.github/scripts/README.md](../../../.github/scripts/README.md#releases)) |
 | `crate ... already exists` | crates.io has that version; re-run the publish job, which skips it |
+| `429 Too Many Requests` and `crates.io asks to wait ... past the 3600 s this job waits` | The rate limit outlasted the job's hour of waiting. Re-run the failed jobs after the time the error gives; the crates already out are skipped |
 
 For anything else, find the first error in the failed step's log and report it with a fix.
