@@ -100,11 +100,9 @@ mod tests {
             ..RedisSettings::default()
         };
         let shown = format!("{settings:?}");
-        assert!(!shown.contains("s3cret"), "{shown}");
-        assert!(
-            shown.contains("redis://billing:***@redis.internal:6379/2"),
-            "{shown}"
-        );
+        // The message names no URL, which would show the password if this failed.
+        assert!(!shown.contains("s3cret"), "the password is shown");
+        assert!(shown.contains("redis://billing:***@redis.internal:6379/2"));
     }
 
     #[test]
@@ -127,15 +125,17 @@ mod tests {
             "redis+unix:///run/redis.sock?user=billing&pa\tss=s3cret",
         ] {
             let shown = without_password(url);
-            assert!(!shown.contains("s3cret"), "{shown}");
-            assert!(shown.contains("billing"), "{shown}");
+            // The message names no URL, which would show the password if this failed.
+            assert!(!shown.contains("s3cret"), "the password is shown");
+            assert!(shown.contains("billing"), "the user is hidden too");
         }
     }
 
     #[test]
     fn a_url_the_client_cant_read_is_not_shown() {
         let shown = without_password("http://billing:s3cret@redis.internal");
-        assert!(!shown.contains("s3cret"), "{shown}");
+        // The message names no URL, which would show the password if this failed.
+        assert!(!shown.contains("s3cret"), "the password is shown");
     }
 
     #[test]
