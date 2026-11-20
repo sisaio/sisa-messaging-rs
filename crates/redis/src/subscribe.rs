@@ -413,9 +413,16 @@ impl Group {
     }
 
     /// What the task does while the endpoint is busy: keeps the held and the read entries fresh,
-    /// and looks, so a deleted stream gets its group back before new messages go by it.
+    /// and looks. Each look first creates the groups again, so a deleted stream gets its group
+    /// back before new messages go by it: Dragonfly's `XPENDING` doesn't say `NOGROUP` for one.
     async fn tick(&self, reading: &mut Reading) {
         self.refresh(reading).await;
+        if Instant::now() < reading.next_look {
+            return;
+        }
+        if let Err(error) = self.create().await {
+            tracing::warn!(endpoint = self.name, %error, "could not create the Redis consumer group again");
+        }
         if let Err(error) = self.look(reading).await {
             tracing::warn!(endpoint = self.name, %error, "could not look for Redis entries to take over");
         }

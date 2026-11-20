@@ -457,7 +457,7 @@ The same names and commands on Redis, Valkey and Dragonfly.
 | Thing | Name | Example |
 | --- | --- | --- |
 | Stream | `{prefix}:{message type}`, created by the first publish or subscribe | `sisa:orders.order_placed.v1` |
-| Consumer group | The endpoint name, on the stream of each message type it handles. A new one starts with the messages published after it is created, and a stream deleted since gets its group back the same way | `billing` |
+| Consumer group | The endpoint name, on the stream of each message type it handles. A new one starts with the messages published after it is created, and a stream deleted since gets its group back the same way, within a second while the endpoint is busy | `billing` |
 | Consumer | One per instance and subscription, named with a UUID version 7. One with nothing pending that hasn't read for an hour is removed by another instance, in a Lua script that checks again that nothing is pending | `019a9b5e-...` |
 | Error stream | `{prefix}:_error:{endpoint}` | `sisa:_error:billing` |
 
