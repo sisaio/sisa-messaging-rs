@@ -76,7 +76,7 @@ reviews:
         Conventional Commits as CONTRIBUTING.md says: `type(scope): summary`, at most 72
         characters, no period at the end, the summary in the imperative. The type is one of feat,
         fix, perf, refactor, docs, test, build, ci, chore or revert. The scope is optional: core,
-        nats, postgres, testing, facade or deps. A breaking change adds `!` after the type or scope.
+        runtime, nats, iggy, redis, postgres, testing, facade or deps. A breaking change adds `!` after the type or scope.
 
   # Commits on a PR come from its author only, so CodeRabbit doesn't write docstrings or tests.
   finishing_touches:
