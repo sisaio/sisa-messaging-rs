@@ -5,10 +5,6 @@
 //! Database crates implement only the store traits from `sisa-messaging-core`; this crate holds
 //! the logic around them. Applications depend on `sisa-messaging`, which re-exports it.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 mod bus;
 mod dispatch;
 mod endpoint;

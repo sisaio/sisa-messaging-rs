@@ -25,10 +25,6 @@
 //! Both tables are partitioned by time. [`PostgresPartitions`] lets the bus's maintenance worker
 //! create partitions ahead and expire old ones.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 mod inbox;
 mod outbox;
 mod partitions;

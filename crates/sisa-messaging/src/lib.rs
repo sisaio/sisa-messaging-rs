@@ -45,9 +45,6 @@
 //! of them.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
 
 pub use sisa_messaging_core::{
     Codec, CodecError, ContentType, Correlation, Date, Deliveries, Delivery, EndpointSpec,
