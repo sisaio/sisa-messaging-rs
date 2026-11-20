@@ -1,6 +1,11 @@
 //! The envelope's attributes checked against the CloudEvents reference SDK: what we write is a
 //! valid CloudEvent to it, and what it writes reads as an envelope.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 use std::collections::BTreeMap;
 
 use bytes::Bytes;

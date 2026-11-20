@@ -11,6 +11,11 @@
 //! database, `postgres:18-alpine` by default, `IGGY_IMAGE` the Iggy server, `apache/iggy:0.10.0`
 //! by default, and `REDIS_IMAGE` the Redis server, `redis:8.10-alpine` by default.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 mod iggy;
 mod nats;
 mod postgres;

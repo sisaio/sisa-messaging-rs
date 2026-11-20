@@ -5,10 +5,6 @@
 //! every subject under the prefix, and publishes each envelope to `{prefix}.{message type}` with
 //! its CloudEvents attributes in `ce-` headers.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 mod binding;
 mod settings;
 mod subscribe;

@@ -13,6 +13,7 @@ protect_breaking_commits = true
 commit_parsers = [
     { message = "^feat", group = "added" },
     { message = "^(fix|revert)", group = "fixed" },
+    { message = "^security", group = "security" },
     { message = "^perf", group = "changed" },
     { message = "^(refactor|docs|test|build|ci|chore)", skip = true },
     { message = "^.*", group = "other" },
