@@ -25,7 +25,3 @@ All notable changes are listed here. The format follows
 - *(runtime)* fence the outbox marks and bound each publish by its lease
 - *(postgres)* fail the inbox commit of an aborted transaction
 - *(core)* keep timestamps and extension names within the wire rules
-
-### Other
-
-- Initial commit

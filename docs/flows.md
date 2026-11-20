@@ -1,6 +1,7 @@
 # Flows
 
-Diagrams of each step that [Architecture](01-architecture.md) describes.
+Diagrams of each step that the [runtime spec](specs/runtime.md#behaviour) describes, across the
+crates. A new flow follows [templates/flow-spec.md](templates/flow-spec.md).
 
 ## Publishing without an outbox
 

@@ -133,8 +133,8 @@ billing: invoiced order 1 for Ada (4200 cents), message 01a1a97f-3ef5-7079-80e3-
 
 ## More
 
-- [Docs](https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/00-overview.md): an overview,
-  then architecture, flows and research, in reading order.
+- [Docs](https://github.com/sisaio/sisa-messaging-rs/blob/main/docs/README.md): the architecture,
+  each crate's spec, the formats other languages share, the flows and the decisions.
 - [Roadmap](https://github.com/sisaio/sisa-messaging-rs/blob/main/ROADMAP.md) and
   [changelog](https://github.com/sisaio/sisa-messaging-rs/blob/main/CHANGELOG.md).
 - [Contributing](https://github.com/sisaio/sisa-messaging-rs/blob/main/CONTRIBUTING.md): building,
