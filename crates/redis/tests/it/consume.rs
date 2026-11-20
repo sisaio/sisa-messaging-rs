@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use redis::streams::{StreamPendingCountReply, StreamPendingId};
 use sisa_messaging_core::{
     Deliveries, Delivery, EndpointSpec, MessageType, TransportPublisher, TransportSubscriber,
 };
@@ -183,12 +184,9 @@ async fn a_held_retry_isnt_taken_over_while_its_endpoint_is_busy() {
     let retried = envelope();
     first.publish(&retried).await.unwrap();
     let delay = Duration::from_secs(3);
+    let retrying = next(&mut first_deliveries).await;
     let retried_at = Instant::now();
-    next(&mut first_deliveries)
-        .await
-        .retry(delay)
-        .await
-        .unwrap();
+    retrying.retry(delay).await.unwrap();
     // A second message fills the endpoint's channel and stays unread there.
     first.publish(&envelope()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -221,8 +219,9 @@ async fn a_retried_message_comes_again_after_its_delay() {
     transport.publish(&envelope).await.unwrap();
 
     let delay = Duration::from_secs(2);
+    let retrying = next(&mut deliveries).await;
     let retried_at = Instant::now();
-    next(&mut deliveries).await.retry(delay).await.unwrap();
+    retrying.retry(delay).await.unwrap();
 
     let delivery = next(&mut deliveries).await;
     assert!(retried_at.elapsed() >= delay);
@@ -240,12 +239,9 @@ async fn a_retry_longer_than_the_ack_wait_comes_after_its_delay_on_any_instance(
     let envelope = envelope();
     first.publish(&envelope).await.unwrap();
     let delay = Duration::from_secs(3);
+    let retrying = next(&mut first_deliveries).await;
     let retried_at = Instant::now();
-    next(&mut first_deliveries)
-        .await
-        .retry(delay)
-        .await
-        .unwrap();
+    retrying.retry(delay).await.unwrap();
     let mut second_deliveries = second.subscribe(&billing()).await.unwrap();
 
     let delivery = tokio::select! {
@@ -257,6 +253,60 @@ async fn a_retry_longer_than_the_ack_wait_comes_after_its_delay_on_any_instance(
     assert_eq!(delivery.envelope().id, envelope.id);
     assert_eq!(delivery.attempt(), 2);
     delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_held_retry_taken_over_elsewhere_isnt_taken_back() {
+    let redis = Redis::start().await;
+    let mut settings = settings(&redis);
+    settings.ack_wait = Duration::from_secs(3);
+    let transport = RedisTransport::connect(settings).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    transport.publish(&envelope()).await.unwrap();
+    next(&mut deliveries)
+        .await
+        .retry(Duration::from_secs(1))
+        .await
+        .unwrap();
+    // Another instance takes the entry over, as after this one stalled past the ack wait.
+    let held = pending_entries(&redis).await;
+    assert_eq!(held.len(), 1);
+    let id = held[0].id.clone();
+    redis::cmd("XCLAIM")
+        .arg("sisa:orders.order_placed.v1")
+        .arg("billing")
+        .arg("elsewhere")
+        .arg(0)
+        .arg(&id)
+        .arg("JUSTID")
+        .query_async::<Vec<String>>(&mut redis.connection().await)
+        .await
+        .unwrap();
+
+    // Neither the refresh nor the due delivery claims it back, before the ack wait lets this
+    // instance take it over from the other.
+    assert!(
+        next_within(&mut deliveries, Duration::from_secs(2))
+            .await
+            .is_none()
+    );
+    let pending = pending_entries(&redis).await;
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].consumer, "elsewhere");
+}
+
+/// The billing group's pending entries.
+async fn pending_entries(redis: &Redis) -> Vec<StreamPendingId> {
+    let reply: StreamPendingCountReply = redis::cmd("XPENDING")
+        .arg("sisa:orders.order_placed.v1")
+        .arg("billing")
+        .arg("-")
+        .arg("+")
+        .arg(10)
+        .query_async(&mut redis.connection().await)
+        .await
+        .unwrap();
+    reply.ids
 }
 
 #[tokio::test]
