@@ -1,5 +1,7 @@
 # Security
 
+## Reporting
+
 Report a vulnerability privately through
 [GitHub security advisories](https://github.com/sisaio/sisa-messaging-rs/security/advisories/new),
 not in a public issue.
@@ -18,6 +20,13 @@ not in a public issue.
   release is on crates.io.
 - The fix ships as a patch release, and the advisory is published with it, crediting you unless
   you'd rather not be named.
+
+## What counts
+
+A message body, a connection string or a password reaching a log, an error message or a `Debug`
+output is a vulnerability, and so is a way for a publisher to add or cut short another header
+through an attribute's value. The library encrypts nothing: message data that sits unencrypted on
+the broker or in the outbox and inbox tables is the application's choice, not a vulnerability.
 
 ## Verifying a release
 

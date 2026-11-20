@@ -14,18 +14,19 @@ Report findings; don't push fixes unless asked.
 - [ ] Run the checks in [CONTRIBUTING.md](../../../CONTRIBUTING.md#build-and-check). Note each
       failure with its first error.
 - [ ] Check the diff against the
-      [rules](../../../docs/01-architecture.md#rules-that-hold-the-design-together), the
-      [decisions](../../../docs/01-architecture.md#decisions) and the
-      [code rules](../../../AGENTS.md#code) in AGENTS.md. The ones most often broken:
+      [rules](../../../docs/architecture.md#rules-that-hold-the-design-together), the
+      [decisions](../../../docs/adr/README.md) and the
+      [hard rules](../../../AGENTS.md#hard-rules) in AGENTS.md. The ones most often broken:
   - a delivery is acked only after its handler's work is committed, never on an error path;
   - an outbox row is written on the caller's connection, never on one of the outbox's own;
   - no transaction is held across a transport call;
   - only the clock module reads the wall clock;
   - no new dependency in a library crate, and no transport or database client in core.
 - [ ] Check what goes with the change: a test for each new behavior, doc comments on new public
-      items, the `docs/` page it affects (above all
-      [Data formats](../../../docs/01-architecture.md#data-formats)), and `breaking` on the PR if
-      the public API, the wire format or a table changed.
+      items, the crate's [spec](../../../docs/specs/README.md) when what it does changed,
+      [Formats](../../../docs/formats.md) when a header, a name or a table changed, an
+      [ADR](../../../docs/adr/README.md) for a choice that is hard to reverse, and `breaking` on
+      the PR if the public API, the wire format or a table changed.
 - [ ] Check the docs in the diff: doc comments are short and plain with an example where it
       helps, and never link a Markdown file; `docs/` pages use Mermaid for diagrams and tables
       over long lists; every relative link and `#anchor` resolves.
@@ -62,8 +63,8 @@ same shape anywhere in a change.
 ## Whole-repository review
 
 - [ ] Start from `main`'s head and note its commit. Read
-      [Guarantees and limits](../../../docs/01-architecture.md#guarantees-and-limits) and the
-      [rules](../../../docs/01-architecture.md#rules-that-hold-the-design-together) first, then
+      [Guarantees and limits](../../../docs/architecture.md#guarantees-and-limits) and the
+      [rules](../../../docs/architecture.md#rules-that-hold-the-design-together) first, then
       each crate.
 - [ ] For each invariant below, check a test still guards it: break the code and see it fail.
       An invariant the docs promise with no test is a finding. Name the test in the table once
