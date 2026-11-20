@@ -150,8 +150,8 @@ async fn messages_of_several_types_published_together_all_come_at_once() {
         ],
     );
     let mut deliveries = transport.subscribe(&shipping).await.unwrap();
-    // One message in the handler and one waiting in the channel keep the reader from reading, so
-    // its next read finds an entry in both streams.
+    // The reader reads only when asked, so while one message is in the handler its next read
+    // finds an entry in both streams.
     transport.publish(&envelope()).await.unwrap();
     let handled = next(&mut deliveries).await;
     transport.publish(&envelope()).await.unwrap();
@@ -187,12 +187,12 @@ async fn a_held_retry_isnt_taken_over_while_its_endpoint_is_busy() {
     let retrying = next(&mut first_deliveries).await;
     let retried_at = Instant::now();
     retrying.retry(delay).await.unwrap();
-    // A second message fills the endpoint's channel and stays unread there.
+    // A second message waits while the endpoint is busy.
     first.publish(&envelope()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     let mut second_deliveries = second.subscribe(&billing()).await.unwrap();
 
-    // The unread message ages in the channel, so the second instance may take that one over.
+    // The second instance may read the waiting message.
     let until = retried_at + delay - Duration::from_millis(500);
     while let Some(delivery) = next_within(
         &mut second_deliveries,
@@ -434,6 +434,87 @@ async fn a_message_that_isnt_an_envelope_goes_to_the_error_stream() {
 }
 
 #[tokio::test]
+async fn an_entry_with_a_field_name_that_isnt_utf8_goes_to_the_error_stream() {
+    let redis = Redis::start().await;
+    let transport = RedisTransport::connect(settings(&redis)).await.unwrap();
+    let mut deliveries = transport.subscribe(&billing()).await.unwrap();
+    redis::cmd("XADD")
+        .arg("sisa:orders.order_placed.v1")
+        .arg("*")
+        .arg(b"\xffname".as_slice())
+        .arg("legacy")
+        .arg("data")
+        .arg("plain")
+        .query_async::<String>(&mut redis.connection().await)
+        .await
+        .unwrap();
+    let envelope = envelope();
+    transport.publish(&envelope).await.unwrap();
+
+    let delivery = next(&mut deliveries).await;
+    assert_eq!(delivery.envelope().id, envelope.id);
+    delivery.ack().await.unwrap();
+
+    // The copy keeps the name as it came.
+    let copies: Vec<(String, Vec<Vec<u8>>)> = redis::cmd("XRANGE")
+        .arg("sisa:_error:billing")
+        .arg("-")
+        .arg("+")
+        .query_async(&mut redis.connection().await)
+        .await
+        .unwrap();
+    assert_eq!(copies.len(), 1);
+    let fields = &copies[0].1;
+    let field = |name: &[u8]| {
+        fields
+            .chunks(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].clone())
+    };
+    assert_eq!(field(b"\xffname"), Some(b"legacy".to_vec()));
+    assert_eq!(field(b"data"), Some(b"plain".to_vec()));
+    assert_eq!(field(b"ce_errortype"), Some(b"invalid_envelope".to_vec()));
+}
+
+#[tokio::test]
+async fn an_entry_read_with_others_isnt_taken_over_while_it_waits() {
+    let redis = Redis::start().await;
+    let first = quick(&redis).await;
+    let second = quick(&redis).await;
+    let shipping = EndpointSpec::new(
+        "shipping",
+        vec![
+            MessageType::new("orders.order_placed.v1").unwrap(),
+            MessageType::new("orders.order_paid.v1").unwrap(),
+        ],
+    );
+    let mut first_deliveries = first.subscribe(&shipping).await.unwrap();
+    first.publish(&envelope()).await.unwrap();
+    let paid = envelope_of("orders.order_paid.v1");
+    first.publish(&paid).await.unwrap();
+    // One read returns both, and the paid one waits while the handler takes past the ack wait.
+    let handled = next(&mut first_deliveries).await;
+    let mut second_deliveries = second.subscribe(&shipping).await.unwrap();
+    let until = Instant::now() + Duration::from_millis(2500);
+    while let Some(delivery) = next_within(
+        &mut second_deliveries,
+        until.saturating_duration_since(Instant::now()),
+    )
+    .await
+    {
+        // The handled one may be taken over: its handler ran past the ack wait.
+        assert_ne!(delivery.envelope().id, paid.id);
+        delivery.ack().await.unwrap();
+    }
+    handled.ack().await.unwrap();
+
+    let delivery = next(&mut first_deliveries).await;
+    assert_eq!(delivery.envelope().id, paid.id);
+    assert_eq!(delivery.attempt(), 1);
+    delivery.ack().await.unwrap();
+}
+
+#[tokio::test]
 async fn an_entry_without_data_goes_to_the_error_stream() {
     let redis = Redis::start().await;
     let transport = RedisTransport::connect(settings(&redis)).await.unwrap();
@@ -453,6 +534,12 @@ async fn an_entry_without_data_goes_to_the_error_stream() {
     )
     .await;
 
+    // The read that the endpoint asks for moves it.
+    assert!(
+        next_within(&mut deliveries, Duration::from_secs(1))
+            .await
+            .is_none()
+    );
     eventually("the entry is in the error stream", async || {
         stored(&redis, "sisa:_error:billing").await.len() == 1
     })
@@ -460,11 +547,6 @@ async fn an_entry_without_data_goes_to_the_error_stream() {
     let copies = stored(&redis, "sisa:_error:billing").await;
     assert_eq!(copies[0]["ce_id"], id);
     assert_eq!(copies[0]["ce_errormessage"], "the entry has no data field");
-    assert!(
-        next_within(&mut deliveries, Duration::from_secs(1))
-            .await
-            .is_none()
-    );
 }
 
 #[tokio::test]
@@ -536,7 +618,7 @@ async fn a_deleted_stream_gets_the_group_back() {
         .query_async::<()>(&mut redis.connection().await)
         .await
         .unwrap();
-    // The read that finds no group recreates it.
+    // The look that finds no group recreates it, while nothing is asked for.
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let envelope = envelope();

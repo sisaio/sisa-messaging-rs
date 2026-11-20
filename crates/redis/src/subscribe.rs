@@ -8,16 +8,13 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use redis::aio::ConnectionManager;
-use redis::streams::{
-    StreamClaimReply, StreamId, StreamInfoConsumersReply, StreamPendingCountReply, StreamReadReply,
-};
+use redis::streams::{StreamInfoConsumersReply, StreamPendingCountReply};
 use redis::{RedisError, Value};
 use sisa_messaging_core::{
-    Deliveries, Delivery, EndpointSpec, Envelope, TransportError, TransportSubscriber,
+    Deliveries, Delivery, EndpointSpec, Envelope, MessageId, TransportError, TransportSubscriber,
 };
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use uuid::Uuid;
 
 use crate::RedisTransport;
 use crate::transport::{CE, DATA, append, append_envelope, broker};
@@ -88,7 +85,8 @@ impl TransportSubscriber for RedisTransport {
         let group = Arc::new(Group {
             transport: self.clone(),
             name: endpoint.name.clone(),
-            consumer: Uuid::now_v7().to_string(),
+            // A UUID version 7, from the one clock the crates read.
+            consumer: MessageId::new().to_string(),
             streams: endpoint
                 .message_types
                 .iter()
@@ -99,10 +97,23 @@ impl TransportSubscriber for RedisTransport {
         group.create().await?;
         let connection = self.blocking_connection(POLL_WAIT).await?;
 
+        // The endpoint asks for each delivery, and only then is an entry read, so none waits
+        // read in a buffer while its ack wait runs.
         let (sender, mut receiver) = mpsc::channel(1);
-        tokio::spawn(read(Arc::clone(&group), connection, sender));
+        let (asks, asked) = mpsc::channel(1);
+        tokio::spawn(read(Arc::clone(&group), connection, asked, sender));
+        let mut asking = false;
         Ok(Box::pin(futures_util::stream::poll_fn(move |context| {
-            receiver.poll_recv(context)
+            if !asking {
+                // Full only while an ask is waiting, and closed once the task stopped.
+                let _ = asks.try_send(());
+                asking = true;
+            }
+            let polled = receiver.poll_recv(context);
+            if polled.is_ready() {
+                asking = false;
+            }
+            polled
         })))
     }
 
@@ -147,12 +158,35 @@ struct Due {
     delivered: usize,
 }
 
+/// An entry as the server sends it. Field names are bytes: another client may write any.
+struct Entry {
+    id: String,
+    fields: Vec<(Vec<u8>, Value)>,
+}
+
+impl Entry {
+    fn field(&self, name: &[u8]) -> Option<&Value> {
+        self.fields
+            .iter()
+            .find(|(field, _)| field.as_slice() == name)
+            .map(|(_, value)| value)
+    }
+}
+
+/// A new entry a read returned beyond the first, already pending for this consumer.
+struct Ready {
+    stream: String,
+    entry: Entry,
+    /// When its idle time was last reset, by the read or by a refresh.
+    refreshed: Instant,
+}
+
 /// What the reading task keeps between reads.
 struct Reading {
     due: VecDeque<Due>,
-    /// New entries a read returned beyond the first: a read over several streams returns up to
-    /// one entry of each, and all of them are already pending for this consumer.
-    ready: VecDeque<(String, StreamId)>,
+    /// A read over several streams returns up to one entry of each. They wait here, kept fresh
+    /// like the held entries, so no other instance takes them over while they wait.
+    ready: VecDeque<Ready>,
     next_look: Instant,
     looks: u32,
 }
@@ -230,7 +264,7 @@ impl Group {
 
     /// Takes an entry over for this consumer if it is still idle for the ack wait, so only one
     /// instance gets it, with its attempt. The server counts the delivery.
-    async fn take_over(&self, due: &Due) -> Result<Option<(StreamId, u32)>, TransportError> {
+    async fn take_over(&self, due: &Due) -> Result<Option<(Entry, u32)>, TransportError> {
         let mut command = redis::cmd("XCLAIM");
         command
             .arg(&due.stream)
@@ -238,11 +272,11 @@ impl Group {
             .arg(&self.consumer)
             .arg(millis(self.ack_wait()))
             .arg(&due.id);
-        let claimed: StreamClaimReply = self
+        let claimed: Value = self
             .transport
             .query("taking over a Redis entry", &command)
             .await?;
-        let Some(entry) = claimed.ids.into_iter().next() else {
+        let Some(entry) = entries_of(claimed).into_iter().next() else {
             return Ok(None);
         };
         Ok(Some((entry, self.delivered(due).await)))
@@ -283,7 +317,7 @@ impl Group {
         stream: &str,
         id: &str,
         count: bool,
-    ) -> Result<Option<StreamId>, TransportError> {
+    ) -> Result<Option<Entry>, TransportError> {
         let mut command = redis::cmd("EVAL");
         command
             .arg(CLAIM_OWN)
@@ -294,19 +328,19 @@ impl Group {
             .arg(id)
             .arg(if count { "0" } else { "1" });
         if count {
-            let claimed: StreamClaimReply = self
+            let claimed: Value = self
                 .transport
                 .query("delivering a Redis entry again", &command)
                 .await?;
-            return Ok(claimed.ids.into_iter().next());
+            return Ok(entries_of(claimed).into_iter().next());
         }
         let claimed: Vec<String> = self
             .transport
             .query("holding a Redis entry for a retry", &command)
             .await?;
-        Ok(claimed.into_iter().next().map(|claimed_id| StreamId {
+        Ok(claimed.into_iter().next().map(|claimed_id| Entry {
             id: claimed_id,
-            ..StreamId::default()
+            fields: Vec::new(),
         }))
     }
 
@@ -340,6 +374,76 @@ impl Group {
                 }
             }
         }
+    }
+
+    /// Refreshes the read entries that have waited half the ack wait, and forgets those another
+    /// instance has taken over, as after this one stalled.
+    async fn refresh_ready(&self, reading: &mut Reading) {
+        let now = Instant::now();
+        let refresh = self.ack_wait() / 2;
+        let mut kept = VecDeque::with_capacity(reading.ready.len());
+        while let Some(mut ready) = reading.ready.pop_front() {
+            if ready.refreshed + refresh <= now {
+                match self.claim_own(&ready.stream, &ready.entry.id, false).await {
+                    Ok(Some(_)) => ready.refreshed = now,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        tracing::warn!(endpoint = self.name, %error, "could not keep a read Redis entry; another instance may take it over");
+                    }
+                }
+            }
+            kept.push_back(ready);
+        }
+        reading.ready = kept;
+    }
+
+    /// Looks for entries to take over once the look interval has passed, and for idle consumers
+    /// every so many looks. A look also gets a deleted stream its group back.
+    async fn look(&self, reading: &mut Reading) -> Result<(), TransportError> {
+        if Instant::now() < reading.next_look {
+            return Ok(());
+        }
+        reading.next_look = Instant::now() + self.look_interval();
+        reading.looks = reading.looks.wrapping_add(1);
+        if reading.looks.is_multiple_of(LOOKS_PER_CLEAN_UP) {
+            self.remove_idle_consumers().await;
+        }
+        reading.due = self.look_for_due().await?;
+        Ok(())
+    }
+
+    /// What the task does while the endpoint is busy: keeps the held and the read entries fresh,
+    /// and looks, so a deleted stream gets its group back before new messages go by it.
+    async fn tick(&self, reading: &mut Reading) {
+        self.refresh(reading).await;
+        if let Err(error) = self.look(reading).await {
+            tracing::warn!(endpoint = self.name, %error, "could not look for Redis entries to take over");
+        }
+    }
+
+    /// Keeps the held and the read entries fresh.
+    async fn refresh(&self, reading: &mut Reading) {
+        self.refresh_held().await;
+        self.refresh_ready(reading).await;
+    }
+
+    /// The next read entry still this consumer's. One that waited is claimed again first, which
+    /// checks that, and gives its handler the whole ack wait.
+    async fn take_ready(
+        &self,
+        reading: &mut Reading,
+    ) -> Result<Option<(String, Entry)>, TransportError> {
+        while let Some(ready) = reading.ready.pop_front() {
+            if ready.refreshed.elapsed() < self.look_interval()
+                || self
+                    .claim_own(&ready.stream, &ready.entry.id, false)
+                    .await?
+                    .is_some()
+            {
+                return Ok(Some((ready.stream, ready.entry)));
+            }
+        }
+        Ok(None)
     }
 
     /// Takes out one held entry whose delay has passed, if any.
@@ -418,8 +522,8 @@ impl Group {
         connection: &mut ConnectionManager,
         reading: &mut Reading,
     ) -> Result<Option<RedisDelivery>, TransportError> {
-        self.refresh_held().await;
-        if let Some((stream, entry)) = reading.ready.pop_front() {
+        self.refresh(reading).await;
+        if let Some((stream, entry)) = self.take_ready(reading).await? {
             return self.deliver(stream, entry, 1).await;
         }
         while let Some(held) = self.take_due() {
@@ -427,14 +531,7 @@ impl Group {
                 return self.deliver(held.stream, entry, held.attempt).await;
             }
         }
-        if Instant::now() >= reading.next_look {
-            reading.next_look = Instant::now() + self.look_interval();
-            reading.looks = reading.looks.wrapping_add(1);
-            if reading.looks.is_multiple_of(LOOKS_PER_CLEAN_UP) {
-                self.remove_idle_consumers().await;
-            }
-            reading.due = self.look_for_due().await?;
-        }
+        self.look(reading).await?;
         while let Some(due) = reading.due.pop_front() {
             if let Some((entry, attempt)) = self.take_over(&due).await? {
                 return self.deliver(due.stream, entry, attempt).await;
@@ -460,7 +557,14 @@ impl Group {
             .arg("STREAMS")
             .arg(&self.streams)
             .arg(vec![">"; self.streams.len()]);
-        let read: Option<StreamReadReply> = match command.query_async(connection).await {
+        // The response timeout covers the reply; this covers the reconnecting before it too.
+        let read: Value = match tokio::time::timeout(
+            self.transport.settings().connect_timeout + block,
+            command.query_async(connection),
+        )
+        .await
+        .map_err(|elapsed| broker("reading from Redis", elapsed))?
+        {
             Ok(read) => read,
             Err(error) => {
                 // A stream deleted since gets its group back, starting with new messages.
@@ -470,13 +574,16 @@ impl Group {
                 return Err(broker("reading from Redis", error));
             }
         };
-        for key in read.into_iter().flat_map(|read| read.keys) {
-            for entry in key.ids {
-                reading.ready.push_back((key.key.clone(), entry));
-            }
-        }
+        let now = Instant::now();
+        reading
+            .ready
+            .extend(read_of(read).into_iter().map(|(stream, entry)| Ready {
+                stream,
+                entry,
+                refreshed: now,
+            }));
         match reading.ready.pop_front() {
-            Some((stream, entry)) => self.deliver(stream, entry, 1).await,
+            Some(ready) => self.deliver(ready.stream, ready.entry, 1).await,
             None => Ok(None),
         }
     }
@@ -487,7 +594,7 @@ impl Group {
     async fn deliver(
         self: &Arc<Self>,
         stream: String,
-        entry: StreamId,
+        entry: Entry,
         attempt: u32,
     ) -> Result<Option<RedisDelivery>, TransportError> {
         match read_envelope(&entry) {
@@ -510,13 +617,13 @@ impl Group {
     async fn set_aside(
         &self,
         stream: &str,
-        entry: &StreamId,
+        entry: &Entry,
         error: &str,
     ) -> Result<(), TransportError> {
-        let mut fields: Vec<(String, Vec<u8>)> = entry
-            .map
+        let mut fields: Vec<(Vec<u8>, Vec<u8>)> = entry
+            .fields
             .iter()
-            .filter(|(name, _)| name.as_str() != DATA)
+            .filter(|(name, _)| name.as_slice() != DATA.as_bytes())
             .filter_map(|(name, value)| Some((name.clone(), bytes_of(value)?)))
             .collect();
         for (attribute, value) in [
@@ -524,14 +631,20 @@ impl Group {
             ("errortype", "invalid_envelope"),
             ("errormessage", error),
         ] {
-            fields.push((format!("{CE}{attribute}"), value.as_bytes().to_vec()));
+            fields.push((
+                format!("{CE}{attribute}").into_bytes(),
+                value.as_bytes().to_vec(),
+            ));
         }
-        let data = entry.map.get(DATA).and_then(bytes_of).unwrap_or_default();
+        let data = entry
+            .field(DATA.as_bytes())
+            .and_then(bytes_of)
+            .unwrap_or_default();
         let command = append(
             &self.transport.error_stream(&self.name),
             fields
                 .iter()
-                .map(|(name, value)| (name.as_str(), value.as_slice())),
+                .map(|(name, value)| (name.as_slice(), value.as_slice())),
             &data,
         );
         self.transport
@@ -541,12 +654,13 @@ impl Group {
     }
 }
 
-// Reads one delivery each time the endpoint has room for it, so none waits long in a buffer
-// while its ack wait runs, until the endpoint's deliveries are dropped. While the endpoint is busy
-// with a delivery, the entries held for a retry are still kept fresh.
+// Reads one delivery each time the endpoint asks for one, until the endpoint's deliveries are
+// dropped. While the endpoint is busy with a delivery, the entries held for a retry and those a
+// read returned beyond the first are still kept fresh.
 async fn read(
     group: Arc<Group>,
     mut connection: ConnectionManager,
+    mut asked: mpsc::Receiver<()>,
     sender: mpsc::Sender<Result<RedisDelivery, TransportError>>,
 ) {
     let mut reading = Reading {
@@ -555,21 +669,34 @@ async fn read(
         next_look: Instant::now(),
         looks: 0,
     };
-    loop {
-        let permit = tokio::select! {
-            permit = sender.reserve() => match permit {
-                Ok(permit) => permit,
-                Err(_) => break,
+    // Dropping the deliveries stops the work in progress too: a read, a reconnect or a refresh.
+    'asks: loop {
+        tokio::select! {
+            ask = asked.recv() => if ask.is_none() {
+                break;
             },
             () = tokio::time::sleep(group.look_interval()) => {
-                group.refresh_held().await;
+                tokio::select! {
+                    () = group.tick(&mut reading) => {}
+                    () = sender.closed() => break,
+                }
                 continue;
             }
-        };
-        match group.next(&mut connection, &mut reading).await {
-            Ok(Some(delivery)) => permit.send(Ok(delivery)),
-            Ok(None) => {}
-            Err(error) => permit.send(Err(error)),
+        }
+        loop {
+            let next = tokio::select! {
+                next = group.next(&mut connection, &mut reading) => next,
+                () = sender.closed() => break 'asks,
+            };
+            let delivery = match next {
+                Ok(Some(delivery)) => Ok(delivery),
+                Ok(None) => continue,
+                Err(error) => Err(error),
+            };
+            if sender.send(delivery).await.is_err() {
+                break 'asks;
+            }
+            break;
         }
     }
 }
@@ -585,6 +712,67 @@ fn code(error: &TransportError) -> Option<&str> {
     }
 }
 
+/// The entries of a read, with the stream of each: an array, or a map in RESP3, of each stream's
+/// name and entries. Nothing for a read that timed out.
+fn read_of(reply: Value) -> Vec<(String, Entry)> {
+    let streams = match reply {
+        Value::Array(streams) => streams
+            .into_iter()
+            .filter_map(|stream| match stream {
+                Value::Array(pair) => {
+                    let mut pair = pair.into_iter();
+                    Some((pair.next()?, pair.next()?))
+                }
+                _ => None,
+            })
+            .collect(),
+        Value::Map(streams) => streams,
+        _ => Vec::new(),
+    };
+    streams
+        .into_iter()
+        .filter_map(|(name, entries)| Some((String::from_utf8(bytes_of(&name)?).ok()?, entries)))
+        .flat_map(|(name, entries)| {
+            entries_of(entries)
+                .into_iter()
+                .map(move |entry| (name.clone(), entry))
+        })
+        .collect()
+}
+
+/// The entries of an array, as `XREADGROUP` and `XCLAIM` reply with: each the id and the fields,
+/// or nil for one deleted since.
+fn entries_of(reply: Value) -> Vec<Entry> {
+    let Value::Array(entries) = reply else {
+        return Vec::new();
+    };
+    entries.into_iter().filter_map(entry_of).collect()
+}
+
+fn entry_of(entry: Value) -> Option<Entry> {
+    let Value::Array(entry) = entry else {
+        return None;
+    };
+    let mut entry = entry.into_iter();
+    let id = String::from_utf8(bytes_of(&entry.next()?)?).ok()?;
+    let fields = match entry.next()? {
+        Value::Array(flat) => {
+            let mut flat = flat.into_iter();
+            let mut fields = Vec::new();
+            while let (Some(name), Some(value)) = (flat.next(), flat.next()) {
+                fields.push((bytes_of(&name)?, value));
+            }
+            fields
+        }
+        Value::Map(pairs) => pairs
+            .into_iter()
+            .map(|(name, value)| Some((bytes_of(&name)?, value)))
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    Some(Entry { id, fields })
+}
+
 /// The bytes of a field's value, as the server sends them.
 fn bytes_of(value: &Value) -> Option<Vec<u8>> {
     match value {
@@ -598,19 +786,25 @@ fn bytes_of(value: &Value) -> Option<Vec<u8>> {
 // Reads the envelope from the `ce_` fields and the `data` field. Field names are compared without
 // case, so `Ce_id` from another client counts. Without `ce_datacontenttype`, the `content-type`
 // field names the content type, as a Kafka-style producer writes it.
-fn read_envelope(entry: &StreamId) -> Result<Envelope, String> {
+fn read_envelope(entry: &Entry) -> Result<Envelope, String> {
     let mut attributes = BTreeMap::new();
     let mut content_type = None;
     let mut data = None;
-    for (name, value) in &entry.map {
-        if name == DATA {
+    for (name, value) in &entry.fields {
+        if name.as_slice() == DATA.as_bytes() {
             data = bytes_of(value);
             continue;
         }
         let name = name.to_ascii_lowercase();
-        if name != CONTENT_TYPE && !name.starts_with(CE) {
+        if name.as_slice() != CONTENT_TYPE.as_bytes() && !name.starts_with(CE.as_bytes()) {
             continue;
         }
+        let name = String::from_utf8(name).map_err(|name| {
+            format!(
+                "the field name {} isn't UTF-8 text",
+                String::from_utf8_lossy(name.as_bytes())
+            )
+        })?;
         let text = bytes_of(value)
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .ok_or_else(|| format!("the field {name} isn't UTF-8 text"))?;

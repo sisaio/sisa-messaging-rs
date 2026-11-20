@@ -31,8 +31,6 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 # The reading task, the channel it feeds and the retry timers.
 tokio = { workspace = true }
-# The consumer names of the instances.
-uuid = { workspace = true }
 # A retry that can't keep its entry or a consumer that can't be removed.
 tracing = { workspace = true }
 
