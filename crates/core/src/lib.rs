@@ -5,10 +5,6 @@
 //! Applications depend on `sisa-messaging`, which re-exports this crate's types, or on this crate
 //! and the transport and persistence crates they use.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 mod clock;
 mod codec;
 mod envelope;

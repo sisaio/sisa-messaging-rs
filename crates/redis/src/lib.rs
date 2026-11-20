@@ -19,10 +19,6 @@
 //! Redis Cluster isn't supported yet, and neither is TLS. Garnet has no consumer groups yet, so
 //! it can't run this transport.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 mod settings;
 mod subscribe;
 mod transport;

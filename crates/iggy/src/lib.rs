@@ -19,10 +19,6 @@
 //! Iggy is younger than the other brokers and changes between releases: this crate follows the
 //! `iggy` 0.12 client and is tested against Iggy server 0.10.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 mod settings;
 mod subscribe;
 mod transport;
