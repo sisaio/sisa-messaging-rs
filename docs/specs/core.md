@@ -52,8 +52,9 @@ pub struct TraceContext {
 
 The fields are grouped in Rust and flat on the wire, where each CloudEvents binding wants one
 header per attribute. Correlation and trace are typed fields, not extensions, because the runtime
-sets and carries them: a handler's publishes get the handled message as their causation, its
-correlation id, and its trace context unchanged. `extensions` holds what the runtime doesn't
+sets and carries them: a handler's publishes get the handled message as their causation and its
+correlation id, and a trace context as the
+[runtime spec](runtime.md#trace-context) says. `extensions` holds what the runtime doesn't
 interpret.
 
 ### Codec
