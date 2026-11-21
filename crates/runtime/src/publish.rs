@@ -25,7 +25,8 @@ pub enum PublishError {
     Store(#[from] StoreError),
 }
 
-// A new envelope for a message from this source, encoded with the bus's codec.
+// A new envelope for a message from this source, encoded with the bus's codec. It carries the
+// trace context of the span the publish runs in, when OpenTelemetry records one.
 pub(crate) fn encode<Msg: Message>(
     source: &Source,
     codec: &impl Codec,
@@ -34,10 +35,7 @@ pub(crate) fn encode<Msg: Message>(
     let message_type = MessageType::of::<Msg>()?;
     let content_type = ContentType::new(codec.content_type())?;
     let data = codec.encode(message)?;
-    Ok(Envelope::new(
-        message_type,
-        source.clone(),
-        content_type,
-        data,
-    ))
+    let mut envelope = Envelope::new(message_type, source.clone(), content_type, data);
+    envelope.trace = crate::trace::current();
+    Ok(envelope)
 }

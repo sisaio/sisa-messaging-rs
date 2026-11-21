@@ -389,7 +389,11 @@ impl<Codec> Endpoint<Codec> {
             message_id = %id,
             attempt,
             traceparent = envelope.trace.as_ref().map(|trace| trace.traceparent.as_str()),
+            otel.kind = "consumer",
         );
+        // A message can wait in a queue for hours, so its handling is a trace of its own that
+        // links to the span it was published in.
+        crate::trace::link(&span, envelope.trace.as_ref());
         let context = HandlerContext::new(
             source.clone(),
             Arc::clone(&self.codec),
