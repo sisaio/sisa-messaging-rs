@@ -164,6 +164,12 @@ jobs:
             cargo check -p sisa-messaging --features "$features" --locked
           done
 
+      # Two semver-incompatible versions of `opentelemetry` are two crates with two sets of global
+      # providers, and a crate on the one the application didn't initialize records into nothing.
+      # `cargo tree -i` fails when the name matches more than one version.
+      - name: Check the build holds one opentelemetry version
+        run: cargo tree -i opentelemetry --all-features --edges normal --locked > /dev/null
+
       # docs.rs builds every published crate with every feature; a broken link fails here instead.
       - name: Build the docs
         run: cargo doc --workspace --no-deps --all-features --locked
