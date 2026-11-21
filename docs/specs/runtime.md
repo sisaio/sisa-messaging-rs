@@ -55,7 +55,8 @@ database is a compile error, never a silent direct send. `bus.outbox(&mut tx)` b
 transaction only for the call, so the application keeps using `tx` between publishes.
 
 A handler gets the message and a `HandlerContext`. The context publishes with the handled message
-as the causation, and its correlation id and trace context carried over unchanged. On an endpoint
+as the causation and its correlation id carried over unchanged; the trace context is set as
+[Trace context](#trace-context) says. On an endpoint
 with an inbox, it also hands out the delivery's transaction: the handler takes `&mut HandlerContext<PgTransaction<'static>>` and runs its
 queries on `context.transaction()`.
 
@@ -146,6 +147,30 @@ sent and handled. Both tables are range-partitioned by time, one partition per d
 - **A default partition** catches a row whose time has no partition yet, such as a message from a
   publisher with a clock far off. The worker warns while it holds rows, since PostgreSQL can't
   create a partition over rows already sitting in the default one.
+
+### Trace context
+
+The runtime carries W3C Trace Context in the envelope's `traceparent` and `tracestate`, through
+`sisa-telemetry-core`, which is API only. What it does depends on whether the application has
+installed OpenTelemetry, as `sisa_telemetry::init` does:
+
+| | With OpenTelemetry installed | Without |
+| --- | --- | --- |
+| A publish on the bus or the outbox | The envelope gets the trace context of the span the publish runs in. Outside any recorded span it gets none | The envelope gets none |
+| A handler's publish | The envelope gets the trace context of the `handle` span | The handled message's trace context is passed on unchanged |
+| Handling a delivery | The `handle` span starts a new trace and links to the span in the message's `traceparent`. A message without one gets no link | The `handle` span is a plain `tracing` span, with the `traceparent` as a field |
+
+- An outbox row keeps the trace context of the span that wrote it; the dispatcher sends it as
+  stored, however much later.
+- A handling is a trace of its own, not a child of the publish: a message can wait for hours,
+  and a parent and child would make a trace that long
+  ([ADR-0009](../adr/0009-trace-context-through-sisa-telemetry-core.md)). Each retry is a new
+  `handle` span with the same link.
+- The consumer's own sampler decides whether a `handle` span is exported; the publisher's
+  sampling decision isn't followed.
+- Baggage isn't carried: the envelope has no attribute for it.
+- An envelope the application builds itself and hands to a transport keeps the trace context it
+  was given.
 
 ## Guarantees and limits
 
