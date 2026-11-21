@@ -47,6 +47,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 (set -e; for f in "" nats iggy redis postgres; do cargo check -p sisa-messaging --features "$f" --locked; done)
+cargo tree -i opentelemetry --all-features --edges normal --locked > /dev/null
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.95 check --workspace --all-targets --all-features --locked
 cargo nextest run --workspace --all-features --locked
