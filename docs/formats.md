@@ -21,7 +21,7 @@ consumers that don't know CloudEvents still read a plain body.
 | `subject` | No | What the message is about within the source, such as an order id |
 | `dataschema` | No | The schema's URI, for Avro and other schema codecs |
 | `partitionkey` | No | A routing key, the CloudEvents Partitioning extension: the Kafka message key, the Iggy partition, a NATS subject token later. Order per key is not guaranteed |
-| `traceparent`, `tracestate` | No | W3C Trace Context, per the CloudEvents Distributed Tracing extension |
+| `traceparent`, `tracestate` | No | W3C Trace Context, per the CloudEvents Distributed Tracing extension. The runtime sets them from the publishing span when the application has installed OpenTelemetry |
 | `correlationid` | No | Our extension: the id that ties a conversation together |
 | `causationid` | No | Our extension: the id of the message whose handler published this one |
 | `errorendpoint`, `errortype`, `errormessage`, `errorattempts` | Error destination only | Our extensions: where and why handling gave up |

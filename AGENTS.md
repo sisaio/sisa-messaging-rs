@@ -44,6 +44,9 @@ Breaking one needs a new [ADR](docs/adr/README.md) first.
 - Name every constraint and index in SQL, with a two-letter prefix: `pk_`, `uq_`, `fk_`, `ck_`,
   `ix_` ([PostgreSQL tables](docs/formats.md#postgresql-tables)). Constraints go inside
   `CREATE TABLE`.
+- The runtime touches OpenTelemetry only through `sisa-telemetry-core`: no SDK, no exporter, and
+  nothing process-wide. A handling starts a new trace that links to its publish; it is never the
+  publish's child ([ADR-0009](docs/adr/0009-trace-context-through-sisa-telemetry-core.md)).
 - Don't add dependencies to the library crates without asking. Each transport, persistence and
   codec brings its client in its own crate, never in core.
 - The maintainer picks public names. Use given names exactly, and propose new ones instead of

@@ -21,3 +21,4 @@ Don't re-propose an accepted decision without new evidence.
 | [0006](0006-how-each-transport-maps.md) | The delivery contract is ack, retry after a delay, and reject; JetStream for NATS, pending entries for a Redis retry, a held partition for an Iggy retry | Accepted |
 | [0007](0007-what-the-library-leaves-out.md) | No sagas, request and response, scheduled messages or encryption at first | Accepted |
 | [0008](0008-minimum-rust-version.md) | The minimum Rust version is 1.95 | Accepted |
+| [0009](0009-trace-context-through-sisa-telemetry-core.md) | The runtime sets and reads trace context through `sisa-telemetry-core`; a handling starts a new trace that links to its publish | Proposed |
