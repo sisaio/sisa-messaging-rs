@@ -67,6 +67,10 @@ tokio = { version = "1.54.1", features = ["rt", "macros", "time", "sync"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 bytes = { version = "1.12.1" }
 tracing = { version = "0.1.44" }
+# Trace context across messages, through the OpenTelemetry API it pins; and, for tests only, the
+# in-memory exporters that read spans back.
+sisa-telemetry-core = { version = "0.1.0" }
+sisa-telemetry = { version = "0.1.0" }
 
 # Error types: the mechanical `Display` and `Error` implementations.
 thiserror = { version = "2.0.21" }

@@ -15,6 +15,7 @@ mod maintenance;
 mod outbox;
 mod publish;
 mod retry;
+mod trace;
 
 pub use bus::{Bus, BusBuilder, NoOutbox, StartError};
 pub use dispatch::DispatchSettings;

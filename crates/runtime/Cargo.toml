@@ -20,8 +20,12 @@ futures-util = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+# Trace context across a publish and its handling. API only: no OpenTelemetry SDK or exporter.
+sisa-telemetry-core = { workspace = true }
 
 [dev-dependencies]
+# Reads back the spans a publish and a handling make.
+sisa-telemetry = { workspace = true, features = ["testing"] }
 bytes = { workspace = true }
 serde = { workspace = true }
 sisa-messaging-testing = { workspace = true }
