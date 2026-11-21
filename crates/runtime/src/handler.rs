@@ -159,7 +159,11 @@ impl<Transaction: Send, Codec: sisa_messaging_core::Codec> Publisher
             self.envelope.correlation.correlation_id,
             Some(self.envelope.id),
         );
-        envelope.trace.clone_from(&self.envelope.trace);
+        // The handler's own span when OpenTelemetry records it; otherwise the handled message's
+        // trace context is passed on unchanged.
+        if envelope.trace.is_none() {
+            envelope.trace.clone_from(&self.envelope.trace);
+        }
         self.held.push(envelope);
         Ok(())
     }
