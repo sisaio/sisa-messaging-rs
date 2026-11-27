@@ -1,6 +1,6 @@
 # ADR-0010: The migrations ship in the postgres crate, and also as a Rust migrator
 
-- Status: **Proposed**
+- Status: **Accepted**
 - Date: 2026-11-27
 - Deciders: Sang Au
 

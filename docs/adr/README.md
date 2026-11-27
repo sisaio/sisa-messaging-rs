@@ -22,4 +22,4 @@ Don't re-propose an accepted decision without new evidence.
 | [0007](0007-what-the-library-leaves-out.md) | No sagas, request and response, scheduled messages or encryption at first | Accepted |
 | [0008](0008-minimum-rust-version.md) | The minimum Rust version is 1.95 | Accepted |
 | [0009](0009-trace-context-through-sisa-telemetry-core.md) | The runtime sets and reads trace context through `sisa-telemetry-core`; a handling starts a new trace that links to its publish | Proposed |
-| [0010](0010-migrations-also-ship-as-a-rust-migrator.md) | The migrations move into `crates/postgres/migrations`, and an opt-in `migrate` feature ships them as a sqlx `Migrator` (`migrator()`) with the same checksums | Proposed |
+| [0010](0010-migrations-also-ship-as-a-rust-migrator.md) | The migrations move into `crates/postgres/migrations`, and an opt-in `migrate` feature ships them as a sqlx `Migrator` (`migrator()`) with the same checksums | Accepted |
