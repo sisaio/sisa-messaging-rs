@@ -7,13 +7,16 @@ Status: **Implemented** in 0.1.0 · Published: yes · Label: `area:postgres` · 
 The three stores on PostgreSQL, through sqlx: the row writes, the claim, the receipt, the
 partition DDL and the advisory lock. Only SQL: when to claim, how long a lease is, the backoff
 and when to create or expire a partition are the [runtime's](runtime.md#behaviour). The tables
-come from the migrations in [`migrations/postgresql`](../../migrations/postgresql), which the
-application runs.
+come from the migrations in [`crates/postgres/migrations`](../../crates/postgres/migrations), which the
+application runs: with sqlx-cli, with psql, or from Rust with `migrator()` (feature `migrate`,
+[ADR-0010](../adr/0010-migrations-also-ship-as-a-rust-migrator.md)), which records the same
+versions and checksums as sqlx-cli.
 
 ## Public contract
 
 Main types: `PostgresOutbox`, `PostgresInbox` and `PostgresPartitions`, which implement core's
-[store contracts](core.md#stores): `OutboxStore`, `InboxStore` and `PartitionStore`.
+[store contracts](core.md#stores): `OutboxStore`, `InboxStore` and `PartitionStore`. With the
+`migrate` feature, `migrator()` returns the migrations as a sqlx `Migrator`.
 `PostgresPartitions::outbox(pool)` names the table a maintenance worker keeps.
 
 ## Behaviour

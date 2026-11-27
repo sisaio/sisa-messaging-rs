@@ -103,8 +103,8 @@ group's pending entries, is in the [Redis spec](specs/redis.md#behaviour).
 
 ## PostgreSQL tables
 
-Created by the SQL migrations in [`migrations/postgresql`](../migrations/postgresql), which the
-application runs itself: with `sqlx migrate run --source migrations/postgresql` in its deploy
+Created by the SQL migrations in [`crates/postgres/migrations`](../crates/postgres/migrations), which the
+application runs itself: with `sqlx migrate run --source crates/postgres/migrations` in its deploy
 pipeline, or by hand with psql, into a schema created beforehand. Pick one way per schema: a psql
 run leaves no row in `_sqlx_migrations`, so a later `sqlx migrate run` would run the migration again
 and fail. The SQL names no schema, so the connection's `search_path` picks it, for the migrations

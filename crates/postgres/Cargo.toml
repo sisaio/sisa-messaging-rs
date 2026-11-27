@@ -17,6 +17,11 @@ categories = ["asynchronous", "database"]
 [lints]
 workspace = true
 
+[features]
+# `migrator()`: the migrations as a sqlx Migrator, for an application that runs them from Rust.
+# Off by default, so the crate builds sqlx without its migrate feature (ADR-0004, ADR-0010).
+migrate = ["sqlx/migrate"]
+
 [dependencies]
 # The shared contracts that this crate implements.
 sisa-messaging-core = { workspace = true }

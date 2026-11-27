@@ -48,7 +48,7 @@ flowchart TD
 | [`sisa-messaging-nats`](specs/nats.md) | Yes | `NatsTransport`, `NatsSettings`, `NatsDelivery` | Both transport halves on JetStream: a stream per prefix, a durable pull consumer per endpoint |
 | [`sisa-messaging-iggy`](specs/iggy.md) | Yes | `IggyTransport`, `IggySettings`, `IggyDelivery` | Both transport halves on Iggy: a topic per message type in one stream, a consumer group per endpoint and topic, and the per-message retry a log doesn't have |
 | [`sisa-messaging-redis`](specs/redis.md) | Yes | `RedisTransport`, `RedisSettings`, `RedisDelivery` | Both transport halves on Redis Streams, for Redis, Valkey and Dragonfly: a stream per message type, a consumer group per endpoint, and the delayed retry and takeover built from the pending entries |
-| [`sisa-messaging-postgres`](specs/postgres.md) | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresPartitions` | The three stores: the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL; the tables come from the migrations in [`migrations/postgresql`](../migrations/postgresql) |
+| [`sisa-messaging-postgres`](specs/postgres.md) | Yes | `PostgresOutbox`, `PostgresInbox`, `PostgresPartitions` | The three stores: the row writes, the claim, the receipt, the partition DDL and the advisory lock. Only SQL; the tables come from the migrations in [`crates/postgres/migrations`](../crates/postgres/migrations) |
 | [`sisa-messaging-testing`](specs/testing.md) | No | `Nats`, `Postgres`, `Iggy`, `Redis`, `eventually` | A NATS, a PostgreSQL, an Iggy and a Redis (or Valkey or Dragonfly) container per test, and a wait-until helper |
 
 Later crates follow the same shape: `-kafka` (Kafka, Redpanda, WarpStream), `-amqp` (RabbitMQ,
