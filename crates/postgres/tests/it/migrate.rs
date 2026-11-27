@@ -4,7 +4,7 @@ use sisa_messaging_testing::Postgres;
 use sqlx::{PgPool, migrate::Migrator};
 
 fn migrations() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations/postgresql")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations")
 }
 
 /// A pool whose `search_path` is the new schema `messaging`, as an application configures it.
@@ -22,7 +22,7 @@ pub(crate) async fn messaging_pool(postgres: &Postgres) -> PgPool {
     .unwrap()
 }
 
-/// Runs the migrations as `sqlx migrate run --source migrations/postgresql` does.
+/// Runs the migrations as `sqlx migrate run --source crates/postgres/migrations` does.
 pub(crate) async fn migrated(postgres: &Postgres) -> PgPool {
     let pool = messaging_pool(postgres).await;
     Migrator::new(migrations().as_path())
@@ -153,4 +153,29 @@ async fn a_row_lands_in_the_partition_of_its_utc_day() {
     .unwrap();
 
     assert_eq!(partition, format!("inbox_receipts_p{}", today(&pool).await));
+}
+
+/// `migrator()` records what sqlx-cli records from the files: versions, descriptions,
+/// checksums and kinds, in order. A database migrated one way accepts the other.
+#[cfg(feature = "migrate")]
+#[tokio::test]
+async fn the_rust_migrator_matches_the_sql_files() {
+    use sqlx::migrate::Migration;
+
+    let key = |migration: &Migration| {
+        (
+            migration.version,
+            migration.description.to_string(),
+            migration.checksum.to_vec(),
+            format!("{:?}", migration.migration_type),
+            migration.no_tx,
+        )
+    };
+    let files = Migrator::new(migrations().as_path()).await.unwrap();
+    let ours = sisa_messaging_postgres::migrator();
+    assert!(files.iter().count() > 0, "no migration files found");
+    assert_eq!(
+        ours.iter().map(key).collect::<Vec<_>>(),
+        files.iter().map(key).collect::<Vec<_>>(),
+    );
 }

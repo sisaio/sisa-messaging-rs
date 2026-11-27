@@ -36,7 +36,7 @@ reviews:
     - label: "area:redis"
       instructions: The PR changes crates/redis.
     - label: "area:postgres"
-      instructions: The PR changes crates/postgres or migrations/postgresql.
+      instructions: The PR changes crates/postgres, its migrations included.
     - label: "area:testing"
       instructions: The PR changes crates/testing.
     - label: "area:facade"

@@ -56,7 +56,7 @@ iggy = { version = "0.12.0" }
 redis = { version = "1.8.2", default-features = false, features = ["tokio-comp", "streams", "connection-manager"] }
 
 # PostgreSQL through sqlx, without the default macros and migrate features: queries are checked by
-# the tests, and the tables come from the SQL in migrations/postgresql, which applications run.
+# the tests, and the tables come from the SQL in crates/postgres/migrations, which applications run.
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json"] }
 
 # Message ids: UUID version 7, so ids sort by creation time.

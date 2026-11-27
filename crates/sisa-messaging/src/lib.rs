@@ -9,6 +9,7 @@
 //! | `iggy` | `IggyTransport`, the Apache Iggy transport |
 //! | `redis` | `RedisTransport`, the Redis Streams transport, for Redis, Valkey and Dragonfly |
 //! | `postgres` | `PostgresOutbox`, `PostgresInbox` and `PostgresPartitions`, on sqlx |
+//! | `migrate` | `postgres_migrator`: the PostgreSQL migrations as a sqlx `Migrator` |
 //!
 //! A bus with an outbox, whose publishes commit with the application's own transaction:
 //!
@@ -70,3 +71,7 @@ pub use sisa_messaging_redis::{RedisDelivery, RedisSettings, RedisTransport};
 
 #[cfg(feature = "postgres")]
 pub use sisa_messaging_postgres::{PostgresInbox, PostgresOutbox, PostgresPartitions};
+
+/// The PostgreSQL migrations as a sqlx `Migrator`, for an application that runs them from Rust.
+#[cfg(feature = "migrate")]
+pub use sisa_messaging_postgres::migrator as postgres_migrator;

@@ -114,7 +114,7 @@ until docker exec orders-postgres pg_isready -h localhost -U postgres -d orders;
 # The library's tables in a `messaging` schema, the example's own in `public`.
 docker exec orders-postgres psql -U postgres -d orders -c 'CREATE SCHEMA messaging'
 DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders?options=-c%20search_path%3Dmessaging' \
-    sqlx migrate run --source migrations/postgresql
+    sqlx migrate run --source crates/postgres/migrations
 DATABASE_URL='postgres://postgres:postgres@localhost:5432/orders' \
     sqlx migrate run --source examples/orders/migrations
 

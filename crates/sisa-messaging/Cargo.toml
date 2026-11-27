@@ -25,6 +25,9 @@ iggy = ["dep:sisa-messaging-iggy"]
 redis = ["dep:sisa-messaging-redis"]
 # The PostgreSQL outbox and inbox.
 postgres = ["dep:sisa-messaging-postgres"]
+# The PostgreSQL migrations as a sqlx Migrator (`postgres_migrator`), for an application that
+# runs them from Rust.
+migrate = ["postgres", "sisa-messaging-postgres/migrate"]
 
 [dependencies]
 # One crate per part; this one only re-exports them.
